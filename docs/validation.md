@@ -66,3 +66,14 @@ The installed 0.1.0 build was sampled every 30 seconds for 30 minutes, 61 sample
 The public stable feed offered 0.1.1 to installed 0.1.0. Remind Me Later closed the dialog, and another manual check offered the update again. The installed app then relaunched as 0.1.1, build 3. Developer ID, notarization ticket and Gatekeeper assessment passed. All four previously stored configuration groups matched their pre-update hashes; both usage caches and 361 quota observations were still present. Codex, Claude and OpenCode Go returned current quotas after launch.
 
 The public catalog and appcast were byte-for-byte identical to the locally validated release files. GitHub macOS CI passed for release commit `e4382d7`; the Pages deployment succeeded. A forced failed-download test is still outstanding.
+
+
+## Version 0.1.2 installer and website
+
+The public Mac download is a Developer ID signed and notarized DMG, with an Applications shortcut and an installation background. Both the app and final disk image passed Apple notarization, ticket stapling and Gatekeeper assessment. The installed copy passes deep, strict signature verification after copying from the read-only image. An initial, unpublished candidate set FinderInfo on the signed bundle to hide its extension; this was removed, and the release pipeline now performs a mount-and-copy verification before signing the DMG.
+
+The downloaded public DMG was byte-identical to the tested local artifact and passed ticket/Gatekeeper checks. The Sparkle ZIP remains separate; its Ed25519 signature verifies against the embedded public key and fails after changing one archive byte. Both GitHub macOS runs for release commit `d12dd96` passed. All 47 local Swift tests passed; the normal tray remains 677 pt tall and respects the 500 pt constrained-height case.
+
+The website uses the actual `MenuLimitImage` renderer for its quota symbols and the new segmented-droplet logo. Direct buttons link to the DMG. Browser checks covered 1280, 390 and 320 px widths without horizontal overflow, plus Apple Silicon hints, Intel hints, Safari without CPU hints, Windows, Linux, iPad, Android, unknown platform and denied CPU hints. Unsupported systems receive an availability message and an explicit alternative Mac link. Safari's generic “Intel Mac” user-agent is not treated as CPU evidence.
+
+A fresh second-Mac installation test remains outstanding. The measured App Store sandbox blockers are unchanged; submission is authorized but no working store build has been submitted.
