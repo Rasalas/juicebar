@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "aliases": [
+    {
+      "names": ["ox-alpha", "ox-alpha-free", "stealth/ox-alpha", "stealth/ox-alpha:free", "z-ai/glm-5.3-flash"],
+      "providers": ["opencode", "opencode-go", "openrouter"],
+      "canonicalModel": "glm-5.3-flash",
+      "displayName": "GLM-5.3-Flash",
+      "source": "https://openrouter.ai/stealth/ox-alpha",
+      "verifiedOn": "2026-09-25"
+    },
+    {
+      "names": ["union-alpha", "union-alpha-free", "stealth/union-alpha", "stealth/union-alpha:free", "unbiased/pareto"],
+      "providers": ["opencode", "opencode-go", "openrouter"],
+      "canonicalModel": "pareto",
+      "displayName": "Pareto",
+      "source": "https://openrouter.ai/stealth/union-alpha",
+      "verifiedOn": "2026-09-25"
+    }
+  ]
+}

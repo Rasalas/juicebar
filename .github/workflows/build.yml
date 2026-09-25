@@ -1,0 +1,27 @@
+name: macOS
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: SSH collector privacy tests
+        run: python3 Tests/ssh_usage_test.py
+      - name: Menu bar layout regression
+        run: swift run Juicebar --verify-tray-layout
+      - name: Usage survives restart
+        run: swift run Juicebar --verify-activity-persistence
+      - name: Build app
+        run: bash scripts/build-app.sh
+      - name: Archive
+        run: ditto -c -k --keepParent dist/Juicebar.app dist/Juicebar.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Juicebar-macOS
+          path: dist/Juicebar.zip
+      - name: Direct-download updater compiles
+        run: JUICEBAR_DISTRIBUTION=direct swift build

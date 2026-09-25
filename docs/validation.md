@@ -1,0 +1,36 @@
+# Validation status · 25 September 2026
+
+## Reproducible checks
+
+```sh
+swift test
+python3 Tests/ssh_usage_test.py
+swift run Juicebar --verify-tray-layout
+swift run Juicebar --verify-activity-persistence
+swift run Juicebar --render-previews
+bash scripts/build-app.sh
+codesign --verify --deep --strict dist/Juicebar.app
+JUICEBAR_DISTRIBUTION=direct swift build
+```
+
+All 42 Swift tests and all three Python collector tests pass locally. The Swift suite covers provider normalization, additional and hidden limits, plan labels, warning epochs, expiry, pacing, settings migration, SQLite persistence, process deadlines, activity deduplication, partial log lines, historical Claude aggregates, token accounting, pricing and confirmed alpha aliases. Python tests check that the SSH collector returns usage metadata and excludes conversation content.
+
+The tray regression uses SwiftUI's intrinsic size proposal, verifies that ordinary accounts fit, and caps the viewport only when available height is exhausted. The persistence check opens a fresh store over an isolated database and verifies cost/history data before any import. Render previews use synthetic data; they are not screenshots of real accounts.
+
+## Integrations checked locally
+
+Codex quota and reset data, Claude limits, OpenCode Go limits, local OpenCode history and SSH activity collection were exercised on a development Mac. Existing log files and remote files were not modified. API organization-cost integrations and OpenRouter have fixture coverage but have not been exercised with real admin/management keys.
+
+Source builds were tested on Apple Silicon. The full supported macOS-version range, Intel hardware, login launch and prolonged resource behavior have not been tested. Short idle samples are not evidence of leak-free operation.
+
+## macOS permissions
+
+Launching provider processes with a sanitized working directory fixes a reproduced inherited `PWD` mismatch. Launching an app bundle directly from removable storage can still cause a macOS file-access prompt. No full-disk-access permission is required or changed by the app.
+
+Notification delivery was observed in Notification Center. macOS can suppress the banner and sound during display sharing or Focus even when app-specific notifications are enabled. Juicebar shows the available notification settings but does not override global preferences.
+
+## Distribution checks still outstanding
+
+Developer ID signing and notarization, installing on another Mac, and a real old-to-new Sparkle update are required before the first official direct binary. Compiling the updater is not equivalent to verifying delivery. App Store sandbox compatibility/review and Windows/Linux ports are not complete.
+
+The source and direct-download app bundles both build and pass deep signature verification with ad-hoc signing. The direct bundle includes Sparkle and its licenses; a test archive produces an Ed25519-signed appcast. This is a packaging smoke test, not a notarization or installed-update test.
