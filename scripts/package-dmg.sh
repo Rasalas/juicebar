@@ -17,6 +17,7 @@ artwork="$(mktemp -d "${TMPDIR:-/tmp}/juicebar-dmg.XXXXXX")"
 trap 'rm -rf "$artwork"' EXIT
 swift scripts/make-dmg-background.swift "$artwork"
 "$dmgbuild" -s scripts/dmg-settings.py -D "app=$app" -D "background=$artwork/background.png" "Juicebar" "$dmg"
+python3 scripts/verify-dmg.py "$dmg"
 codesign --force --sign "$JUICEBAR_SIGN_IDENTITY" --timestamp "$dmg"
 codesign --verify --strict "$dmg"
 xcrun notarytool submit "$dmg" --keychain-profile "$JUICEBAR_NOTARY_PROFILE" --wait
