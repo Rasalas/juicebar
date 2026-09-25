@@ -27,18 +27,20 @@ Normal builds have no Sparkle dependency and no automatic update checks. The mac
 Run the documented validation suite first. Use a clean checkout of the source tag, a strictly increasing build number and the same marketing version for all distribution channels. No license check or payment flag is part of the update flow.
 
 ```sh
-export JUICEBAR_VERSION=0.1.0
-export JUICEBAR_BUILD=2
+python3 -m venv .artifacts/dmg-tools
+.artifacts/dmg-tools/bin/pip install -r scripts/dmg-requirements.txt
+export JUICEBAR_VERSION=0.1.2
+export JUICEBAR_BUILD=4
 export JUICEBAR_SIGN_IDENTITY='Developer ID Application: YOUR NAME (TEAMID)'
 export JUICEBAR_NOTARY_PROFILE=juicebar-notary
 bash scripts/package-release.sh
 ```
 
-The script builds for the current Mac architecture, notarizes the app, staples its ticket and creates the signed Sparkle appcast and checksum under `dist/releases/<version>/`. It does not create a GitHub release. The feed's archive URLs point to that version's release assets. A universal or separate Intel release requires explicit build and hardware validation first.
+The script builds for the current Mac architecture, notarizes the app, staples its ticket and creates the signed Sparkle appcast and checksum under `dist/releases/<version>/`. It also builds a Finder disk image with an Applications shortcut, signs and notarizes the DMG, and includes both files in the checksum manifest. DMG layout is generated without Finder automation. It does not create a GitHub release. The feed's archive URLs point to that version's release assets. A universal or separate Intel release requires explicit build and hardware validation first.
 
 Before promoting a release to stable, install an older signed build against the candidate feed and complete an update. Verify signature rejection for a modified archive and check that settings, Keychain access and usage history survive. Test cancellation and a failed download. Do not enable automatic installation by default; update checks are enabled in official builds and remain user-configurable. Sparkle system-profile reporting is disabled.
 
-Upload the archive, `appcast.xml` and `SHA256SUMS.txt` together to a draft GitHub release named `v<version>`. Inspect the release notes and download links, then publish and designate it as latest. The stable feed URL is `https://github.com/Rasalas/juicebar/releases/latest/download/appcast.xml`. Every latest binary release must include that asset. Do not designate a source-only announcement or beta release as latest once this feed is in use.
+Upload the public DMG, the updater ZIP, `appcast.xml` and `SHA256SUMS.txt` together to a draft GitHub release named `v<version>`. Inspect the release notes and download links, then publish and designate it as latest. The stable feed URL is `https://github.com/Rasalas/juicebar/releases/latest/download/appcast.xml`. Every latest binary release must include that asset. Do not designate a source-only announcement or beta release as latest once this feed is in use.
 
 Keeping a release draft prevents a partially uploaded update from reaching users. For a bad release, withdraw its feed entry and ship a corrected build with a higher build number; don't silently replace an already distributed binary.
 
@@ -53,6 +55,8 @@ References: [Developer ID and notarization](https://developer.apple.com/develope
 For the first end-to-end test, publish the candidate as a GitHub prerelease, leaving it out of the stable feed. Build the older test app with `JUICEBAR_UPDATE_FEED_URL=https://github.com/Rasalas/juicebar/releases/download/v0.1.0/appcast.xml` and a lower build number. Only that test app reads the explicit candidate feed. The new official build uses the default stable feed. Promote the same prerelease after installation succeeds; do not rebuild or replace the tested archive.
 
 ## Website and model data
+
+Public download buttons must point directly to the signed DMG. The ZIP is reserved for Sparkle updates. Update the versioned links in `site/index.html` and `site/help.html` only after the release assets are public; verify the served file and checksum. Intel, Windows and Linux must not receive an incompatible download by default.
 
 The Pages workflow deploys `site/` when its files change on main. Catalog-only updates follow [model-catalog.md](model-catalog.md) and need no app release. Never upload an unsigned catalog. App Store preparation and its current sandbox blocker are tracked in [sandbox-feasibility.md](sandbox-feasibility.md).
 

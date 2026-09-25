@@ -26,7 +26,7 @@ struct DashboardView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
-                    JuiceGlass(fill: 0.65, color: Palette.accent).frame(width: 23, height: 29)
+                    JuiceLogo().frame(width: 29, height: 29)
                     Text("juicebar").font(.system(size: 23, weight: .semibold, design: .rounded)).tracking(-0.7)
                 }.padding(.horizontal, 22).padding(.top, 42).padding(.bottom, 36)
                 ForEach(Page.allCases) { item in

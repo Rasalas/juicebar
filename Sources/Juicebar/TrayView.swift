@@ -10,7 +10,7 @@ struct TrayView: View {
             HStack(spacing: 8) {
                 Button { DashboardWindow.shared.show(store: store) } label: {
                     HStack(spacing: 7) {
-                        JuiceGlass(fill: 0.65, color: Palette.accent).frame(width: 17, height: 22)
+                        JuiceLogo().frame(width: 22, height: 22)
                         Text("juicebar").font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.5)
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).help(tr("Juicebar öffnen")).accessibilityLabel(tr("Juicebar öffnen"))

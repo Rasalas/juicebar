@@ -35,3 +35,5 @@ Aliases and prices ship in the app and can update independently through a signed
 The current app is not sandboxed or store-ready. A separate sandbox prototype can read explicitly selected folders and retrieve OpenCode Go quotas, but cannot launch the externally installed Codex CLI. Claude credential data was unavailable without interaction. See the [measured results and next implementation work](sandbox-feasibility.md), plus the [listing draft](app-store/listing-en.md). Store approval is not guaranteed. Do not remove core functionality from the direct edition to force parity.
 
 Sources: [App Sandbox](https://developer.apple.com/documentation/security/app_sandbox), [sandbox file access](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox), [Apple business models](https://developer.apple.com/app-store/business-models/), [Sparkle setup](https://sparkle-project.org/documentation/).
+
+The maintainer authorized App Store submission on 25 September 2026. Submission remains pending on the measured sandbox blockers above; the direct build must not be submitted as a working store edition.

@@ -82,6 +82,24 @@ import JuicebarCore
         NSApp.appearance = NSAppearance(named: .darkAqua)
         try renderView(TrayLabel(store: store).padding(12).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .dark),
                        size: NSSize(width: 360, height: 45), appearance: NSAppearance(named: .darkAqua)!, to: directory.appendingPathComponent("menubar-dark.png"))
+        // Website artwork uses the exact menu image shown by the shipping app.
+        let menuImage = MenuLimitImage.make(meters: store.trayMeters, mode: store.settings.displayMode,
+                                           dark: true, expiring: store.expiringCount > 0)
+        let pixels = NSSize(width: menuImage.size.width * 2, height: menuImage.size.height * 2)
+        guard let menuBitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(pixels.width), pixelsHigh: Int(pixels.height),
+                                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: menuBitmap) else {
+            throw ProviderFailure.unavailable("Menu artwork bitmap unavailable")
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        menuImage.draw(in: NSRect(origin: .zero, size: pixels))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let menuPNG = menuBitmap.representation(using: .png, properties: [:]) else {
+            throw ProviderFailure.unavailable("Menu artwork encoding failed")
+        }
+        try menuPNG.write(to: directory.appendingPathComponent("menu-limits.png"))
         print("Rendered previews: \(directory.path)")
     }
     private static func renderView<V: View>(_ view: V, size: NSSize, appearance: NSAppearance, to url: URL) throws {

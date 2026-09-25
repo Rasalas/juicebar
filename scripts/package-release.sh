@@ -7,6 +7,8 @@ cd "$(dirname "$0")/.."
 : "${JUICEBAR_SIGN_IDENTITY:?Set a Developer ID Application identity}"
 : "${JUICEBAR_NOTARY_PROFILE:?Set a notarytool Keychain profile name}"
 [[ "$JUICEBAR_SIGN_IDENTITY" == 'Developer ID Application:'* ]] || { echo 'Developer ID Application identity required.' >&2; exit 1; }
+dmgbuild="${JUICEBAR_DMGBUILD:-$PWD/.artifacts/dmg-tools/bin/dmgbuild}"
+[[ -x "$dmgbuild" ]] || { echo 'Install scripts/dmg-requirements.txt in .artifacts/dmg-tools first.' >&2; exit 1; }
 export JUICEBAR_DISTRIBUTION=direct
 swift package resolve
 bash scripts/setup-release-tools.sh
@@ -30,5 +32,6 @@ archive="$release_dir/Juicebar-$JUICEBAR_VERSION-macOS-$(uname -m).zip"
 ditto -c -k --sequesterRsrc --keepParent dist/Juicebar.app "$archive"
 rm "$submission"
 "$sparkle_bin/generate_appcast" --account juicebar --download-url-prefix "https://github.com/Rasalas/juicebar/releases/download/v$JUICEBAR_VERSION/" "$release_dir"
-(cd "$release_dir" && shasum -a 256 "$(basename "$archive")") > "$release_dir/SHA256SUMS.txt"
+bash scripts/package-dmg.sh
+(cd "$release_dir" && shasum -a 256 ./*.zip ./*.dmg) > "$release_dir/SHA256SUMS.txt"
 printf 'Prepared %s. Test installation and an old-to-new update before publishing.\n' "$release_dir"
