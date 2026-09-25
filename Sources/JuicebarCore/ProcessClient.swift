@@ -61,12 +61,12 @@ public final class ProcessClient {
             if ready > 0 {
                 var bytes = [UInt8](repeating: 0, count: 8192)
                 let count = Darwin.read(item.fd, &bytes, bytes.count)
-                guard count > 0 else { throw ProviderFailure.unavailable("Der Anbieterprozess wurde beendet. Anmeldung und CLI-Version prüfen.") }
+                guard count > 0 else { throw ProviderFailure.unavailable(tr("Der Anbieterprozess wurde beendet. Anmeldung und CLI-Version prüfen.")) }
                 bytesRead += count
-                guard bytesRead <= maximumResponseBytes else { throw ProviderFailure.invalidData("Die Anbieterantwort ist zu groß.") }
+                guard bytesRead <= maximumResponseBytes else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
                 buffer.append(contentsOf: bytes.prefix(count))
             } else if !process.isRunning {
-                throw ProviderFailure.unavailable("Der Anbieterprozess wurde beendet. Anmeldung und CLI-Version prüfen.")
+                throw ProviderFailure.unavailable(tr("Der Anbieterprozess wurde beendet. Anmeldung und CLI-Version prüfen."))
             }
         }
         throw ProviderFailure.timedOut

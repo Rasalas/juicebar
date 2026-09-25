@@ -17,7 +17,11 @@ Juicebar is open source. Direct downloads and updates are intended to stay free.
 - A theoretical API-cost equivalent based on model-specific token types and published standard prices. Confirmed alpha-model aliases are resolved retrospectively. Unknown models stay unpriced.
 - Multiple accounts, provider error isolation, request timeouts and backoff. No analytics or advertising.
 
-The current interface is German. Contributions toward localization are welcome.
+The interface supports English and German, follows the system language and offers an override in Settings. Confirmed names and API prices update through a signed data catalog.
+
+[Website](https://rasalas.github.io/juicebar/) · [Setup & help](https://rasalas.github.io/juicebar/help.html)
+
+![Juicebar overview with sample data](site/assets/overview.png)
 
 ## Install or build
 
@@ -46,7 +50,7 @@ open -n "$HOME/Applications/Juicebar.app" --args --demo
 (cd "$HOME" && "$HOME/Applications/Juicebar.app/Contents/MacOS/Juicebar" --diagnose)
 ```
 
-Enable notifications explicitly in **Warnungen → Aktivieren**. macOS Focus and display-sharing settings can suppress banners and sounds even if a notification appears in Notification Center.
+Enable notifications explicitly in **Warnings → Enable**, or **Warnungen → Aktivieren**. macOS Focus and display-sharing settings can suppress banners and sounds even if a notification appears in Notification Center.
 
 ## Connections
 

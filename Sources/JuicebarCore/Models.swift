@@ -39,11 +39,11 @@ public enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable 
     public var needsKey: Bool { self != .codex && self != .claude }
     public var keyHelp: String {
         switch self {
-        case .openaiAPI: return "Admin-Key zum Lesen der Organisationskosten. Ein normaler Modell-Key reicht nicht."
-        case .anthropicAPI: return "Admin-Key zum Lesen der Organisationskosten. Das Claude-Abo wird separat angezeigt."
-        case .opencodeGo, .opencodeZen: return "OpenCode-Key. Alternativ den vorhandenen lokalen OpenCode-Login verwenden."
-        case .openrouter: return "Management-Key für kontoweites Guthaben."
-        default: return "Die Anmeldung bleibt bei der installierten CLI."
+        case .openaiAPI: return tr("Admin-Key zum Lesen der Organisationskosten. Ein normaler Modell-Key reicht nicht.")
+        case .anthropicAPI: return tr("Admin-Key zum Lesen der Organisationskosten. Das Claude-Abo wird separat angezeigt.")
+        case .opencodeGo, .opencodeZen: return tr("OpenCode-Key. Alternativ den vorhandenen lokalen OpenCode-Login verwenden.")
+        case .openrouter: return tr("Management-Key für kontoweites Guthaben.")
+        default: return tr("Die Anmeldung bleibt bei der installierten CLI.")
         }
     }
 }
@@ -205,12 +205,12 @@ public enum ProviderFailure: Error, LocalizedError, Equatable {
     case missingExecutable(String), authentication, unsupported(String), invalidData(String), timedOut, rateLimited(TimeInterval), network, unavailable(String), needsSetup(String)
     public var errorDescription: String? {
         switch self {
-        case .missingExecutable(let name): return "\(name) wurde nicht gefunden. Pfad unter Konten einstellen."
-        case .authentication: return "Anmeldung fehlt oder ist abgelaufen. Beim Anbieter erneut anmelden."
+        case .missingExecutable(let name): return tr("{0} wurde nicht gefunden. Pfad unter Konten einstellen.", name)
+        case .authentication: return tr("Anmeldung fehlt oder ist abgelaufen. Beim Anbieter erneut anmelden.")
         case .unsupported(let detail), .invalidData(let detail), .unavailable(let detail), .needsSetup(let detail): return detail
-        case .timedOut: return "Die Abfrage hat zu lange gedauert. Der letzte Stand bleibt sichtbar."
-        case .rateLimited: return "Der Anbieter begrenzt die Abfragen. Juicebar wartet vor dem nächsten Versuch."
-        case .network: return "Verbindung nicht möglich. Juicebar versucht es später erneut."
+        case .timedOut: return tr("Die Abfrage hat zu lange gedauert. Der letzte Stand bleibt sichtbar.")
+        case .rateLimited: return tr("Der Anbieter begrenzt die Abfragen. Juicebar wartet vor dem nächsten Versuch.")
+        case .network: return tr("Verbindung nicht möglich. Juicebar versucht es später erneut.")
         }
     }
 }

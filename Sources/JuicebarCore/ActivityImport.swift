@@ -30,7 +30,7 @@ public enum ActivityImport {
             } catch is CancellationError { throw CancellationError() }
             catch {
                 if let previous {
-                    warnings.append("\(label): letzter erfolgreicher Stand vom \(previous.observedAt.formatted(date: .abbreviated, time: .shortened)) bleibt erhalten. \(error.localizedDescription)")
+                    warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(date: .abbreviated, time: .shortened), error.localizedDescription))
                     return previous.events.filter { $0.date >= since && $0.date <= now }
                 }
                 warnings.append("\(label): \(error.localizedDescription)")
@@ -41,15 +41,15 @@ public enum ActivityImport {
         warnings += logs.notices
         var local: LocalUsageReport?
         var events = logs.events
-        events += try collect("opencode|\(databasePath ?? "default")", label: "OpenCode lokal") {
+        events += try collect("opencode|\(databasePath ?? "default")", label: tr("OpenCode lokal")) {
             local = try OpenCodeHistory.read(path: databasePath, now: now, lookbackDays: 90)
             return (local?.events ?? [], [])
         }
         for host in hosts {
-            try Task.checkCancellation(); progress("SSH · \(host) wird gelesen …")
+            try Task.checkCancellation(); progress(tr("SSH · {0} wird gelesen …", host))
             events += try collect("ssh|\(host)", label: host) { try SSHActivity.read(host: host, now: now) }
         }
-        if !hosts.isEmpty { notices.append("SSH-Quellen: \(hosts.joined(separator: ", ")). Bei Verbindungsfehlern bleiben bereits eingelesene Werte erhalten.") }
+        if !hosts.isEmpty { notices.append(tr("SSH-Quellen: {0}. Bei Verbindungsfehlern bleiben bereits eingelesene Werte erhalten.", hosts.joined(separator: ", "))) }
         var report = ActivityReport(events: events, notices: notices, warnings: warnings, now: now)
         ClaudeHistory.supplement(&report, roots: roots.filter { $0.source == .claude }.map { $0.url.deletingLastPathComponent() }, now: now)
         // UI only needs local model/day summaries; events stay on the background worker.

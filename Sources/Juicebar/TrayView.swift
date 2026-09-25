@@ -13,31 +13,31 @@ struct TrayView: View {
                         JuiceGlass(fill: 0.65, color: Palette.accent).frame(width: 17, height: 22)
                         Text("juicebar").font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.5)
                     }.contentShape(Rectangle())
-                }.buttonStyle(.plain).help("Juicebar öffnen").accessibilityLabel("Juicebar öffnen")
+                }.buttonStyle(.plain).help(tr("Juicebar öffnen")).accessibilityLabel(tr("Juicebar öffnen"))
                 Spacer()
                 if store.isRefreshing { ProgressView().controlSize(.small) }
                 Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise") }
-                    .disabled(store.isRefreshing || store.isDemo).help("Aktualisieren")
+                    .disabled(store.isRefreshing || store.isDemo).help(tr("Aktualisieren"))
                 Menu {
-                    Button(store.isPaused ? "Abfragen fortsetzen" : "Abfragen pausieren") { store.isPaused.toggle(); if !store.isPaused { store.refresh(force: true) } }
-                    Button("Warnungen 1 Stunde stummschalten") { store.snooze() }
+                    Button(store.isPaused ? tr("Abfragen fortsetzen") : tr("Abfragen pausieren")) { store.isPaused.toggle(); if !store.isPaused { store.refresh(force: true) } }
+                    Button(tr("Warnungen 1 Stunde stummschalten")) { store.snooze() }
                     Divider()
-                    Button("Juicebar beenden") { store.stop(); NSApp.terminate(nil) }
+                    Button(tr("Juicebar beenden")) { store.stop(); NSApp.terminate(nil) }
                 } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.button).menuIndicator(.hidden).buttonStyle(JuiceButtonStyle()).fixedSize()
-                    .help("Weitere Aktionen")
+                    .help(tr("Weitere Aktionen"))
             }
             accountSections.hidden().accessibilityHidden(true)
             ScrollView { accountSections }.scrollBounceBehavior(.basedOnSize)
             VStack(alignment: .leading, spacing: 10) {
                 if store.expiringCount > 0 {
-                    Label("\(store.expiringCount) \(store.expiringCount == 1 ? "Reset-Frist" : "Reset-Fristen") in den nächsten 3 Tagen", systemImage: "hourglass")
+                    Label(tr("{0} {1} in den nächsten 3 Tagen", store.expiringCount, store.expiringCount == 1 ? tr("Reset-Frist") : tr("Reset-Fristen")), systemImage: "hourglass")
                         .font(.caption).foregroundStyle(Palette.accent)
                 }
                 HStack {
-                    Text("Soll = gleichmäßiger Verbrauch")
+                    Text(tr("Soll = gleichmäßiger Verbrauch"))
                     Spacer(minLength: 4)
-                    Text(store.isDemo ? "Beispieldaten" : store.isPaused ? "Pausiert" : updatedText(store.lastChecked, now: store.now))
+                    Text(store.isDemo ? tr("Beispieldaten") : store.isPaused ? tr("Pausiert") : updatedText(store.lastChecked, now: store.now))
                 }.font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
@@ -48,7 +48,7 @@ struct TrayView: View {
     private var accountSections: some View {
         VStack(alignment: .leading, spacing: 26) {
             if accounts.isEmpty {
-                Text("Noch keine aktiven Konten. Verbinde einen Anbieter in der Übersicht.")
+                Text(tr("Noch keine aktiven Konten. Verbinde einen Anbieter in der Übersicht."))
                     .font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
             }
             ForEach(accounts) { account in
@@ -105,7 +105,7 @@ private struct TrayAccountView: View {
                 }
                 Spacer(minLength: 4)
                 if snapshot != nil && stale {
-                    Text("Letzter Stand").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(tr("Letzter Stand")).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
             }
             if let snapshot {
@@ -125,14 +125,14 @@ private struct TrayAccountView: View {
                     ResetAvailability(snapshot: snapshot, now: store.now)
                 }
                 if visibleWindows.isEmpty && snapshot.money.isEmpty {
-                    Text(snapshot.notice ?? "Keine Kontingente verfügbar").font(.caption).foregroundStyle(.secondary)
+                    Text(snapshot.notice ?? tr("Keine Kontingente verfügbar")).font(.caption).foregroundStyle(.secondary)
                 }
             }
             if let failure = store.failures[account.id] {
                 Label(failure, systemImage: "exclamationmark.circle")
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else if snapshot == nil {
-                Text("Verbindung wird hergestellt …").font(.caption).foregroundStyle(.secondary)
+                Text(tr("Verbindung wird hergestellt …")).font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 2)

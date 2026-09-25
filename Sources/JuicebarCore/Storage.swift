@@ -7,17 +7,17 @@ public final class HistoryDatabase {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     public init(path: String) throws {
-        if sqlite3_open(path, &database) != SQLITE_OK { throw ProviderFailure.unavailable("Der lokale Verlauf konnte nicht geöffnet werden.") }
+        if sqlite3_open(path, &database) != SQLITE_OK { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht geöffnet werden.")) }
         sqlite3_busy_timeout(database, 100)
         try execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS observations (id INTEGER PRIMARY KEY, account TEXT NOT NULL, time REAL NOT NULL, payload BLOB NOT NULL); CREATE INDEX IF NOT EXISTS observation_account_time ON observations(account,time); CREATE TABLE IF NOT EXISTS warnings (id TEXT PRIMARY KEY, time REAL NOT NULL, payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS preferences (id TEXT PRIMARY KEY, payload BLOB NOT NULL);")
     }
     deinit { sqlite3_close(database) }
     private func execute(_ sql: String) throws {
-        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else { throw ProviderFailure.unavailable("Der lokale Verlauf ist momentan nicht verfügbar.") }
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else { throw ProviderFailure.unavailable(tr("Der lokale Verlauf ist momentan nicht verfügbar.")) }
     }
     private func statement(_ sql: String) throws -> OpaquePointer {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { throw ProviderFailure.unavailable("Der lokale Verlauf konnte nicht gelesen werden.") }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht gelesen werden.")) }
         return stmt
     }
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -35,7 +35,7 @@ public final class HistoryDatabase {
         bind(snapshot.configurationID, to: stmt, at: 1)
         sqlite3_bind_double(stmt, 2, snapshot.observedAt.timeIntervalSince1970)
         bind(try encoder.encode(snapshot), to: stmt, at: 3)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable("Verlauf konnte nicht gespeichert werden.") }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Verlauf konnte nicht gespeichert werden.")) }
         try execute("DELETE FROM observations WHERE id NOT IN (SELECT id FROM observations ORDER BY time DESC LIMIT 12000); DELETE FROM warnings WHERE time < strftime('%s','now') - 15552000;")
     }
     public func history(account: String, since: Date = .distantPast, limit: Int = 2000) throws -> [AccountSnapshot] {
@@ -52,7 +52,7 @@ public final class HistoryDatabase {
         defer { sqlite3_finalize(stmt) }
         bind(event.id, to: stmt, at: 1); sqlite3_bind_double(stmt, 2, event.createdAt.timeIntervalSince1970)
         bind(try encoder.encode(event), to: stmt, at: 3)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable("Warnzustand konnte nicht gespeichert werden.") }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Warnzustand konnte nicht gespeichert werden.")) }
     }
     public func warnings(limit: Int = 2000) throws -> [WarningEvent] {
         let stmt = try statement("SELECT payload FROM warnings ORDER BY time DESC LIMIT ?")
@@ -70,11 +70,11 @@ public final class HistoryDatabase {
     public func write<T: Encodable>(_ value: T, key: String) throws {
         let stmt = try statement("INSERT OR REPLACE INTO preferences(id,payload) VALUES(?,?)")
         defer { sqlite3_finalize(stmt) }; bind(key, to: stmt, at: 1); bind(try encoder.encode(value), to: stmt, at: 2)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable("Einstellung konnte nicht gespeichert werden.") }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Einstellung konnte nicht gespeichert werden.")) }
     }
     public func removeAccount(_ id: String) throws {
         let stmt = try statement("DELETE FROM observations WHERE account=?")
         defer { sqlite3_finalize(stmt) }; bind(id, to: stmt, at: 1)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable("Verlauf konnte nicht entfernt werden.") }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Verlauf konnte nicht entfernt werden.")) }
     }
 }

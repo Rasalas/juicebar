@@ -65,11 +65,11 @@ struct QuotaBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 4 : 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(window.title).font(.system(size: compact ? 12 : 13, weight: .medium))
+                Text(tr(window.title)).font(.system(size: compact ? 12 : 13, weight: .medium))
                 Spacer()
                 Text(expired ? "—" : "\(Int(displayed.rounded()))")
                     .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
-                if !expired { Text(mode == .remaining ? "% übrig" : "% verbraucht").font(.system(size: compact ? 10 : 11)).foregroundStyle(.secondary) }
+                if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(.system(size: compact ? 10 : 11)).foregroundStyle(.secondary) }
             }
             GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
@@ -83,7 +83,7 @@ struct QuotaBar: View {
                             .frame(width: 10, height: 10)
                             // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
                             .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
-                            .help("Sollstand bei gleichmäßigem Verbrauch: \(Int(mode.value(used: ideal).rounded())) %")
+                            .help(tr("Sollstand bei gleichmäßigem Verbrauch: {0} %", Int(mode.value(used: ideal).rounded())))
                     }
                 }
                 .frame(height: compact ? 13 : 18, alignment: .topLeading)
@@ -91,36 +91,36 @@ struct QuotaBar: View {
             HStack(spacing: 4) {
                 if let reset = window.resetsAt {
                     Image(systemName: "arrow.clockwise").font(.system(size: 9))
-                    Text(expired ? "Reset erreicht · warte auf neuen Stand" : "Reset \(relativeTime(reset, now: now))")
-                        .help(reset.formatted(date: .complete, time: .shortened))
-                } else { Text("Resetzeit nicht verfügbar") }
+                    Text(expired ? tr("Reset erreicht · warte auf neuen Stand") : tr("Reset {0}", relativeTime(reset, now: now)))
+                        .help(reset.formatted(Date.FormatStyle(date: .complete, time: .shortened).locale(Localization.locale)))
+                } else { Text(tr("Resetzeit nicht verfügbar")) }
                 Spacer(minLength: 0)
                 if let ideal = window.idealPercent(at: now), !expired {
-                    Label("Soll \(Int(mode.value(used: ideal).rounded())) %", systemImage: "diamond.fill")
+                    Label(tr("Soll {0} %", Int(mode.value(used: ideal).rounded())), systemImage: "diamond.fill")
                         .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
-                        .help("Erwarteter Füllstand bei gleichmäßiger Nutzung über das gesamte Zeitfenster.")
+                        .help(tr("Erwarteter Füllstand bei gleichmäßiger Nutzung über das gesamte Zeitfenster."))
                 }
             }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(window.title), \(Int(displayed.rounded())) Prozent \(mode == .remaining ? "übrig" : "verbraucht")\(expired ? ", Wert abgelaufen" : "")")
+        .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : ""))
     }
 }
 
 func relativeTime(_ date: Date, now: Date = Date()) -> String {
     let delta = date.timeIntervalSince(now)
-    if delta <= 0 { return "jetzt" }
-    if delta < 3600 { return "in \(max(1, Int(delta / 60))) Min." }
-    if delta < 86400 { return "in \(Int(delta / 3600)) Std. \(Int(delta.truncatingRemainder(dividingBy: 3600) / 60)) Min." }
-    return "in \(Int(ceil(delta / 86400))) Tagen"
+    if delta <= 0 { return tr("jetzt") }
+    if delta < 3600 { return tr("in {0} Min.", max(1, Int(delta / 60))) }
+    if delta < 86400 { return tr("in {0} Std. {1} Min.", Int(delta / 3600), Int(delta.truncatingRemainder(dividingBy: 3600) / 60)) }
+    return tr("in {0} Tagen", Int(ceil(delta / 86400)))
 }
 
 func updatedText(_ date: Date?, now: Date) -> String {
-    guard let date else { return "Noch nicht abgerufen" }
+    guard let date else { return tr("Noch nicht abgerufen") }
     let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
-    if minutes < 1 { return "Gerade aktualisiert" }
-    if minutes < 60 { return "Stand vor \(minutes) Min." }
-    return "Stand \(date.formatted(date: .abbreviated, time: .shortened))"
+    if minutes < 1 { return tr("Gerade aktualisiert") }
+    if minutes < 60 { return tr("Stand vor {0} Min.", minutes) }
+    return tr("Stand {0}", date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)))
 }
 
 struct EmptyState: View {
@@ -163,15 +163,15 @@ struct ResetAvailability: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             let count = snapshot.benefitCount ?? 0
-            Label("\(count) \(count == 1 ? "Reset verfügbar" : "Resets verfügbar")", systemImage: "arrow.counterclockwise")
+            Label("\(count) \(count == 1 ? tr("Reset verfügbar") : tr("Resets verfügbar"))", systemImage: "arrow.counterclockwise")
                 .foregroundStyle(Palette.accent)
             if let expiry {
-                Text(expiry <= now ? "Ablauf erreicht · neuer Stand ausstehend" :
-                     "\(count == 1 ? "Läuft" : "Nächster Ablauf") \(relativeTime(expiry, now: now))\(count == 1 ? " ab" : "") · \(expiry.formatted(.dateTime.day().month(.abbreviated).hour().minute()))")
+                Text(expiry <= now ? tr("Ablauf erreicht · neuer Stand ausstehend") :
+                     "\(count == 1 ? tr("Läuft") : tr("Nächster Ablauf")) \(relativeTime(expiry, now: now))\(count == 1 ? tr(" ab") : "") · \(expiry.formatted(.dateTime.day().month(.abbreviated).hour().minute()))")
                     .foregroundStyle(.secondary)
-                    .help(expiry.formatted(date: .complete, time: .shortened))
+                    .help(expiry.formatted(Date.FormatStyle(date: .complete, time: .shortened).locale(Localization.locale)))
             } else {
-                Text("Ablaufdatum nicht verfügbar").foregroundStyle(.secondary)
+                Text(tr("Ablaufdatum nicht verfügbar")).foregroundStyle(.secondary)
             }
         }.font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
     }

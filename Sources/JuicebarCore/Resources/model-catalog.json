@@ -1,0 +1,452 @@
+{
+  "schema": 1,
+  "revision": 1,
+  "verifiedOn": "2026-09-25",
+  "aliases": [
+    {
+      "names": [
+        "ox-alpha",
+        "ox-alpha-free",
+        "stealth/ox-alpha",
+        "stealth/ox-alpha:free",
+        "z-ai/glm-5.3-flash"
+      ],
+      "providers": [
+        "opencode",
+        "opencode-go",
+        "openrouter"
+      ],
+      "canonicalModel": "glm-5.3-flash",
+      "displayName": "GLM-5.3-Flash",
+      "source": "https://openrouter.ai/stealth/ox-alpha",
+      "verifiedOn": "2026-09-25"
+    },
+    {
+      "names": [
+        "union-alpha",
+        "union-alpha-free",
+        "stealth/union-alpha",
+        "stealth/union-alpha:free",
+        "unbiased/pareto"
+      ],
+      "providers": [
+        "opencode",
+        "opencode-go",
+        "openrouter"
+      ],
+      "canonicalModel": "pareto",
+      "displayName": "Pareto",
+      "source": "https://openrouter.ai/stealth/union-alpha",
+      "verifiedOn": "2026-09-25"
+    }
+  ],
+  "rates": {
+    "gpt-6-astra": {
+      "input": 10.0,
+      "output": 50.0,
+      "read": 1.0,
+      "write": 12.5,
+      "hour": 12.5,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-6-sol": {
+      "input": 2.0,
+      "output": 10.0,
+      "read": 0.2,
+      "write": 2.5,
+      "hour": 2.5,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "read": 0.01,
+      "write": 0.125,
+      "hour": 0.125,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-5.6-sol": {
+      "input": 4.0,
+      "output": 20.0,
+      "read": 0.4,
+      "write": 5.0,
+      "hour": 5.0,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-5.6": {
+      "input": 4.0,
+      "output": 20.0,
+      "read": 0.4,
+      "write": 5.0,
+      "hour": 5.0,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-5.6-terra": {
+      "input": 2.0,
+      "output": 12.0,
+      "read": 0.2,
+      "write": 2.5,
+      "hour": 2.5,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "output": 1.2,
+      "read": 0.02,
+      "write": 0.25,
+      "hour": 0.25,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25",
+      "longContext": 272000
+    },
+    "gpt-5.5": {
+      "input": 5.0,
+      "output": 30.0,
+      "read": 0.5,
+      "write": 5.0,
+      "hour": 6.25,
+      "longContext": 272000,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25"
+    },
+    "gpt-5.4": {
+      "input": 2.5,
+      "output": 15.0,
+      "read": 0.25,
+      "write": 2.5,
+      "hour": 3.125,
+      "longContext": 272000,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25"
+    },
+    "gpt-5.4-mini": {
+      "input": 0.75,
+      "output": 4.5,
+      "read": 0.075,
+      "write": 0.75,
+      "hour": 0.9375,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25"
+    },
+    "gpt-5.2": {
+      "input": 1.75,
+      "output": 14.0,
+      "read": 0.175,
+      "write": 1.75,
+      "hour": 2.1875,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25"
+    },
+    "gpt-5.2-codex": {
+      "input": 1.75,
+      "output": 14.0,
+      "read": 0.175,
+      "write": 1.75,
+      "hour": 2.1875,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25"
+    },
+    "gpt-5.3-codex": {
+      "input": 1.75,
+      "output": 14.0,
+      "read": 0.175,
+      "write": 1.75,
+      "hour": 2.1875,
+      "source": "https://openai.com/api/pricing/",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-fable-5-1": {
+      "input": 10.0,
+      "output": 50.0,
+      "read": 0.25,
+      "write": 12.5,
+      "hour": 20.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-fable-5": {
+      "input": 10.0,
+      "output": 50.0,
+      "read": 1.0,
+      "write": 12.5,
+      "hour": 20.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-5-5": {
+      "input": 4.0,
+      "output": 20.0,
+      "read": 0.2,
+      "write": 5.0,
+      "hour": 8.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-5": {
+      "input": 5.0,
+      "output": 25.0,
+      "read": 0.5,
+      "write": 6.25,
+      "hour": 10.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-4-8": {
+      "input": 5.0,
+      "output": 25.0,
+      "read": 0.5,
+      "write": 6.25,
+      "hour": 10.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-4-7": {
+      "input": 5.0,
+      "output": 25.0,
+      "read": 0.5,
+      "write": 6.25,
+      "hour": 10.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-4-6": {
+      "input": 5.0,
+      "output": 25.0,
+      "read": 0.5,
+      "write": 6.25,
+      "hour": 10.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-4-5": {
+      "input": 5.0,
+      "output": 25.0,
+      "read": 0.5,
+      "write": 6.25,
+      "hour": 10.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-4-1": {
+      "input": 15.0,
+      "output": 75.0,
+      "read": 1.5,
+      "write": 18.75,
+      "hour": 30.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-opus-4": {
+      "input": 15.0,
+      "output": 75.0,
+      "read": 1.5,
+      "write": 18.75,
+      "hour": 30.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-sonnet-5": {
+      "input": 2.0,
+      "output": 10.0,
+      "read": 0.2,
+      "write": 2.5,
+      "hour": 4.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0,
+      "read": 0.3,
+      "write": 3.75,
+      "hour": 6.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-sonnet-4-5": {
+      "input": 3.0,
+      "output": 15.0,
+      "read": 0.3,
+      "write": 3.75,
+      "hour": 6.0,
+      "longContext": 200000,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-sonnet-4": {
+      "input": 3.0,
+      "output": 15.0,
+      "read": 0.3,
+      "write": 3.75,
+      "hour": 6.0,
+      "longContext": 200000,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-haiku-4-5": {
+      "input": 1.0,
+      "output": 5.0,
+      "read": 0.1,
+      "write": 1.25,
+      "hour": 2.0,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-3-5-haiku": {
+      "input": 0.8,
+      "output": 4.0,
+      "read": 0.08,
+      "write": 1.0,
+      "hour": 1.6,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "claude-haiku-3-5": {
+      "input": 0.8,
+      "output": 4.0,
+      "read": 0.08,
+      "write": 1.0,
+      "hour": 1.6,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "verifiedOn": "2026-09-25"
+    },
+    "glm-5.3-flash": {
+      "input": 0.15,
+      "output": 0.5,
+      "read": 0.03,
+      "write": 0.15,
+      "hour": 0.15,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "glm-5.3": {
+      "input": 1.4,
+      "output": 4.4,
+      "read": 0.26,
+      "write": 1.4,
+      "hour": 1.4,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "glm-5.2": {
+      "input": 1.4,
+      "output": 4.4,
+      "read": 0.26,
+      "write": 1.4,
+      "hour": 1.4,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "glm-5.1": {
+      "input": 1.4,
+      "output": 4.4,
+      "read": 0.26,
+      "write": 1.4,
+      "hour": 1.4,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "glm-5": {
+      "input": 1.0,
+      "output": 3.2,
+      "read": 0.2,
+      "write": 1.0,
+      "hour": 1.0,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "deepseek-v4.1-flash": {
+      "input": 0.3,
+      "output": 1.2,
+      "read": 0.006,
+      "write": 0.3,
+      "hour": 0.3,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "deepseek-v4-flash": {
+      "input": 0.14,
+      "output": 0.28,
+      "read": 0.028,
+      "write": 0.14,
+      "hour": 0.14,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "minimax-m3": {
+      "input": 0.3,
+      "output": 1.2,
+      "read": 0.06,
+      "write": 0.3,
+      "hour": 0.3,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "minimax-m2.7": {
+      "input": 0.3,
+      "output": 1.2,
+      "read": 0.06,
+      "write": 0.3,
+      "hour": 0.3,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "minimax-m2.5": {
+      "input": 0.3,
+      "output": 1.2,
+      "read": 0.06,
+      "write": 0.3,
+      "hour": 0.3,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "kimi-k2.5": {
+      "input": 0.6,
+      "output": 3.0,
+      "read": 0.1,
+      "write": 0.6,
+      "hour": 0.6,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "kimi-k2.6": {
+      "input": 0.95,
+      "output": 4.0,
+      "read": 0.16,
+      "write": 0.95,
+      "hour": 0.95,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "kimi-k2.7-code": {
+      "input": 0.95,
+      "output": 4.0,
+      "read": 0.19,
+      "write": 0.95,
+      "hour": 0.95,
+      "source": "https://opencode.ai/docs/zen/",
+      "verifiedOn": "2026-09-25"
+    },
+    "pareto": {
+      "input": 2.5,
+      "output": 7.5,
+      "read": 0.25,
+      "write": 0,
+      "hour": 0,
+      "source": "https://openrouter.ai/unbiased/pareto",
+      "verifiedOn": "2026-09-25"
+    }
+  }
+}

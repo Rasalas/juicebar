@@ -72,18 +72,18 @@ public enum WarningEngine {
                 let key = "\(window.id)|\(epoch)"
                 if settings.thresholdEnabled && window.usedPercent >= settings.threshold {
                     append("\(key)|threshold|\(settings.threshold)", .threshold,
-                           "\(window.title): \(Int(window.usedPercent)) % verbraucht.")
+                           tr("{0}: {1} % verbraucht.", window.title, Int(window.usedPercent)))
                 }
                 if settings.paceEnabled, let ideal = window.idealPercent(at: now), ideal >= 5,
                    window.usedPercent > ideal + settings.paceBuffer {
                     append("\(key)|pace", .pace,
-                           "\(window.title): \(Int(window.usedPercent)) % verbraucht, gleichmäßig wären es \(Int(ideal)) %.")
+                           tr("{0}: {1} % verbraucht, gleichmäßig wären es {2} %.", window.title, Int(window.usedPercent), Int(ideal)))
                 }
                 if settings.forecastEnabled,
                    let forecast = projection(window: window, snapshot: snapshot, history: history, now: now),
                    forecast.reachesLimitAt.timeIntervalSince(now) <= settings.forecastHours * 3600 {
                     let minutes = max(1, Int(forecast.reachesLimitAt.timeIntervalSince(now) / 60))
-                    append("\(key)|forecast", .forecast, "\(window.title): Bei diesem Tempo voraussichtlich in \(minutes) Min. ausgeschöpft, vor dem Reset.")
+                    append("\(key)|forecast", .forecast, tr("{0}: Bei diesem Tempo voraussichtlich in {1} Min. ausgeschöpft, vor dem Reset.", window.title, minutes))
                 }
             }
         }
@@ -95,7 +95,7 @@ public enum WarningEngine {
                 guard let stage = settings.expiryHours.filter({ $0 > 0 && hours <= $0 }).min() else { continue }
                 let when = expiry.formatted(.dateTime.day().month().hour().minute())
                 append("benefit|\(benefit.id)|\(expiry.timeIntervalSince1970)|\(stage)", .expiry,
-                       "\(benefit.title) · \(benefit.scope): läuft am \(when) ab.\(benefit.isManual ? " Manuell eingetragen." : "")", manual: benefit.isManual)
+                       tr("{0} · {1}: läuft am {2} ab.{3}", benefit.title, benefit.scope, when, benefit.isManual ? tr(" Manuell eingetragen.") : ""), manual: benefit.isManual)
             }
         }
         return result

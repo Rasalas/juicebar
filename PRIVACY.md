@@ -23,7 +23,7 @@ Enabled providers receive their required authenticated usage requests. SSH conne
 
 Official direct-download builds can check for app updates through Sparkle using GitHub-hosted release metadata. The host sees ordinary connection metadata such as IP address and the update request. Sparkle system-profile reporting is disabled. Automatic checks can be disabled in settings. Source builds do not enable this updater. Links to GitHub, documentation and funding pages open in your browser and are subject to those services' policies.
 
-The model alias and price catalogs currently ship with the app. A separate remote catalog is planned but is not active.
+A model alias and price catalog ships with the app. Juicebar can check once per day for a signed catalog at `rasalas.github.io/juicebar/`. No credentials, model names or usage data are sent in that request. GitHub Pages receives ordinary connection metadata. Automatic catalog checks can be disabled separately in Settings. Invalid updates leave the last valid catalog in use.
 
 Notifications may show provider names and usage values on your desktop or lock screen according to your macOS notification settings.
 

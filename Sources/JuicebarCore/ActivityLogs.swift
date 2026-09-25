@@ -58,7 +58,7 @@ public enum ActivityLogs {
                     }
                     events.append(contentsOf: result.events.filter { $0.date >= since && $0.date <= now })
                     skipped += result.skipped; filesRead += 1
-                    if filesRead % 10 == 0 { progress("\(filesRead) Logdateien gelesen · \(root.source.name)") }
+                    if filesRead % 10 == 0 { progress(tr("{0} Logdateien gelesen · {1}", filesRead, root.source.name)) }
                 } catch is CancellationError { throw CancellationError() }
                 catch {
                     readErrors += 1
@@ -68,9 +68,9 @@ public enum ActivityLogs {
                     }
                 }
             }
-            if readErrors > 0 { notices.append("\(root.source.name): \(readErrors) Dateien konnten nicht gelesen werden.") }
+            if readErrors > 0 { notices.append(tr("{0}: {1} Dateien konnten nicht gelesen werden.", root.source.name, readErrors)) }
         }
-        if skipped > 0 { notices.append("\(skipped) Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.") }
+        if skipped > 0 { notices.append(tr("{0} Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.", skipped)) }
         if let cacheDirectory {
             for file in (try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "plist" && !activeCache.contains(file.lastPathComponent) {
                 if let data = try? Data(contentsOf: file), let cached = try? decoder.decode(CachedFile.self, from: data), cached.version == 2 {
@@ -127,7 +127,7 @@ public enum ActivityLogs {
 struct UsageLogParser {
     let source: ActivitySource
     let fileID: String
-    private var model = "Unbekannt"
+    private var model = tr("Unbekannt")
     private var session = ""
     private var sawMeta = false
     private var forkAnchor: Date?
@@ -180,7 +180,7 @@ struct UsageLogParser {
               let id = message["id"] as? String ?? record["requestId"] as? String else { return }
         let tokens = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].reduce(0) { $0 + number(usage, $1) }
         guard tokens > 0 else { return }
-        responses.append(ActivityEvent(id: stableID("\(id)|\(record["requestId"] as? String ?? "")"), source: .claude, date: date, model: message["model"] as? String ?? "Unbekannt", tokens: tokens, usage: TokenBreakdown.claude(usage)))
+        responses.append(ActivityEvent(id: stableID("\(id)|\(record["requestId"] as? String ?? "")"), source: .claude, date: date, model: message["model"] as? String ?? tr("Unbekannt"), tokens: tokens, usage: TokenBreakdown.claude(usage)))
     }
     private func number(_ object: [String: Any], _ key: String) -> Double { max(0, JSONValue.number(object[key]) ?? 0) }
 }

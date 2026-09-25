@@ -33,7 +33,7 @@ struct DashboardView: View {
                     Button { page = item } label: {
                         HStack(spacing: 11) {
                             Image(systemName: item.symbol).frame(width: 18)
-                            Text(item.rawValue)
+                            Text(tr(item.rawValue))
                             Spacer()
                             if item == .resets && store.expiringCount > 0 {
                                 Text("\(store.expiringCount)").font(.system(size: 10, weight: .bold))
@@ -49,9 +49,9 @@ struct DashboardView: View {
                 }
                 Spacer()
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(store.isDemo ? "Beispieldaten" : "Bleibt auf deinem Mac", systemImage: store.isDemo ? "testtube.2" : "lock.shield")
+                    Label(store.isDemo ? tr("Beispieldaten") : tr("Bleibt auf deinem Mac"), systemImage: store.isDemo ? "testtube.2" : "lock.shield")
                         .font(.system(size: 11, weight: .medium))
-                    Text(store.isDemo ? "Demo · keine Abfragen" : "Keine Telemetrie.\nKeine Gesprächsinhalte.")
+                    Text(store.isDemo ? tr("Demo · keine Abfragen") : tr("Keine Telemetrie.\nKeine Gesprächsinhalte."))
                         .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
                 }.padding(22)
             }.frame(width: 190).background(Palette.sidebar)
@@ -61,7 +61,7 @@ struct DashboardView: View {
                     HStack {
                         HStack(spacing: 6) {
                             Circle().fill(store.isPaused ? Color.secondary : store.failures.isEmpty ? Palette.green : Color.orange).frame(width: 6, height: 6)
-                            Text(store.isDemo ? "Demo" : store.isPaused ? "Pausiert" : store.isRefreshing ? "Wird aktualisiert …" : !store.failures.isEmpty ? "Nicht alle Konten erreichbar" : updatedText(store.lastChecked, now: store.now))
+                            Text(store.isDemo ? "Demo" : store.isPaused ? tr("Pausiert") : store.isRefreshing ? tr("Wird aktualisiert …") : !store.failures.isEmpty ? tr("Nicht alle Konten erreichbar") : updatedText(store.lastChecked, now: store.now))
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -89,18 +89,18 @@ struct DashboardView: View {
     }
     private var refreshButton: some View {
         Button { store.refresh(force: true) } label: {
-            Label(store.isRefreshing ? "Wird aktualisiert …" : "Aktualisieren", systemImage: "arrow.clockwise")
+            Label(store.isRefreshing ? tr("Wird aktualisiert …") : tr("Aktualisieren"), systemImage: "arrow.clockwise")
         }.disabled(store.isRefreshing || store.isDemo).controlSize(.small).keyboardShortcut("r")
     }
     private var overviewAccounts: [AccountConfiguration] { QuotaOrder.accounts(store.accounts.filter(\.enabled)) }
     private var overview: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 16) {
-                PageHeading(title: "Alles im Blick.", subtitle: "Deine Kontingente, ihr nächster Reset und wie viel Spielraum bleibt.")
+                PageHeading(title: tr("Alles im Blick."), subtitle: tr("Deine Kontingente, ihr nächster Reset und wie viel Spielraum bleibt."))
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 6) {
                     refreshButton
-                    if store.isPaused { Text("Abfragen pausiert").font(.caption).foregroundStyle(.secondary) }
+                    if store.isPaused { Text(tr("Abfragen pausiert")).font(.caption).foregroundStyle(.secondary) }
                 }.padding(.top, 3)
             }.padding(.top, 10)
             if store.expiringCount > 0 {
@@ -108,8 +108,8 @@ struct DashboardView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "hourglass").font(.title3)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("\(store.expiringCount == 1 ? "Ein Reset läuft" : "\(store.expiringCount) Resets laufen") bald ab").font(.system(size: 13, weight: .semibold))
-                            Text("Fristen ansehen und rechtzeitig beim Anbieter einlösen.").font(.system(size: 12)).foregroundStyle(Color.secondary)
+                            Text(tr("{0} bald ab", store.expiringCount == 1 ? tr("Ein Reset läuft") : tr("{0} Resets laufen", store.expiringCount))).font(.system(size: 13, weight: .semibold))
+                            Text(tr("Fristen ansehen und rechtzeitig beim Anbieter einlösen.")).font(.system(size: 12)).foregroundStyle(Color.secondary)
                         }
                         Spacer(); Image(systemName: "arrow.up.right")
                     }.padding(17).foregroundStyle(Palette.accent)
@@ -117,8 +117,8 @@ struct DashboardView: View {
                 }.buttonStyle(.plain)
             }
             if store.accounts.filter(\.enabled).isEmpty {
-                Panel { EmptyState(symbol: "plus.circle", title: "Dein erster Überblick", message: "Füge ein Konto hinzu, um Verbrauch und Resetzeiten zu sehen.")
-                    Button("Konto hinzufügen") { page = .accounts }.buttonStyle(JuiceButtonStyle(prominent: true)) }
+                Panel { EmptyState(symbol: "plus.circle", title: tr("Dein erster Überblick"), message: tr("Füge ein Konto hinzu, um Verbrauch und Resetzeiten zu sehen."))
+                    Button(tr("Konto hinzufügen")) { page = .accounts }.buttonStyle(JuiceButtonStyle(prominent: true)) }
             } else {
                 HStack(alignment: .top, spacing: 18) {
                     ForEach(0..<min(2, overviewAccounts.count), id: \.self) { column in
@@ -131,7 +131,7 @@ struct DashboardView: View {
                 }
                 HStack(spacing: 7) {
                     Rectangle().fill(.secondary).frame(width: 2, height: 10)
-                    Text("Die Markierung zeigt den Sollstand bei gleichmäßiger Nutzung. Jeder Balken gehört zu einem eigenen Limit.")
+                    Text(tr("Die Markierung zeigt den Sollstand bei gleichmäßiger Nutzung. Jeder Balken gehört zu einem eigenen Limit."))
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
@@ -140,11 +140,11 @@ struct DashboardView: View {
                     HStack(spacing: 16) {
                         Image(systemName: "bell.badge").font(.system(size: 23, weight: .light)).foregroundStyle(Palette.accent)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Rechtzeitig Bescheid wissen").font(.system(size: 14, weight: .semibold))
-                            Text("Warnungen bei 50 %, hohem Tempo und ablaufenden Resets.").font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text(tr("Rechtzeitig Bescheid wissen")).font(.system(size: 14, weight: .semibold))
+                            Text(tr("Warnungen bei 50 %, hohem Tempo und ablaufenden Resets.")).font(.system(size: 12)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Einrichten") { page = .alerts }.buttonStyle(JuiceButtonStyle())
+                        Button(tr("Einrichten")) { page = .alerts }.buttonStyle(JuiceButtonStyle())
                     }
                 }
             }
@@ -163,12 +163,12 @@ struct AccountCard: View {
                     ProviderMark(kind: account.provider)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(account.displayName).font(.system(size: 15, weight: .semibold))
-                        Text(store.snapshots[account.id]?.plan.capitalized ?? "Noch nicht verbunden").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(store.snapshots[account.id]?.plan.capitalized ?? tr("Noch nicht verbunden")).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if store.refreshingAccount == account.id { ProgressView().controlSize(.small) }
                     else if let snapshot = store.snapshots[account.id], !snapshot.isFresh(at: store.now) || store.failures[account.id] != nil {
-                        Text("Letzter Stand").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                        Text(tr("Letzter Stand")).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                     }
                 }
                 if let snapshot = store.snapshots[account.id] {
@@ -191,14 +191,14 @@ struct AccountCard: View {
                     }
                 } else if store.refreshingAccount == account.id {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Verbrauch wird abgefragt …").font(.callout)
-                        Text("Die Anmeldung bleibt bei deinem Anbieter.").font(.caption).foregroundStyle(.secondary)
+                        Text(tr("Verbrauch wird abgefragt …")).font(.callout)
+                        Text(tr("Die Anmeldung bleibt bei deinem Anbieter.")).font(.caption).foregroundStyle(.secondary)
                     }.padding(.vertical, 16)
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(store.failures[account.id] ?? "Beim nächsten Abruf erscheinen hier deine Kontingente.")
+                        Text(store.failures[account.id] ?? tr("Beim nächsten Abruf erscheinen hier deine Kontingente."))
                             .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Button("Verbindung einrichten", action: manage).buttonStyle(JuiceButtonStyle())
+                        Button(tr("Verbindung einrichten"), action: manage).buttonStyle(JuiceButtonStyle())
                     }.padding(.vertical, 8)
                 }
                 if let error = store.failures[account.id], store.snapshots[account.id] != nil {
@@ -208,7 +208,7 @@ struct AccountCard: View {
                     Text(updatedText(store.snapshots[account.id]?.observedAt, now: store.now)).font(.system(size: 10)).foregroundStyle(.tertiary)
                     Spacer()
                     Button { store.openAccount(account) } label: { Image(systemName: "arrow.up.right.square") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("\(account.provider.name) im Browser öffnen")
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help(tr("{0} im Browser öffnen", account.provider.name))
                 }
             }
         }

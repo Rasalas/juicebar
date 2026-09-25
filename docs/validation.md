@@ -42,3 +42,17 @@ The first public [macOS CI run](https://github.com/Rasalas/juicebar/actions/runs
 Version 0.1.0 build 2 is Developer ID signed and accepted by Apple's notary service. The ticket was stapled, validated and accepted by `spctl`. A notarized build 1 with an explicit candidate feed found the public prerelease through Sparkle, downloaded it, offered installation and relaunched as build 2. The installed build uses the normal stable feed. Account, settings, SSH-source and path hashes were unchanged; usage-day and response counts were retained. Codex, Claude and OpenCode Go returned fresh values after relaunch.
 
 Sparkle's signature tool accepted the original archive and rejected a modified copy. Feed version, archive length and checksum were checked. No signing key or account secret is included in the repository or release assets. Cancellation, forced network failure and installation on another Mac remain additional coverage, not claims of this test.
+
+## Follow-up release checks
+
+Version 0.1.1 adds English/German UI, guided CLI setup and the signed model catalog. Tests cover signature tampering, unknown schemas, oversized files, invalid prices/dates, alias collisions, downgrade rejection and cached/bundled fallback. Translation tests preserve interpolation arguments, including braces in provider-supplied values.
+
+The separate sandbox probe and its measured limits are documented in [sandbox feasibility](sandbox-feasibility.md). It does not modify the shipping app's container or credentials.
+
+The project website was checked at 1280 px and 390 px widths with no horizontal overflow. Screenshots show synthetic app data. Store screenshot drafts are rendered at 2560 × 1600 in English and German; they are not evidence of a completed store build.
+
+### Second Mac installation
+
+A configured MacBook SSH alias was found but connection to port 22 timed out. No remote changes were made. Fresh-Mac installation remains unverified.
+
+When the MacBook is available, install the public release from GitHub, then run `bash scripts/check-installed-app.sh /Applications/Juicebar.app`. Also verify first launch without bypassing Gatekeeper, fresh Codex/Claude/OpenCode connections, notification permission and sound, sleep/wake, and one Sparkle update. A signature check on the development Mac is not a substitute for this test.

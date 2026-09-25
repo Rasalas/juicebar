@@ -56,6 +56,12 @@ import JuicebarCore
                                to: directory.appendingPathComponent("\(index)-\(dark ? "dark-narrow" : "light").png"))
             }
         }
+        for (name, page) in [("overview", Page.overview), ("usage", Page.usage)] {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            try renderView(DashboardView(store: store, page: page).frame(width: 1280, height: 800).environment(\.colorScheme, .dark),
+                           size: NSSize(width: 1280, height: 800), appearance: NSAppearance(named: .darkAqua)!,
+                           to: directory.appendingPathComponent("store-\(Localization.language)-\(name).png"))
+        }
         NSApp.appearance = NSAppearance(named: .aqua)
         try renderView(AboutView().buttonStyle(JuiceButtonStyle()).tint(Palette.accent).padding(24).frame(width: 640).background(Color(nsColor: .windowBackgroundColor)),
                        size: NSSize(width: 640, height: 360), appearance: NSAppearance(named: .aqua)!, to: directory.appendingPathComponent("about.png"))

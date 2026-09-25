@@ -48,8 +48,8 @@ enum JuicebarEntry {
             for kind in [ProviderKind.codex, .claude, .opencodeGo] {
                 do {
                     let snapshot = try await registry.provider(for: kind).read(configuration: AccountConfiguration(id: "diagnostic-\(kind.rawValue)", provider: kind), includeHistory: true)
-                    print("\(kind.name): OK · \(snapshot.windows.count) Limits · Resetdaten \(snapshot.benefitsChecked ? "verfügbar" : "unbekannt")")
-                    for window in snapshot.windows { print("  \(window.title): \(Int(window.usedPercent)) % · Reset \(window.resetsAt == nil ? "unbekannt" : "vorhanden")") }
+                    print("\(kind.name): OK · \(snapshot.windows.count) Limits · Resetdaten \(snapshot.benefitsChecked ? tr("verfügbar") : tr("unbekannt"))")
+                    for window in snapshot.windows { print("  \(window.title): \(Int(window.usedPercent)) % · Reset \(window.resetsAt == nil ? tr("unbekannt") : "vorhanden")") }
                 } catch { print("\(kind.name): \(error.localizedDescription)") }
                 fflush(stdout)
             }
@@ -105,11 +105,11 @@ struct TrayLabel: View {
     @ObservedObject var store: AppStore
     private var detail: String {
         let values = store.trayMeters.map { meter in
-            guard let window = meter.window else { return "\(meter.account.displayName): kein aktuelles Limit verfügbar" }
-            if meter.expired { return "\(meter.account.displayName) · \(window.title): Reset erreicht, neuer Stand ausstehend" }
-            return "\(meter.account.displayName) · \(window.title): \(Int(store.settings.displayMode.value(used: window.usedPercent).rounded())) % \(store.settings.displayMode.label.lowercased())\(meter.fresh ? "" : " · letzter Stand")"
+            guard let window = meter.window else { return tr("{0}: kein aktuelles Limit verfügbar", meter.account.displayName) }
+            if meter.expired { return tr("{0} · {1}: Reset erreicht, neuer Stand ausstehend", meter.account.displayName, window.title) }
+            return tr("{0} · {1}: {2} % {3}{4}", meter.account.displayName, window.title, Int(store.settings.displayMode.value(used: window.usedPercent).rounded()), store.settings.displayMode.label.lowercased(), meter.fresh ? "" : tr(" · letzter Stand"))
         }
-        return (values.isEmpty ? "Juicebar · Keine Limits für die Menüleiste ausgewählt" : values.joined(separator: "\n")) + (store.expiringCount > 0 ? "\nReset-Frist läuft bald ab" : "")
+        return (values.isEmpty ? tr("Juicebar · Keine Limits für die Menüleiste ausgewählt") : values.joined(separator: "\n")) + (store.expiringCount > 0 ? tr("\nReset-Frist läuft bald ab") : "")
     }
     var body: some View {
         Image(nsImage: MenuLimitImage.make(meters: store.trayMeters, mode: store.settings.displayMode, dark: colorScheme == .dark, expiring: store.expiringCount > 0))

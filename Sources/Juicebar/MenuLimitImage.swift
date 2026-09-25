@@ -29,7 +29,7 @@ enum MenuLimitImage {
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = "Kontingente"
+        image.accessibilityDescription = tr("Kontingente")
         return image
     }
 

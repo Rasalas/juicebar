@@ -24,10 +24,10 @@ public enum OpenCodeHistory {
     public static func read(path: String? = nil, now: Date = Date(), lookbackDays: Int = 30) throws -> LocalUsageReport {
         let root = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share").path
         let file = path ?? URL(fileURLWithPath: root).appendingPathComponent("opencode/opencode.db").path
-        guard FileManager.default.fileExists(atPath: file) else { throw ProviderFailure.unavailable("Keine lokale OpenCode-Datenbank gefunden. OpenCode einmal verwenden oder den Datenbankpfad auswählen.") }
+        guard FileManager.default.fileExists(atPath: file) else { throw ProviderFailure.unavailable(tr("Keine lokale OpenCode-Datenbank gefunden. OpenCode einmal verwenden oder den Datenbankpfad auswählen.")) }
         var database: OpaquePointer?
         guard sqlite3_open_v2(file, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
-            sqlite3_close(database); throw ProviderFailure.unavailable("Die OpenCode-Datenbank ist nicht lesbar.")
+            sqlite3_close(database); throw ProviderFailure.unavailable(tr("Die OpenCode-Datenbank ist nicht lesbar."))
         }
         defer { sqlite3_close(database) }
         sqlite3_busy_timeout(database, 100)
@@ -57,8 +57,8 @@ public enum OpenCodeHistory {
                 guard total > 0 else { continue }
                 let model = message["model"] as? [String: Any] ?? [:]
                 let id = message["id"] as? String ?? String(cString: rawID)
-                let provider = message["providerID"] as? String ?? model["providerID"] as? String ?? model["providerId"] as? String ?? "Unbekannt"
-                let name = message["modelID"] as? String ?? model["modelID"] as? String ?? model["id"] as? String ?? "Unbekannt"
+                let provider = message["providerID"] as? String ?? model["providerID"] as? String ?? model["providerId"] as? String ?? tr("Unbekannt")
+                let name = message["modelID"] as? String ?? model["modelID"] as? String ?? model["id"] as? String ?? tr("Unbekannt")
                 let cost = JSONValue.number(message["cost"])
                 if cost == nil { missingCosts = true }
                 let time = (message["time"] as? [String: Any]).flatMap { JSONValue.number($0["created"]) } ?? sqlite3_column_double(stmt, 2)
@@ -68,7 +68,7 @@ public enum OpenCodeHistory {
                 rows[id] = (day, date, total, cost, provider, name, TokenBreakdown.opencode(tokens))
             }
         }
-        guard supported else { throw ProviderFailure.unsupported("Dieses OpenCode-Datenbankschema wird noch nicht unterstützt.") }
+        guard supported else { throw ProviderFailure.unsupported(tr("Dieses OpenCode-Datenbankschema wird noch nicht unterstützt.")) }
         var days: [Date: UsageDay] = [:], models: [String: ModelUsage] = [:]
         for row in rows.values {
             var day = days[row.day] ?? UsageDay(day: row.day, tokens: 0, cost: 0)
@@ -77,9 +77,9 @@ public enum OpenCodeHistory {
             var model = models[id] ?? ModelUsage(id: id, provider: row.provider, model: row.model, tokens: 0, cost: 0)
             model.tokens += row.tokens; model.cost += row.cost ?? 0; models[id] = model
         }
-        let note = "Lokale Nachrichten der letzten \(lookbackDays) Tage. Kosten sind OpenCode-Schätzungen, keine Abo-Rechnung. Kopien mit gleicher Nachrichten-ID werden nur einmal gezählt."
-            + (limited ? " Anzeige auf die neuesten 100.000 Zeilen je Tabelle begrenzt." : "")
-            + (missingCosts ? " Für einige Nachrichten fehlen Kosten." : "")
+        let note = tr("Lokale Nachrichten der letzten {0} Tage. Kosten sind OpenCode-Schätzungen, keine Abo-Rechnung. Kopien mit gleicher Nachrichten-ID werden nur einmal gezählt.", lookbackDays)
+            + (limited ? tr(" Anzeige auf die neuesten 100.000 Zeilen je Tabelle begrenzt.") : "")
+            + (missingCosts ? tr(" Für einige Nachrichten fehlen Kosten.") : "")
         var report = LocalUsageReport(days: days.values.sorted { $0.day < $1.day }, models: models.values.sorted { $0.tokens > $1.tokens }, messageCount: rows.count, notice: note, observedAt: now)
         report.events = rows.map { id, row in ActivityEvent(id: stableID(id), source: .opencode, date: row.date, model: row.model, provider: row.provider, tokens: row.tokens, usage: row.usage) }
         return report

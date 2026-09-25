@@ -51,3 +51,7 @@ Separately fetched signed model metadata, beta channels and automated release pu
 References: [Developer ID and notarization](https://developer.apple.com/developer-id/), [Sparkle](https://sparkle-project.org/documentation/).
 
 For the first end-to-end test, publish the candidate as a GitHub prerelease, leaving it out of the stable feed. Build the older test app with `JUICEBAR_UPDATE_FEED_URL=https://github.com/Rasalas/juicebar/releases/download/v0.1.0/appcast.xml` and a lower build number. Only that test app reads the explicit candidate feed. The new official build uses the default stable feed. Promote the same prerelease after installation succeeds; do not rebuild or replace the tested archive.
+
+## Website and model data
+
+The Pages workflow deploys `site/` when its files change on main. Catalog-only updates follow [model-catalog.md](model-catalog.md) and need no app release. Never upload an unsigned catalog. App Store preparation and its current sandbox blocker are tracked in [sandbox-feasibility.md](sandbox-feasibility.md).

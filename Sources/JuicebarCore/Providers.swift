@@ -31,7 +31,7 @@ public struct CodexProvider: UsageProvider {
                 if let error = reply["error"] as? [String: Any] {
                     let message = (error["message"] as? String ?? "").lowercased()
                     if message.contains("auth") || message.contains("login") || message.contains("sign in") { throw ProviderFailure.authentication }
-                    throw ProviderFailure.unsupported("Codex unterstützt diese Abfrage nicht. CLI-Version und Anmeldung prüfen.")
+                    throw ProviderFailure.unsupported(tr("Codex unterstützt diese Abfrage nicht. CLI-Version und Anmeldung prüfen."))
                 }
                 return reply["result"] as? [String: Any] ?? [:]
             }
@@ -68,11 +68,11 @@ public struct ClaudeProvider: UsageProvider {
                 let reply: [String: Any]
                 do { reply = try client.receive { ($0["type"] as? String) == "control_response" && (($0["response"] as? [String: Any])?["request_id"] as? String) == id } }
                 catch ProviderFailure.timedOut {
-                    if id == "init" { throw ProviderFailure.needsSetup("Claude startet nicht innerhalb von 20 Sekunden. Automatische Versuche pausieren; CLI-Anmeldung und macOS-Zugriff prüfen, dann manuell aktualisieren.") }
+                    if id == "init" { throw ProviderFailure.needsSetup(tr("Claude startet nicht innerhalb von 20 Sekunden. Automatische Versuche pausieren; CLI-Anmeldung und macOS-Zugriff prüfen, dann manuell aktualisieren.")) }
                     throw ProviderFailure.timedOut
                 }
                 guard let response = reply["response"] as? [String: Any], response["subtype"] as? String == "success" else {
-                    throw ProviderFailure.unsupported("Claude unterstützt get_usage nicht oder ist nicht angemeldet. Die aktuelle CLI und ihre Anmeldung prüfen.")
+                    throw ProviderFailure.unsupported(tr("Claude unterstützt get_usage nicht oder ist nicht angemeldet. Die aktuelle CLI und ihre Anmeldung prüfen."))
                 }
                 return response["response"] as? [String: Any] ?? [:]
             }
@@ -124,8 +124,8 @@ public struct APIProvider: UsageProvider {
     public init() {}
     public func read(configuration: AccountConfiguration, includeHistory: Bool) async throws -> AccountSnapshot {
         if configuration.provider == .opencodeZen {
-            return AccountSnapshot(configurationID: configuration.id, identity: configuration.id, plan: "Zen", source: "Lokale OpenCode-Nutzung",
-                                   notice: "Zen bietet hier noch keine verifizierte Guthabenquelle. Tokens und geschätzte Kosten stehen unter Nutzung.")
+            return AccountSnapshot(configurationID: configuration.id, identity: configuration.id, plan: "Zen", source: tr("Lokale OpenCode-Nutzung"),
+                                   notice: tr("Zen bietet hier noch keine verifizierte Guthabenquelle. Tokens und geschätzte Kosten stehen unter Nutzung."))
         }
         let token = SecretStore.read(account: configuration.id) ?? (configuration.useLocalCredentials ? Self.openCodeKey(configuration.provider) : nil)
         guard let token, !token.isEmpty else { throw ProviderFailure.authentication }
@@ -138,9 +138,9 @@ public struct APIProvider: UsageProvider {
         if configuration.provider == .openrouter {
             let payload = try await HTTPTransport.get(URL(string: "https://openrouter.ai/api/v1/credits")!, headers: headers)
             guard let data = payload["data"] as? [String: Any], let credits = JSONValue.number(data["total_credits"]),
-                  let used = JSONValue.number(data["total_usage"]) else { throw ProviderFailure.invalidData("OpenRouter liefert ein unbekanntes Guthabenformat.") }
+                  let used = JSONValue.number(data["total_usage"]) else { throw ProviderFailure.invalidData(tr("OpenRouter liefert ein unbekanntes Guthabenformat.")) }
             return AccountSnapshot(configurationID: configuration.id, identity: identity, source: "OpenRouter Credits",
-                                   money: [MoneyMetric(id: "balance", title: "Guthaben", amount: credits - used), MoneyMetric(id: "lifetime", title: "Gesamtausgaben", amount: used)])
+                                   money: [MoneyMetric(id: "balance", title: tr("Guthaben"), amount: credits - used), MoneyMetric(id: "lifetime", title: tr("Gesamtausgaben"), amount: used)])
         }
         return try await costs(configuration: configuration, token: token, identity: identity)
     }
@@ -168,7 +168,7 @@ public struct APIProvider: UsageProvider {
             var url = components
             if let page { url.queryItems?.append(URLQueryItem(name: "page", value: page)) }
             let payload = try await HTTPTransport.get(url.url!, headers: headers)
-            guard let buckets = payload["data"] as? [[String: Any]] else { throw ProviderFailure.invalidData("Der Anbieter liefert ein unbekanntes Kostenformat.") }
+            guard let buckets = payload["data"] as? [[String: Any]] else { throw ProviderFailure.invalidData(tr("Der Anbieter liefert ein unbekanntes Kostenformat.")) }
             for bucket in buckets {
                 let cost = try ProviderParsing.costBucket(bucket, provider: configuration.provider)
                 total += cost
@@ -176,13 +176,13 @@ public struct APIProvider: UsageProvider {
             }
             if payload["has_more"] as? Bool != true { break }
             page = payload["next_page"] as? String
-            guard page != nil, index < 9 else { throw ProviderFailure.invalidData("Kostenbericht ist zu groß oder unvollständig.") }
+            guard page != nil, index < 9 else { throw ProviderFailure.invalidData(tr("Kostenbericht ist zu groß oder unvollständig.")) }
         }
         var windows: [QuotaWindow] = []
         if let budget = configuration.monthlyBudget, budget > 0 {
-            windows.append(QuotaWindow(id: "budget", title: "Eigenes Monatsbudget", usedPercent: total / budget * 100, resetsAt: end, duration: end.timeIntervalSince(start)))
+            windows.append(QuotaWindow(id: "budget", title: tr("Eigenes Monatsbudget"), usedPercent: total / budget * 100, resetsAt: end, duration: end.timeIntervalSince(start)))
         }
-        return AccountSnapshot(configurationID: configuration.id, identity: identity, plan: "API · Organisation", source: "Abrechnung des Anbieters", windows: windows,
-                               money: [MoneyMetric(id: "month", title: "Dieser Monat", amount: total)], dailyUsage: daily, notice: "Abrechnungsdaten können zeitverzögert eintreffen. Monat nach UTC.")
+        return AccountSnapshot(configurationID: configuration.id, identity: identity, plan: tr("API · Organisation"), source: tr("Abrechnung des Anbieters"), windows: windows,
+                               money: [MoneyMetric(id: "month", title: tr("Dieser Monat"), amount: total)], dailyUsage: daily, notice: tr("Abrechnungsdaten können zeitverzögert eintreffen. Monat nach UTC."))
     }
 }

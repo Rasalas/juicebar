@@ -26,8 +26,8 @@ public enum SecretStore {
         if status == errSecItemNotFound {
             var new = query; attributes.forEach { new[$0] = $1 }
             new[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            guard SecItemAdd(new as CFDictionary, nil) == errSecSuccess else { throw ProviderFailure.unavailable("Schlüssel konnte nicht im Schlüsselbund gespeichert werden.") }
-        } else if status != errSecSuccess { throw ProviderFailure.unavailable("Schlüsselbund ist nicht verfügbar.") }
+            guard SecItemAdd(new as CFDictionary, nil) == errSecSuccess else { throw ProviderFailure.unavailable(tr("Schlüssel konnte nicht im Schlüsselbund gespeichert werden.")) }
+        } else if status != errSecSuccess { throw ProviderFailure.unavailable(tr("Schlüsselbund ist nicht verfügbar.")) }
     }
     public static func remove(account: String) {
         SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account] as CFDictionary)
@@ -50,23 +50,23 @@ public enum HTTPTransport {
             switch response.statusCode {
             case 200..<300: break
             case 401: throw ProviderFailure.authentication
-            case 403: throw ProviderFailure.unsupported("Der Anbieter verweigert den Zugriff. Berechtigungen und aktives Abonnement prüfen.")
+            case 403: throw ProviderFailure.unsupported(tr("Der Anbieter verweigert den Zugriff. Berechtigungen und aktives Abonnement prüfen."))
             case 429:
                 let raw = response.value(forHTTPHeaderField: "Retry-After") ?? ""
                 let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
                 formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
                 let delay = Double(raw) ?? formatter.date(from: raw)?.timeIntervalSinceNow ?? 300
                 throw ProviderFailure.rateLimited(max(60, min(delay, 86400)))
-            case 404: throw ProviderFailure.unsupported("Diese Datenquelle ist für das Konto nicht verfügbar.")
+            case 404: throw ProviderFailure.unsupported(tr("Diese Datenquelle ist für das Konto nicht verfügbar."))
             default: throw ProviderFailure.network
             }
-            guard response.expectedContentLength <= 2_000_000 else { throw ProviderFailure.invalidData("Die Anbieterantwort ist zu groß.") }
+            guard response.expectedContentLength <= 2_000_000 else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
             var data = Data()
             for try await byte in bytes {
                 data.append(byte)
-                guard data.count <= 2_000_000 else { throw ProviderFailure.invalidData("Die Anbieterantwort ist zu groß.") }
+                guard data.count <= 2_000_000 else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
             }
-            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure.invalidData("Unbekanntes Antwortformat. Adapter aktualisieren.") }
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure.invalidData(tr("Unbekanntes Antwortformat. Adapter aktualisieren.")) }
             return object
         } catch let error as ProviderFailure { throw error }
         catch is CancellationError { throw CancellationError() }
@@ -90,9 +90,9 @@ public enum JSONValue {
     }
     public static func title(duration: TimeInterval?, fallback: String) -> String {
         guard let duration, duration > 0 else { return fallback }
-        if duration == 604800 { return "Woche" }
-        if duration >= 86400 { return "\(Int(duration / 86400)) Tage" }
-        if duration >= 3600 { return "\(Int(duration / 3600)) Stunden" }
-        return "\(Int(duration / 60)) Minuten"
+        if duration == 604800 { return tr("Woche") }
+        if duration >= 86400 { return tr("{0} Tage", Int(duration / 86400)) }
+        if duration >= 3600 { return tr("{0} Stunden", Int(duration / 3600)) }
+        return tr("{0} Minuten", Int(duration / 60))
     }
 }

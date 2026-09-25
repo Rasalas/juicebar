@@ -31,14 +31,14 @@ public enum ClaudeHistory {
                 // Profile copies can repeat the same cache; use the maximum, not a sum.
                 value.tokens = max(value.tokens, tokens); value.archivedTokens = value.tokens
                 value.archivedMessages = max(value.archivedMessages, Int(count))
-                if tokens > 0 { value.unpricedModels.insert("Claude-Tagesstatistik ohne Token-Aufschlüsselung") }
+                if tokens > 0 { value.unpricedModels.insert(tr("Claude-Tagesstatistik ohne Token-Aufschlüsselung")) }
                 recovered[day] = value
             }
         }
         if !recovered.isEmpty {
             report.days += recovered.values
             report.days.sort { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
-            report.notices.append("\(recovered.count) ältere Claude-Tage aus dem Statistik-Cache ergänzt. Nachrichten enthalten auch Nutzer- und Werkzeugnachrichten. Für diese Tageswerte fehlen die Token-Arten zur Kostenberechnung.")
+            report.notices.append(tr("{0} ältere Claude-Tage aus dem Statistik-Cache ergänzt. Nachrichten enthalten auch Nutzer- und Werkzeugnachrichten. Für diese Tageswerte fehlen die Token-Arten zur Kostenberechnung.", recovered.count))
         }
     }
 }

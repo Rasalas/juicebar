@@ -1,3 +1,4 @@
+import JuicebarCore
 import SwiftUI
 #if JUICEBAR_DIRECT
 import Sparkle
@@ -15,7 +16,7 @@ import Sparkle
     private var controller: SPUStandardUpdaterController?
     #endif
 
-    var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Entwicklung" }
+    var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? tr("Entwicklung") }
 
     func start() {
         #if JUICEBAR_DIRECT

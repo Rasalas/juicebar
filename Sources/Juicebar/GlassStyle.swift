@@ -106,14 +106,14 @@ struct JuiceMenuPicker<Selection: Hashable>: View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    Text(options.first { $0.1 == selection }?.0 ?? "Auswählen").lineLimit(1)
+                    Text(options.first { $0.1 == selection }?.0 ?? tr("Auswählen")).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                 }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 11).padding(.vertical, 8)
                     .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 9))
                     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.primary.opacity(0.1)))
             }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).frame(maxWidth: 245)
-                .accessibilityLabel(title).accessibilityValue(options.first { $0.1 == selection }?.0 ?? "Auswählen")
+                .accessibilityLabel(title).accessibilityValue(options.first { $0.1 == selection }?.0 ?? tr("Auswählen"))
         }.opacity(enabled ? 1 : 0.4)
     }
 }

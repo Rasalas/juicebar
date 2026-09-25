@@ -85,6 +85,6 @@ final class UsageCostTests: XCTestCase {
         let second = try ActivityImport.read(roots: [], databasePath: file.path, hosts: [], directory: root, now: now)
         XCTAssertEqual(second.0.days.first?.tokens, 140)
         XCTAssertEqual(second.0.days.first?.apiCost, first.0.days.first?.apiCost)
-        XCTAssertTrue(second.0.warnings.contains { $0.contains("bleibt erhalten") })
+        XCTAssertTrue(second.0.warnings.contains { $0.contains(tr("OpenCode lokal")) })
     }
 }

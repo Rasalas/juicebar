@@ -2,7 +2,7 @@
 
 Decision, 25 September 2026: publish Juicebar as MIT-licensed open source. Keep direct downloads and their updates free. Offer a paid Mac App Store edition when its integrations work within the sandbox and it passes review. No purchase check belongs in quota collection, warnings, history or the direct updater.
 
-The store price has not been chosen. GitHub Sponsors and one-time contributions are optional support channels, not conditions for using the app. Ordinary fixes and provider compatibility updates are included. This does not promise perpetual maintenance.
+The proposed store price is EUR 9.99 once; it has not been configured or published. See the [pricing proposal](app-store/pricing.md). GitHub Sponsors and one-time contributions are optional support channels, not conditions for using the app. Ordinary fixes and provider compatibility updates are included. This does not promise perpetual maintenance.
 
 ## Platform status
 
@@ -28,10 +28,10 @@ Both official channels should use the same source tag and version. Store review 
 
 ## Model metadata
 
-Aliases and prices are bundled today. A future signed, versioned data catalog can update confirmed names and prices independently of app binaries. It must have schema validation, size limits, source dates, bundled fallback and rollback to the last valid version. It must never load executable provider code or guess model identities. Shipping this catalog is a separate implementation task; the current app does not fetch it.
+Aliases and prices ship in the app and can update independently through a signed, versioned data catalog. The implementation validates signatures, schema, size, source dates and revisions, and keeps bundled and previous valid fallbacks. It never loads executable provider code or guesses model identities. See [catalog maintenance](model-catalog.md).
 
 ## Mac App Store feasibility
 
-The current app is not sandboxed or store-ready. First validate selected log folders with security-scoped bookmarks, local CLI execution, access to existing credentials, SSH keys/agent behavior and provider service terms. Store approval is not guaranteed. Do not remove core functionality from the direct edition to force parity.
+The current app is not sandboxed or store-ready. A separate sandbox prototype can read explicitly selected folders and retrieve OpenCode Go quotas, but cannot launch the externally installed Codex CLI. Claude credential data was unavailable without interaction. See the [measured results and next implementation work](sandbox-feasibility.md), plus the [listing draft](app-store/listing-en.md). Store approval is not guaranteed. Do not remove core functionality from the direct edition to force parity.
 
 Sources: [App Sandbox](https://developer.apple.com/documentation/security/app_sandbox), [sandbox file access](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox), [Apple business models](https://developer.apple.com/app-store/business-models/), [Sparkle setup](https://sparkle-project.org/documentation/).

@@ -18,14 +18,14 @@ public enum DemoData {
     }
     public static func snapshots(now: Date = Date()) -> [AccountSnapshot] {
         [AccountSnapshot(configurationID: "demo-codex", identity: "demo-codex", plan: "Pro 20×", observedAt: now, source: "Beispieldaten",
-                         windows: [QuotaWindow(id: "week", title: "Woche", usedPercent: 38, resetsAt: now.addingTimeInterval(3 * 86400), duration: 604800),
-                                   QuotaWindow(id: "short", title: "5 Stunden", usedPercent: 24, resetsAt: now.addingTimeInterval(2.5 * 3600), duration: 18000)],
-                         benefits: [ResetBenefit(id: "reset-demo", title: "Angesparter Reset", scope: "Codex-Limits", expiresAt: now.addingTimeInterval(18 * 3600))], benefitCount: 1, benefitsChecked: true),
+                         windows: [QuotaWindow(id: "week", title: tr("Woche"), usedPercent: 38, resetsAt: now.addingTimeInterval(3 * 86400), duration: 604800),
+                                   QuotaWindow(id: "short", title: tr("5 Stunden"), usedPercent: 24, resetsAt: now.addingTimeInterval(2.5 * 3600), duration: 18000)],
+                         benefits: [ResetBenefit(id: "reset-demo", title: tr("Angesparter Reset"), scope: "Codex-Limits", expiresAt: now.addingTimeInterval(18 * 3600))], benefitCount: 1, benefitsChecked: true),
          AccountSnapshot(configurationID: "demo-claude", identity: "demo-claude", plan: "Max 20×", observedAt: now, source: "Beispieldaten",
-                         windows: [QuotaWindow(id: "five_hour", title: "5 Stunden", usedPercent: 64, resetsAt: now.addingTimeInterval(2 * 3600), duration: 18000),
-                                   QuotaWindow(id: "seven_day", title: "Woche", usedPercent: 47, resetsAt: now.addingTimeInterval(2 * 86400), duration: 604800)], benefitsChecked: true),
+                         windows: [QuotaWindow(id: "five_hour", title: tr("5 Stunden"), usedPercent: 64, resetsAt: now.addingTimeInterval(2 * 3600), duration: 18000),
+                                   QuotaWindow(id: "seven_day", title: tr("Woche"), usedPercent: 47, resetsAt: now.addingTimeInterval(2 * 86400), duration: 604800)], benefitsChecked: true),
          AccountSnapshot(configurationID: "demo-go", identity: "demo-go", plan: "Go", observedAt: now, source: "Beispieldaten",
-                         windows: [QuotaWindow(id: "rolling", title: "5 Stunden", usedPercent: 12, resetsAt: now.addingTimeInterval(4 * 3600), duration: nil, supportsPace: false),
-                                   QuotaWindow(id: "monthly", title: "Monat", usedPercent: 31, resetsAt: now.addingTimeInterval(8 * 86400), duration: nil, supportsPace: false)])]
+                         windows: [QuotaWindow(id: "rolling", title: tr("5 Stunden"), usedPercent: 12, resetsAt: now.addingTimeInterval(4 * 3600), duration: nil, supportsPace: false),
+                                   QuotaWindow(id: "monthly", title: tr("Monat"), usedPercent: 31, resetsAt: now.addingTimeInterval(8 * 86400), duration: nil, supportsPace: false)])]
     }
 }

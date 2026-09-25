@@ -2,12 +2,12 @@ import Foundation
 
 public enum QuotaDisplay: String, Codable, CaseIterable, Sendable {
     case remaining, used
-    public var label: String { self == .remaining ? "Verbleibend" : "Verbraucht" }
+    public var label: String { self == .remaining ? tr("Verbleibend") : tr("Verbraucht") }
     public func value(used: Double) -> Double { self == .remaining ? max(0, 100 - used) : max(0, used) }
 }
 public enum TrayStyle: String, Codable, CaseIterable, Sendable {
     case lines, focused
-    public var label: String { self == .lines ? "Alle Konten · Limitlinien" : "Ein Limit" }
+    public var label: String { self == .lines ? tr("Alle Konten · Limitlinien") : tr("Ein Limit") }
     public init(from decoder: Decoder) throws {
         let value = try decoder.singleValueContainer().decode(String.self)
         switch value {
@@ -34,9 +34,9 @@ public enum QuotaOrder {
     public static func windows(_ windows: [QuotaWindow]) -> [QuotaWindow] {
         func rank(_ w: QuotaWindow) -> Int {
             if w.title.contains(" · ") || w.id.hasPrefix("model.") { return 3 }
-            if w.title == "5 Stunden" || (w.duration.map { $0 < 86400 } ?? false) { return 0 }
-            if w.title == "Woche" { return 1 }
-            if w.title == "Monat" || w.id == "budget" { return 2 }
+            if ["5 Stunden", "5 hours"].contains(w.title) || (w.duration.map { $0 < 86400 } ?? false) { return 0 }
+            if w.duration == 604800 || ["Woche", "Week"].contains(w.title) { return 1 }
+            if ["Monat", "Month"].contains(w.title) || w.id == "budget" { return 2 }
             return 3
         }
         return windows.sorted { rank($0) == rank($1) ? $0.id < $1.id : rank($0) < rank($1) }
@@ -55,9 +55,9 @@ public struct TrayMeter: Identifiable {
             if duration == 18000 { return "5h" }
             if duration < 86400 { return "\(Int(duration / 3600))h" }
         }
-        if window.title.lowercased().contains("woche") { return "W" }
-        if window.title.lowercased().contains("monat") { return "M" }
-        return window.title == "5 Stunden" ? "5h" : String(window.title.prefix(5))
+        if ["woche", "week"].contains(where: { window.title.lowercased().contains($0) }) { return "W" }
+        if ["monat", "month"].contains(where: { window.title.lowercased().contains($0) }) { return "M" }
+        return ["5 Stunden", "5 hours"].contains(window.title) ? "5h" : String(window.title.prefix(5))
     }
 }
 public enum TraySelection {
@@ -158,7 +158,7 @@ public struct ActivityReport: Codable, Sendable {
             guard let alias = ModelAliases.resolve(model: event.model, provider: event.provider) else { return nil }
             return "\(event.model) → \(alias.displayName)"
         }).sorted()
-        self.notices = notices + (resolved.isEmpty ? [] : ["Veröffentlichte Modell-Aliase: " + resolved.joined(separator: "; ") + ". Auch ältere Nutzung wird zum aktuellen API-Gegenwert bewertet; die damals kostenlose Preview bleibt in gemeldeten Kosten unverändert."])
+        self.notices = notices + (resolved.isEmpty ? [] : [tr("Veröffentlichte Modell-Aliase: ") + resolved.joined(separator: "; ") + tr(". Auch ältere Nutzung wird zum aktuellen API-Gegenwert bewertet; die damals kostenlose Preview bleibt in gemeldeten Kosten unverändert.")])
         self.warnings = warnings; observedAt = now
     }
 }

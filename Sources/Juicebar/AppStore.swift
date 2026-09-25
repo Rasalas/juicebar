@@ -36,7 +36,7 @@ final class AppStore: ObservableObject {
     private var activityTask: Task<Void, Never>?
     private var activityWorker: Task<(ActivityReport, LocalUsageReport?), Error>?
     @Published var storageError: String?
-    @Published var notificationStatus = "Nicht aktiviert"
+    @Published var notificationStatus = tr("Nicht aktiviert")
     @Published var localDatabasePath = ""
     let isDemo: Bool
     private let database: HistoryDatabase
@@ -62,9 +62,10 @@ final class AppStore: ObservableObject {
                 database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
             } catch {
                 database = try! HistoryDatabase(path: ":memory:")
-                startupError = "Der Verlauf ist nur für diese Sitzung verfügbar: \(error.localizedDescription)"
+                startupError = tr("Der Verlauf ist nur für diese Sitzung verfügbar: {0}", error.localizedDescription)
             }
         }
+        if !demo { ModelCatalog.shared.configure(directory: directory) }
         accounts = demo ? DemoData.accounts : ((try? database.read([AccountConfiguration].self, key: "accounts")) ?? [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)])
         settings = (try? database.read(MonitorSettings.self, key: "settings")) ?? MonitorSettings()
         manualResets = (try? database.read([ManualReset].self, key: "manual-resets")) ?? []
@@ -164,7 +165,7 @@ final class AppStore: ObservableObject {
             }
             // Manual expiration dates also work for disconnected accounts.
             for account in accounts where account.enabled {
-                var snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: "Manuell")
+                var snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: tr("Manuell"))
                 snapshot = withManualResets(snapshot)
                 await notify(account: account, snapshot: snapshot)
             }
@@ -192,7 +193,7 @@ final class AppStore: ObservableObject {
             guard permission.authorizationStatus == .authorized || permission.authorizationStatus == .provisional else { return }
             try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: events[0].id, content: content, trigger: nil))
             for event in events { try database.saveWarning(event); warnings.insert(event, at: 0) }
-        } catch { storageError = "Warnung konnte nicht gespeichert oder zugestellt werden. \(error.localizedDescription)" }
+        } catch { storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", error.localizedDescription) }
     }
 
     func enableNotifications() async {
@@ -205,22 +206,22 @@ final class AppStore: ObservableObject {
         } catch { notificationStatus = error.localizedDescription }
     }
     func updateNotificationStatus() async {
-        guard !isDemo else { notificationStatus = "Im Demo-Modus deaktiviert"; return }
+        guard !isDemo else { notificationStatus = tr("Im Demo-Modus deaktiviert"); return }
         let status = await UNUserNotificationCenter.current().notificationSettings()
         switch status.authorizationStatus {
         case .authorized:
             let banner = status.alertSetting == .enabled && status.alertStyle != .none
-            notificationStatus = "Banner: \(banner ? "an" : "aus") · macOS-Ton: \(status.soundSetting == .enabled ? "an" : "aus")"
-        case .provisional: notificationStatus = "Nur stille Zustellung erlaubt · Banner in macOS aktivieren"
-        case .denied: notificationStatus = "In den macOS-Systemeinstellungen gesperrt"
-        default: notificationStatus = "Noch nicht freigegeben"
+            notificationStatus = tr("Banner: {0} · macOS-Ton: {1}", banner ? tr("an") : tr("aus"), status.soundSetting == .enabled ? tr("an") : tr("aus"))
+        case .provisional: notificationStatus = tr("Nur stille Zustellung erlaubt · Banner in macOS aktivieren")
+        case .denied: notificationStatus = tr("In den macOS-Systemeinstellungen gesperrt")
+        default: notificationStatus = tr("Noch nicht freigegeben")
         }
     }
     func testNotification() async {
         guard !isDemo else { return }
         await updateNotificationStatus()
-        let content = UNMutableNotificationContent(); content.title = "Juicebar ist bereit"
-        content.body = settings.soundEnabled ? "Test für Banner und Hinweiston." : "Test für Banner. Der Hinweiston ist in Juicebar ausgeschaltet."
+        let content = UNMutableNotificationContent(); content.title = tr("Juicebar ist bereit")
+        content.body = settings.soundEnabled ? tr("Test für Banner und Hinweiston.") : tr("Test für Banner. Der Hinweiston ist in Juicebar ausgeschaltet.")
         if settings.soundEnabled { content.sound = .default }
         do { try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)) }
         catch { notificationStatus = error.localizedDescription }
@@ -233,7 +234,7 @@ final class AppStore: ObservableObject {
     }
     func saveAccount(_ account: AccountConfiguration, secret: String) throws {
         if let old = accounts.first(where: { $0.id == account.id }), old.provider != account.provider {
-            throw ProviderFailure.unavailable("Für einen anderen Anbieter bitte ein neues Konto hinzufügen.")
+            throw ProviderFailure.unavailable(tr("Für einen anderen Anbieter bitte ein neues Konto hinzufügen."))
         }
         if !secret.isEmpty && !isDemo { try SecretStore.save(secret, account: account.id) }
         if let index = accounts.firstIndex(where: { $0.id == account.id }) {
@@ -268,12 +269,13 @@ final class AppStore: ObservableObject {
     func loadLocalUsage() {
         guard !localUsageLoading, !isDemo else { return }
         nextActivityImport = Date().addingTimeInterval(300)
-        localUsageLoading = true; activityProgress = "Nutzungsdaten werden aktualisiert …"
+        localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
         let path = localDatabasePath.isEmpty ? nil : localDatabasePath
         let roots = ActivityLogs.defaultRoots(accounts: accounts)
         let owner = self, hosts = sshHosts, directory = storageDirectory
         let worker = Task.detached(priority: .utility) {
-            try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory) { message in
+            if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
+            return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory) { message in
                 Task { @MainActor in owner.activityProgress = message }
             }
         }
@@ -293,7 +295,7 @@ final class AppStore: ObservableObject {
     }
     func addSSHHost(_ host: String) throws {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard SSHActivity.isValidHost(host) else { throw ProviderFailure.invalidData("Bitte einen SSH-Alias wie workstation oder user@host eingeben.") }
+        guard SSHActivity.isValidHost(host) else { throw ProviderFailure.invalidData(tr("Bitte einen SSH-Alias wie workstation oder user@host eingeben.")) }
         guard !sshHosts.contains(host) else { return }
         sshHosts.append(host); try database.write(sshHosts, key: "ssh-hosts"); reloadActivitySources()
     }
@@ -309,7 +311,7 @@ final class AppStore: ObservableObject {
     func cancelActivityImport() { activityWorker?.cancel(); activityTask?.cancel() }
     func selectLocalDatabase() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
-        panel.message = "OpenCode-Datenbank nur lesend öffnen"
+        panel.message = tr("OpenCode-Datenbank nur lesend öffnen")
         if panel.runModal() == .OK, let url = panel.url { localDatabasePath = url.path; reloadActivitySources() }
     }
     var trayMeters: [TrayMeter] {

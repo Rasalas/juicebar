@@ -11,7 +11,7 @@ final class ParsingTests: XCTestCase {
     func testCodexPrimaryCanBeWeekAndUnknownInventoryDatesStayUnknown() throws {
         let payload: [String: Any] = ["accountId": "a", "rateLimits": ["primary": ["usedPercent": 0.5, "windowDurationMins": 10080, "resetsAt": 1900000000]], "rateLimitResetCredits": ["availableCount": 3, "credits": [["id": "r", "status": "available", "expiresAt": NSNull()]]]]
         let snapshot = try ProviderParsing.codex(payload, configuration: .init(provider: .codex))
-        XCTAssertEqual(snapshot.windows.first?.title, "Woche")
+        XCTAssertEqual(snapshot.windows.first?.title, tr("Woche"))
         XCTAssertEqual(snapshot.windows.first?.usedPercent, 0.5)
         XCTAssertEqual(snapshot.benefitCount, 3)
         XCTAssertEqual(snapshot.benefits.count, 1)
