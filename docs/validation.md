@@ -60,3 +60,9 @@ When the MacBook is available, install the public release from GitHub, then run 
 ### Resource observation
 
 The installed 0.1.0 build was sampled every 30 seconds for 30 minutes, 61 samples, while development continued. The main process used 18.0–189.9 MiB resident memory and ended at 127.7 MiB. Sampled CPU ranged from 0 to 0.6%. There was no sustained upward resident-memory trend across the interval. This is a limited observation, not proof of leak freedom; it excludes short spikes between samples, compressed memory and separate provider/SSH child processes. The 0.1.1 build still needs its own longer observation.
+
+### Public 0.1.1 update
+
+The public stable feed offered 0.1.1 to installed 0.1.0. Remind Me Later closed the dialog, and another manual check offered the update again. The installed app then relaunched as 0.1.1, build 3. Developer ID, notarization ticket and Gatekeeper assessment passed. All four previously stored configuration groups matched their pre-update hashes; both usage caches and 361 quota observations were still present. Codex, Claude and OpenCode Go returned current quotas after launch.
+
+The public catalog and appcast were byte-for-byte identical to the locally validated release files. GitHub macOS CI passed for release commit `e4382d7`; the Pages deployment succeeded. A forced failed-download test is still outstanding.
