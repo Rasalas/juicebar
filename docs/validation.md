@@ -34,3 +34,5 @@ Notification delivery was observed in Notification Center. macOS can suppress th
 Developer ID signing and notarization, installing on another Mac, and a real old-to-new Sparkle update are required before the first official direct binary. Compiling the updater is not equivalent to verifying delivery. App Store sandbox compatibility/review and Windows/Linux ports are not complete.
 
 The source and direct-download app bundles both build and pass deep signature verification with ad-hoc signing. The direct bundle includes Sparkle and its licenses; a test archive produces an Ed25519-signed appcast. This is a packaging smoke test, not a notarization or installed-update test.
+
+The first public [macOS CI run](https://github.com/Rasalas/juicebar/actions/runs/36184823187) also passed on the macos-15 runner, including source packaging and direct-updater compilation. This does not replace installation testing across supported macOS versions.

@@ -1,5 +1,7 @@
 # Juicebar
 
+[![macOS checks](https://github.com/Rasalas/juicebar/actions/workflows/build.yml/badge.svg)](https://github.com/Rasalas/juicebar/actions/workflows/build.yml)
+
 A native macOS menu bar app for Codex, Claude and OpenCode usage. See your remaining quota, catch approaching limits and compare activity across your computers.
 
 **Early preview · macOS 14+ · SwiftUI/AppKit · MIT license**
