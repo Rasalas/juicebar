@@ -31,8 +31,14 @@ Notification delivery was observed in Notification Center. macOS can suppress th
 
 ## Distribution checks still outstanding
 
-Developer ID signing and notarization, installing on another Mac, and a real old-to-new Sparkle update are required before the first official direct binary. Compiling the updater is not equivalent to verifying delivery. App Store sandbox compatibility/review and Windows/Linux ports are not complete.
+Installing on another Mac and broader supported-version coverage remain outstanding. Signing, notarization and the installed update path have now been exercised as described below. App Store sandbox compatibility/review and Windows/Linux ports are not complete.
 
 The source and direct-download app bundles both build and pass deep signature verification with ad-hoc signing. The direct bundle includes Sparkle and its licenses; a test archive produces an Ed25519-signed appcast. This is a packaging smoke test, not a notarization or installed-update test.
 
 The first public [macOS CI run](https://github.com/Rasalas/juicebar/actions/runs/36184823187) also passed on the macos-15 runner, including source packaging and direct-updater compilation. This does not replace installation testing across supported macOS versions.
+
+## First direct release
+
+Version 0.1.0 build 2 is Developer ID signed and accepted by Apple's notary service. The ticket was stapled, validated and accepted by `spctl`. A notarized build 1 with an explicit candidate feed found the public prerelease through Sparkle, downloaded it, offered installation and relaunched as build 2. The installed build uses the normal stable feed. Account, settings, SSH-source and path hashes were unchanged; usage-day and response counts were retained. Codex, Claude and OpenCode Go returned fresh values after relaunch.
+
+Sparkle's signature tool accepted the original archive and rejected a modified copy. Feed version, archive length and checksum were checked. No signing key or account secret is included in the repository or release assets. Cancellation, forced network failure and installation on another Mac remain additional coverage, not claims of this test.

@@ -21,7 +21,9 @@ The current interface is German. Contributions toward localization are welcome.
 
 ## Install or build
 
-There is no notarized public binary yet. [Releases](https://github.com/Rasalas/juicebar/releases) will carry official downloads when signing and end-to-end update delivery have been verified. CI artifacts are development builds, not reviewed releases.
+Download the [latest macOS preview](https://github.com/Rasalas/juicebar/releases/latest). The official archive is for Apple Silicon, signed with Developer ID and notarized by Apple. Unzip it, move Juicebar.app to Applications and launch it. App updates are delivered through Sparkle and remain free.
+
+The first release was verified on the development Mac, including an installed old-to-new update. Broader hardware and macOS-version testing is still needed. CI artifacts are development builds, not official downloads.
 
 To build from source, install Xcode with Swift 6 on macOS 14 or newer:
 

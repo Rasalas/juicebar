@@ -1,6 +1,6 @@
 # Releasing Juicebar
 
-Source publication is independent of the paid store edition. The current repository has no notarized public download and no App Store listing. Never advertise a development CI artifact as a supported signed release.
+Source publication is independent of the paid store edition. The first direct download is signed and notarized; there is no App Store listing. Never advertise a development CI artifact as a supported signed release.
 
 ## Source and CI
 
