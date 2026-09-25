@@ -29,6 +29,7 @@ if [[ "$distribution" == direct ]]; then
 fi
 python3 - "$app/Contents/Info.plist" <<'PY'
 import base64, os, plistlib, re, sys
+from urllib.parse import urlparse
 path = sys.argv[1]
 with open(path, 'rb') as f:
     info = plistlib.load(f)
@@ -46,7 +47,11 @@ if os.environ.get('JUICEBAR_DISTRIBUTION') == 'direct':
         valid_key = False
     if not valid_key:
         raise SystemExit('A direct build needs JUICEBAR_UPDATE_PUBLIC_KEY (Sparkle Ed25519 public key).')
-    info.update(SUFeedURL='https://github.com/Rasalas/juicebar/releases/latest/download/appcast.xml',
+    feed = os.environ.get('JUICEBAR_UPDATE_FEED_URL', 'https://github.com/Rasalas/juicebar/releases/latest/download/appcast.xml')
+    parsed = urlparse(feed)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise SystemExit('The update feed must be an HTTPS URL without credentials.')
+    info.update(SUFeedURL=feed,
                 SUPublicEDKey=key, SUEnableAutomaticChecks=True, SUAutomaticallyUpdate=False,
                 SUEnableSystemProfiling=False, SUScheduledCheckInterval=86400)
 with open(path, 'wb') as f:
