@@ -12,7 +12,9 @@ window_rect = ((180, 180), (640, 400))
 icon_locations = {'Juicebar.app': (170, 200), 'Applications': (470, 200)}
 icon_size = 96
 text_size = 13
-hide_extensions = ['Juicebar.app']
+# Do not change FinderInfo on the signed app bundle.
+hide_extensions = []
+grid_spacing = 90
 default_view = 'icon-view'
 show_status_bar = False
 show_tab_view = False
