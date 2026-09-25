@@ -9,9 +9,10 @@ cd "$(dirname "$0")/.."
 [[ "$JUICEBAR_SIGN_IDENTITY" == 'Developer ID Application:'* ]] || { echo 'Developer ID Application identity required.' >&2; exit 1; }
 export JUICEBAR_DISTRIBUTION=direct
 swift package resolve
-sparkle_bin="$PWD/.build/artifacts/sparkle/Sparkle/bin"
+bash scripts/setup-release-tools.sh
+sparkle_bin="${JUICEBAR_RELEASE_TOOLS:-$HOME/Library/Application Support/Juicebar Release Tools}"
 export JUICEBAR_UPDATE_PUBLIC_KEY
-JUICEBAR_UPDATE_PUBLIC_KEY="$("$sparkle_bin/generate_keys" --account juicebar -p)"
+JUICEBAR_UPDATE_PUBLIC_KEY="$(cat assets/sparkle-public-key.txt)"
 bash scripts/build-app.sh
 release_dir="dist/releases/$JUICEBAR_VERSION"
 if [[ -e "$release_dir" ]]; then

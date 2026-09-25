@@ -56,3 +56,7 @@ The project website was checked at 1280 px and 390 px widths with no horizontal 
 A configured MacBook SSH alias was found but connection to port 22 timed out. No remote changes were made. Fresh-Mac installation remains unverified.
 
 When the MacBook is available, install the public release from GitHub, then run `bash scripts/check-installed-app.sh /Applications/Juicebar.app`. Also verify first launch without bypassing Gatekeeper, fresh Codex/Claude/OpenCode connections, notification permission and sound, sleep/wake, and one Sparkle update. A signature check on the development Mac is not a substitute for this test.
+
+### Resource observation
+
+The installed 0.1.0 build was sampled every 30 seconds for 30 minutes, 61 samples, while development continued. The main process used 18.0–189.9 MiB resident memory and ended at 127.7 MiB. Sampled CPU ranged from 0 to 0.6%. There was no sustained upward resident-memory trend across the interval. This is a limited observation, not proof of leak freedom; it excludes short spikes between samples, compressed memory and separate provider/SSH child processes. The 0.1.1 build still needs its own longer observation.

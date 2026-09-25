@@ -14,10 +14,10 @@ The last accepted envelope is written atomically in the app's data folder. The p
 
 1. Confirm names/prices with primary provider sources. Update the source date for every changed entry. Do not infer an alpha model's identity from its behavior.
 2. Edit the bundled JSON, increment `revision`, and run `swift test`.
-3. Sign with the existing local Keychain key:
+3. Install stable signed maintainer tools using `scripts/setup-release-tools.sh` with `JUICEBAR_SIGN_IDENTITY` if needed. Sign with the existing local Keychain key:
 
    ```sh
-   swift scripts/sign-catalog.swift Sources/JuicebarCore/Resources/model-catalog.json site/catalog/model-catalog.signed.json
+   bash scripts/sign-catalog.sh Sources/JuicebarCore/Resources/model-catalog.json site/catalog/model-catalog.signed.json
    ```
 
 4. Review the data diff and verify the envelope against the bundled public key. Commit the catalog and envelope; the Pages workflow publishes `site/`.

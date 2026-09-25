@@ -55,3 +55,19 @@ For the first end-to-end test, publish the candidate as a GitHub prerelease, lea
 ## Website and model data
 
 The Pages workflow deploys `site/` when its files change on main. Catalog-only updates follow [model-catalog.md](model-catalog.md) and need no app release. Never upload an unsigned catalog. App Store preparation and its current sandbox blocker are tracked in [sandbox-feasibility.md](sandbox-feasibility.md).
+
+## Repeated Keychain prompts during release signing
+
+Sparkle's downloaded command-line tools are ad-hoc signed. The release script now installs maintainer tools in `~/Library/Application Support/Juicebar Release Tools`, signs them with the configured Developer ID and a stable identifier, and reuses that location. It verifies the signing team and source hash before reuse. The app's public Sparkle key comes from `assets/sparkle-public-key.txt`, so a release no longer reads a private Keychain item just to obtain its public key.
+
+The first use of the newly signed `generate_appcast` may require one explicit Always Allow approval. Two consecutive archive-signing calls subsequently completed unattended in 0.09 and 0.05 seconds on the development Mac. This does not change access for all applications or export the private key.
+
+`setup-release-tools.sh` also builds a stable signed `sign_catalog` client. Use `bash scripts/sign-catalog.sh` instead of interpreting its Swift source for ordinary catalog updates. Its own Keychain item may require a first approval for the new identity. The private keys stay in Keychain.
+
+To check that Keychain access completes unattended after initial authorization:
+
+```sh
+python3 scripts/check-release-key-access.py dist/releases/0.1.1/Juicebar-0.1.1-macOS-arm64.zip
+```
+
+The check signs a temporary feed twice and fails if either invocation waits longer than 15 seconds. It does not publish files or print secret key material.
