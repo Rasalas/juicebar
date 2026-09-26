@@ -98,3 +98,12 @@ The screenshot command renders the current native views offscreen in English and
 The app and DMG were Developer ID signed, notarized and stapled. The public DMG and feed matched the tested local files. Copying the app out of the public DMG preserved its signature, notarization ticket and Gatekeeper acceptance. The Sparkle archive passed Ed25519 verification; changing one byte made verification fail.
 
 Installed 0.1.3 offered the 0.1.4 prerelease; dismissing the offer and checking again offered it again. Sparkle downloaded, installed and relaunched 0.1.4 build 6. All four account/settings/SSH/path configuration hashes remained unchanged, both usage caches were retained, and quota observations increased from 1,511 to 1,517. Codex, Claude/Fable and OpenCode Go returned fresh limits. The temporary candidate-feed override was removed, then the same tested release assets were promoted to stable. A forced failed-download test and installation on a second Mac remain outstanding.
+
+
+## Juicebars 0.1.5 branding, 26 September
+
+The app now uses three blue, terracotta and lavender bars, generated from one geometry for SVG, in-app PNG and ICNS. English and German native screenshots were refreshed, along with the project website and portfolio. Website checks covered desktop and mobile layouts; the portfolio typecheck, build and four browser tests passed. All 50 Swift tests, three collector tests, tray layout and activity persistence checks passed. Both macOS CI runs for `4805ad7` passed.
+
+The app and DMG passed Developer ID signing, notarization, stapling and Gatekeeper assessment. The public DMG matched the local artifact byte for byte. The updater archive verified against the bundled Ed25519 public key; a modified archive failed verification.
+
+Installed 0.1.4 updated through Sparkle to the 0.1.5 prerelease, build 7. The installed app's name and icon match the new assets, and signature/notarization checks passed. Account, settings, SSH and path configuration hashes remained unchanged; both usage caches were retained and observations increased from 1,550 to 1,556. The temporary candidate feed override was removed before promoting the tested artifacts to stable. Existing bundle, executable, storage and URL identifiers remain unchanged for compatibility.
