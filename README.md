@@ -25,7 +25,7 @@ The interface supports English and German, follows the system language and offer
 
 ## Install or build
 
-Download the [latest macOS preview](https://github.com/Rasalas/juicebar/releases/latest). The official archive is for Apple Silicon, signed with Developer ID and notarized by Apple. Unzip it, move Juicebar.app to Applications and launch it. App updates are delivered through Sparkle and remain free.
+Download the [latest macOS preview](https://github.com/Rasalas/juicebar/releases/latest). The official DMG is for Apple Silicon, signed with Developer ID and notarized by Apple. Open it, drag Juicebar.app to Applications, eject the disk image and launch Juicebar from Applications. App updates are delivered through Sparkle and remain free.
 
 The first release was verified on the development Mac, including an installed old-to-new update. Broader hardware and macOS-version testing is still needed. CI artifacts are development builds, not official downloads.
 
@@ -52,13 +52,25 @@ open -n "$HOME/Applications/Juicebar.app" --args --demo
 
 Enable notifications explicitly in **Warnings → Enable**, or **Warnungen → Aktivieren**. macOS Focus and display-sharing settings can suppress banners and sounds even if a notification appears in Notification Center.
 
+## Refresh screenshots
+
+On macOS with Swift 6 and Python 3.9 or later:
+
+```sh
+python3 scripts/update-screenshots.py
+# Also update the German portfolio page in its sibling checkout:
+python3 scripts/update-screenshots.py --portfolio ../tbuck-www
+```
+
+This builds the current app and renders its real views offscreen with synthetic data in English and German. It refreshes the website images, screenshot drafts and HTML image dimensions. No desktop capture, provider login or changes to your accounts are involved. The command does not commit or publish; review the resulting images first.
+
 ## Connections
 
 | Provider | Data | Prerequisite or limitation |
 | --- | --- | --- |
 | ChatGPT / Codex | Reported quota windows and banked reset expiry | Logged-in Codex CLI; app-server integration tested with 0.157.0 |
 | Claude subscription | Short, weekly and additional model limits; plan tier | Logged-in Claude Code CLI; experimental usage interface tested with 2.1.241 |
-| Claude reset offers | Inventory and expiry when available | Optional private endpoint using locally accessible credentials; manual reminders remain available |
+| Claude reset offers | Manual expiry reminders | Automatic reset inventory is not available; no subscription-token extraction or private reset endpoint |
 | OpenCode Go | Short, weekly and monthly quota | Active Go subscription and local OpenCode Go API key, or a key entered in Juicebar |
 | OpenCode Zen | Local activity and estimated API equivalent | No verified balance endpoint |
 | OpenRouter | Balance and total spending | Management key; not live-verified yet |

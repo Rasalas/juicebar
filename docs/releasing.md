@@ -29,8 +29,8 @@ Run the documented validation suite first. Use a clean checkout of the source ta
 ```sh
 python3 -m venv .artifacts/dmg-tools
 .artifacts/dmg-tools/bin/pip install -r scripts/dmg-requirements.txt
-export JUICEBAR_VERSION=0.1.3
-export JUICEBAR_BUILD=5
+export JUICEBAR_VERSION=0.1.4
+export JUICEBAR_BUILD=6
 export JUICEBAR_SIGN_IDENTITY='Developer ID Application: YOUR NAME (TEAMID)'
 export JUICEBAR_NOTARY_PROFILE=juicebar-notary
 bash scripts/package-release.sh
@@ -55,6 +55,8 @@ References: [Developer ID and notarization](https://developer.apple.com/develope
 For the first end-to-end test, publish the candidate as a GitHub prerelease, leaving it out of the stable feed. Build the older test app with `JUICEBAR_UPDATE_FEED_URL=https://github.com/Rasalas/juicebar/releases/download/v0.1.0/appcast.xml` and a lower build number. Only that test app reads the explicit candidate feed. The new official build uses the default stable feed. Promote the same prerelease after installation succeeds; do not rebuild or replace the tested archive.
 
 ## Website and model data
+
+Run `python3 scripts/update-screenshots.py` after UI changes. Add `--portfolio ../tbuck-www` to refresh the German portfolio images too. The command builds the source variant once, renders English and German fixture views in fresh temporary directories, validates the PNGs and updates their HTML dimensions. It does not publish or access real accounts. Review the website at desktop and mobile widths before committing.
 
 Public download buttons must point directly to the signed DMG. The ZIP is reserved for Sparkle updates. Update the versioned links in `site/index.html` and `site/help.html` only after the release assets are public; verify the served file and checksum. Intel, Windows and Linux must not receive an incompatible download by default.
 

@@ -110,6 +110,9 @@ import JuicebarCore
         let tray = TrayView(store: store, maximumHeight: 1000)
             .environment(\.colorScheme, .dark)
         let traySize = NSHostingView(rootView: tray).fittingSize
+        try renderView(tray.background(Color(nsColor: .windowBackgroundColor)), size: traySize,
+                       appearance: appearance,
+                       to: url.deletingLastPathComponent().appendingPathComponent("tray-dark-\(Localization.language).png"))
         let view = VStack(alignment: .leading, spacing: 0) {
             HStack {
                 TrayLabel(store: store)
