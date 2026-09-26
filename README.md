@@ -6,7 +6,7 @@ A native macOS menu bar app for Codex, Claude and OpenCode usage. See your remai
 
 **Early preview · macOS 14+ · SwiftUI/AppKit · MIT license**
 
-Juicebar is open source. Direct downloads and updates are intended to stay free. A paid Mac App Store edition is planned, subject to sandbox compatibility and review. There is no paid feature gate, required donation or Juicebar account. Windows and Linux are possible future ports, not supported platforms today.
+Juicebar is open source. Direct downloads and updates are free. Mac App Store distribution is on hold while equivalent, provider-compliant integrations remain unresolved. There is no paid feature gate, required donation or Juicebar account. Windows and Linux are possible future ports, not supported platforms today.
 
 ## What it does
 
