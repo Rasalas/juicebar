@@ -220,8 +220,8 @@ final class AppStore: ObservableObject {
     func testNotification() async {
         guard !isDemo else { return }
         await updateNotificationStatus()
-        let content = UNMutableNotificationContent(); content.title = tr("Juicebar ist bereit")
-        content.body = settings.soundEnabled ? tr("Test für Banner und Hinweiston.") : tr("Test für Banner. Der Hinweiston ist in Juicebar ausgeschaltet.")
+        let content = UNMutableNotificationContent(); content.title = tr("Juicebars ist bereit")
+        content.body = settings.soundEnabled ? tr("Test für Banner und Hinweiston.") : tr("Test für Banner. Der Hinweiston ist in Juicebars ausgeschaltet.")
         if settings.soundEnabled { content.sound = .default }
         do { try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)) }
         catch { notificationStatus = error.localizedDescription }

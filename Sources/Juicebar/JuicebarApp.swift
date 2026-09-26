@@ -109,7 +109,7 @@ struct TrayLabel: View {
             if meter.expired { return tr("{0} · {1}: Reset erreicht, neuer Stand ausstehend", meter.account.displayName, window.title) }
             return tr("{0} · {1}: {2} % {3}{4}", meter.account.displayName, window.title, Int(store.settings.displayMode.value(used: window.usedPercent).rounded()), store.settings.displayMode.label.lowercased(), meter.fresh ? "" : tr(" · letzter Stand"))
         }
-        return (values.isEmpty ? tr("Juicebar · Keine Limits für die Menüleiste ausgewählt") : values.joined(separator: "\n")) + (store.expiringCount > 0 ? tr("\nReset-Frist läuft bald ab") : "")
+        return (values.isEmpty ? tr("Juicebars · Keine Limits für die Menüleiste ausgewählt") : values.joined(separator: "\n")) + (store.expiringCount > 0 ? tr("\nReset-Frist läuft bald ab") : "")
     }
     var body: some View {
         Image(nsImage: MenuLimitImage.make(meters: store.trayMeters, mode: store.settings.displayMode, dark: colorScheme == .dark, expiring: store.expiringCount > 0))
@@ -124,7 +124,7 @@ struct TrayLabel: View {
         NSApp.setActivationPolicy(.regular)
         if window == nil {
             let value = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-            value.title = "Juicebar"; value.titleVisibility = .hidden; value.titlebarAppearsTransparent = true
+            value.title = "Juicebars"; value.titleVisibility = .hidden; value.titlebarAppearsTransparent = true
             value.isReleasedWhenClosed = false; value.minSize = NSSize(width: 840, height: 620)
             value.delegate = self
             value.contentView = NSHostingView(rootView: DashboardView(store: store))

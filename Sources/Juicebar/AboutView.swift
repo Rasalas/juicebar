@@ -8,7 +8,7 @@ struct AboutView: View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(tr("Über Juicebar")).font(.headline)
+                    Text(tr("Über Juicebars")).font(.headline)
                     Spacer()
                     Text(updates.version).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
@@ -22,7 +22,7 @@ struct AboutView: View {
                 if updates.available {
                     Toggle(tr("Automatisch nach App-Updates suchen"), isOn: Binding(get: { updates.automaticChecks }, set: { updates.automaticChecks = $0 }))
                     Button(tr("Nach App-Updates suchen …"), action: updates.check).disabled(!updates.canCheck)
-                    Text(tr("Updates bleiben kostenlos. Es wird kein Juicebar-Konto benötigt.")).font(.caption).foregroundStyle(.secondary)
+                    Text(tr("Updates bleiben kostenlos. Es wird kein Juicebars-Konto benötigt.")).font(.caption).foregroundStyle(.secondary)
                 } else {
                     Button(tr("Veröffentlichungen ansehen"), action: updates.check)
                     Text(tr("Dieser selbst gebaute Stand hat keinen aktiven Auto-Updater. Neue Versionen und Installationshinweise stehen im Projekt."))

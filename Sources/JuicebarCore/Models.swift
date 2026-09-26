@@ -209,8 +209,8 @@ public enum ProviderFailure: Error, LocalizedError, Equatable {
         case .authentication: return tr("Anmeldung fehlt oder ist abgelaufen. Beim Anbieter erneut anmelden.")
         case .unsupported(let detail), .invalidData(let detail), .unavailable(let detail), .needsSetup(let detail): return detail
         case .timedOut: return tr("Die Abfrage hat zu lange gedauert. Der letzte Stand bleibt sichtbar.")
-        case .rateLimited: return tr("Der Anbieter begrenzt die Abfragen. Juicebar wartet vor dem nächsten Versuch.")
-        case .network: return tr("Verbindung nicht möglich. Juicebar versucht es später erneut.")
+        case .rateLimited: return tr("Der Anbieter begrenzt die Abfragen. Juicebars wartet vor dem nächsten Versuch.")
+        case .network: return tr("Verbindung nicht möglich. Juicebars versucht es später erneut.")
         }
     }
 }

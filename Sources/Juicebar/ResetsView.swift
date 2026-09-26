@@ -51,7 +51,7 @@ struct ResetsView: View {
                     }
                 }
             }
-            Text(tr("Ein Kontingent-Reset und ein befristetes Reset-Angebot sind verschiedene Dinge. Juicebar löst keine Angebote automatisch ein.")).font(.caption).foregroundStyle(.secondary)
+            Text(tr("Ein Kontingent-Reset und ein befristetes Reset-Angebot sind verschiedene Dinge. Juicebars löst keine Angebote automatisch ein.")).font(.caption).foregroundStyle(.secondary)
         }.sheet(isPresented: $adding) { AddResetView(store: store) }
     }
     private func status(_ status: BenefitStatus) -> String {

@@ -1,4 +1,4 @@
-# Juicebar
+# Juicebars
 
 [![macOS checks](https://github.com/Rasalas/juicebar/actions/workflows/build.yml/badge.svg)](https://github.com/Rasalas/juicebar/actions/workflows/build.yml)
 
@@ -6,7 +6,7 @@ A native macOS menu bar app for Codex, Claude and OpenCode usage. See your remai
 
 **Early preview · macOS 14+ · SwiftUI/AppKit · MIT license**
 
-Juicebar is open source. Direct downloads and updates are free. Mac App Store distribution is on hold while equivalent, provider-compliant integrations remain unresolved. There is no paid feature gate, required donation or Juicebar account. Windows and Linux are possible future ports, not supported platforms today.
+Juicebars is open source. Direct downloads and updates are free. Mac App Store distribution is on hold while equivalent, provider-compliant integrations remain unresolved. There is no paid feature gate, required donation or Juicebars account. Windows and Linux are possible future ports, not supported platforms today.
 
 ## What it does
 
@@ -21,11 +21,11 @@ The interface supports English and German, follows the system language and offer
 
 [Website](https://rasalas.github.io/juicebar/) · [Setup & help](https://rasalas.github.io/juicebar/help.html)
 
-![Juicebar overview with sample data](site/assets/overview.png)
+![Juicebars overview with sample data](site/assets/overview.png)
 
 ## Install or build
 
-Download the [latest macOS preview](https://github.com/Rasalas/juicebar/releases/latest). The official DMG is for Apple Silicon, signed with Developer ID and notarized by Apple. Open it, drag Juicebar.app to Applications, eject the disk image and launch Juicebar from Applications. App updates are delivered through Sparkle and remain free.
+Download the [latest macOS preview](https://github.com/Rasalas/juicebar/releases/latest). The official DMG is for Apple Silicon, signed with Developer ID and notarized by Apple. Open it, drag Juicebar.app to Applications, eject the disk image and launch Juicebars from Applications. App updates are delivered through Sparkle and remain free.
 
 The first release was verified on the development Mac, including an installed old-to-new update. Broader hardware and macOS-version testing is still needed. CI artifacts are development builds, not official downloads.
 
@@ -41,7 +41,7 @@ ditto dist/Juicebar.app "$HOME/Applications/Juicebar.app"
 (cd "$HOME" && open "$HOME/Applications/Juicebar.app")
 ```
 
-Quit an existing Juicebar instance before replacing it. A source build uses an ad-hoc signature and does not replace itself through the official updater. Rebuild from a newer source tag to update. Install locally before launching; starting the build bundle on an external drive may trigger a macOS removable-media prompt.
+Quit an existing Juicebars instance before replacing it. A source build uses an ad-hoc signature and does not replace itself through the official updater. Rebuild from a newer source tag to update. Install locally before launching; starting the build bundle on an external drive may trigger a macOS removable-media prompt.
 
 ```sh
 # Synthetic data, without provider requests or persistent settings
@@ -71,12 +71,12 @@ This builds the current app and renders its real views offscreen with synthetic 
 | ChatGPT / Codex | Reported quota windows and banked reset expiry | Logged-in Codex CLI; app-server integration tested with 0.157.0 |
 | Claude subscription | Short, weekly and additional model limits; plan tier | Logged-in Claude Code CLI; experimental usage interface tested with 2.1.241 |
 | Claude reset offers | Manual expiry reminders | Automatic reset inventory is not available; no subscription-token extraction or private reset endpoint |
-| OpenCode Go | Short, weekly and monthly quota | Active Go subscription and local OpenCode Go API key, or a key entered in Juicebar |
+| OpenCode Go | Short, weekly and monthly quota | Active Go subscription and local OpenCode Go API key, or a key entered in Juicebars |
 | OpenCode Zen | Local activity and estimated API equivalent | No verified balance endpoint |
 | OpenRouter | Balance and total spending | Management key; not live-verified yet |
 | OpenAI / Anthropic API | Organization costs for the current UTC month and a user-set budget | Appropriate admin key, not an ordinary model key; not live-verified yet |
 
-Juicebar does not send model prompts to measure quota. Local token counts are not converted into subscription percentages. Additional limits in supported response structures appear dynamically; new authentication methods or incompatible schemas need adapter changes. Private or experimental provider interfaces can change without notice.
+Juicebars does not send model prompts to measure quota. Local token counts are not converted into subscription percentages. Additional limits in supported response structures appear dynamically; new authentication methods or incompatible schemas need adapter changes. Private or experimental provider interfaces can change without notice.
 
 ## History and estimates
 
@@ -86,9 +86,9 @@ API equivalents use the current catalog of standard prices, not historical invoi
 
 ## Privacy and operation
 
-Usage metadata and settings stay under `~/Library/Application Support/Juicebar`. Keys entered in the app go to macOS Keychain. Provider integrations may read existing CLI credentials and contact the selected providers. No conversation contents are retained by Juicebar. [Privacy details](PRIVACY.md).
+Usage metadata and settings stay under `~/Library/Application Support/Juicebar`. Keys entered in the app go to macOS Keychain. Provider integrations may read existing CLI credentials and contact the selected providers. No conversation contents are retained by Juicebars. [Privacy details](PRIVACY.md).
 
-Warnings need the app to be running. Juicebar does not wake a sleeping Mac. Predictions require enough fresh measurements in the same limit window; missing or stale data remains identifiable.
+Warnings need the app to be running. Juicebars does not wake a sleeping Mac. Predictions require enough fresh measurements in the same limit window; missing or stale data remains identifiable.
 
 ## Contribute and support
 
@@ -100,4 +100,16 @@ Warnings need the app to be running. Juicebar does not wake a sleeping Mac. Pred
 
 [Distribution plan](docs/distribution.md) · [Release procedure](docs/releasing.md) · [Validation](docs/validation.md) · [Provider contracts](docs/integration-contracts.md) · [Technology choice](docs/technology-choice.md)
 
-Juicebar is an independent project, not an official product of the connected providers. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+Juicebars is an independent project, not an official product of the connected providers. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Branding
+
+The three bars use blue `#6BA8FF`, terracotta `#ED9E73` and lavender `#B3A3DF` on `#242824`. The logo has fixed colors; provider colors in the menu bar still identify the connected sources.
+
+`scripts/make-icon.swift` defines the artwork and generates the SVG, app PNG and macOS icon from the same geometry:
+
+```sh
+swift scripts/make-icon.swift .artifacts/branding --update-assets
+```
+
+Refresh screenshots after changing the artwork. The bundle identifier, executable name, data directory and existing project URLs retain `juicebar` for compatibility.

@@ -1,6 +1,24 @@
 import AppKit
 
 let destination = URL(fileURLWithPath: CommandLine.arguments[1])
+try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+// Shared geometry for the website SVG, in-app PNG and macOS icon sizes.
+let bars: [(x: Double, fill: Double, hex: String)] = [
+    (13, 0.75, "6BA8FF"), (27, 0.40, "ED9E73"), (41, 0.90, "B3A3DF")
+]
+let updateAssets = CommandLine.arguments.contains("--update-assets")
+let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+if updateAssets {
+    var svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <rect width=\"64\" height=\"64\" rx=\"15\" fill=\"#242824\"/>\n"
+    for bar in bars {
+        svg += "  <g fill=\"#\(bar.hex)\">\n    <rect x=\"\(bar.x)\" y=\"11\" width=\"10\" height=\"42\" rx=\"5\" opacity=\".2\"/>\n"
+        svg += "    <rect x=\"\(bar.x)\" y=\"\(53 - 42 * bar.fill)\" width=\"10\" height=\"\(42 * bar.fill)\" rx=\"5\"/>\n  </g>\n"
+    }
+    svg += "</svg>\n"
+    for path in ["assets/juicebar.svg", "site/assets/juicebar.svg"] {
+        try svg.write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
+    }
+}
 let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-\(UUID()).iconset")
 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: directory) }
@@ -11,24 +29,21 @@ for size in [16, 32, 128, 256, 512] {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
         let s = CGFloat(pixels)
-        // The same segmented droplet as assets/juicebar.svg, in a macOS icon canvas.
         let transform = NSAffineTransform()
         transform.translateX(by: s * 0.06, yBy: s * 0.94)
         transform.scaleX(by: s * 0.88 / 64, yBy: -s * 0.88 / 64)
         transform.concat()
         NSColor(srgbRed: 36 / 255, green: 40 / 255, blue: 36 / 255, alpha: 1).setFill()
         NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 64, height: 64), xRadius: 15, yRadius: 15).fill()
-        let drop = NSBezierPath()
-        drop.move(to: NSPoint(x: 32, y: 9))
-        drop.curve(to: NSPoint(x: 16, y: 38), controlPoint1: NSPoint(x: 28, y: 17), controlPoint2: NSPoint(x: 16, y: 27))
-        drop.curve(to: NSPoint(x: 32, y: 54), controlPoint1: NSPoint(x: 16, y: 46.8366), controlPoint2: NSPoint(x: 23.1634, y: 54))
-        drop.curve(to: NSPoint(x: 48, y: 38), controlPoint1: NSPoint(x: 40.8366, y: 54), controlPoint2: NSPoint(x: 48, y: 46.8366))
-        drop.curve(to: NSPoint(x: 32, y: 9), controlPoint1: NSPoint(x: 48, y: 27), controlPoint2: NSPoint(x: 36, y: 17))
-        drop.close()
-        drop.addClip()
-        NSColor(srgbRed: 1, green: 178 / 255, blue: 97 / 255, alpha: 1).setFill()
-        for (y, height) in [(7.0, 21.0), (32.0, 8.0), (44.0, 12.0)] {
-            NSBezierPath(rect: NSRect(x: 12, y: y, width: 40, height: height)).fill()
+        for bar in bars {
+            let rgb = UInt32(bar.hex, radix: 16)!
+            let color = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255,
+                                green: CGFloat((rgb >> 8) & 255) / 255,
+                                blue: CGFloat(rgb & 255) / 255, alpha: 1)
+            color.withAlphaComponent(0.2).setFill()
+            NSBezierPath(roundedRect: NSRect(x: bar.x, y: 11, width: 10, height: 42), xRadius: 5, yRadius: 5).fill()
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: bar.x, y: 53 - 42 * bar.fill, width: 10, height: 42 * bar.fill), xRadius: 5, yRadius: 5).fill()
         }
         NSGraphicsContext.restoreGraphicsState()
         let name = "icon_\(size)x\(size)\(scale == 2 ? "@2x" : "").png"
@@ -36,6 +51,9 @@ for size in [16, 32, 128, 256, 512] {
         try png.write(to: directory.appendingPathComponent(name))
         if pixels == 1024 {
             try png.write(to: destination.appendingPathComponent("Juicebar.png"))
+            if updateAssets {
+                try png.write(to: root.appendingPathComponent("Sources/Juicebar/Resources/juicebar.png"))
+            }
         }
     }
 }

@@ -17,8 +17,8 @@ for scale in [1, 2] {
         string.draw(at: NSPoint(x: (640 - width) / 2, y: y), withAttributes: attributes)
     }
     let ink = NSColor(srgbRed: 0.14, green: 0.16, blue: 0.14, alpha: 1)
-    text("Juicebar", y: 322, size: 30, color: ink, weight: .semibold)
-    text("Drag Juicebar to Applications to install.", y: 287, size: 15, color: ink)
+    text("Juicebars", y: 322, size: 30, color: ink, weight: .semibold)
+    text("Drag Juicebars to Applications to install.", y: 287, size: 15, color: ink)
     NSColor(srgbRed: 0.67, green: 0.43, blue: 0.18, alpha: 1).setStroke()
     let arrow = NSBezierPath(); arrow.lineWidth = 3; arrow.lineCapStyle = .round; arrow.lineJoinStyle = .round
     arrow.move(to: NSPoint(x: 295, y: 200)); arrow.line(to: NSPoint(x: 345, y: 200))

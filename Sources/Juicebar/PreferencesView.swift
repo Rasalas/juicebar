@@ -9,7 +9,7 @@ struct PreferencesView: View {
     @State private var loginError: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            PageHeading(title: tr("So läuft Juicebar."), subtitle: tr("Unauffällig in der Menüleiste. Du bestimmst, was dort zählt."))
+            PageHeading(title: tr("So läuft Juicebars."), subtitle: tr("Unauffällig in der Menüleiste. Du bestimmst, was dort zählt."))
             Panel {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(tr("Darstellung")).font(.headline)
@@ -56,7 +56,7 @@ struct PreferencesView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(tr("Hintergrund")).font(.headline)
                     JuiceMenuPicker(title: tr("Aktualisieren"), selection: $store.settings.refreshSeconds, options: [(tr("Jede Minute"), 60.0), (tr("Alle 90 Sekunden"), 90.0), (tr("Alle 3 Minuten"), 180.0), (tr("Alle 5 Minuten"), 300.0)])
-                    Text(tr("API-Kosten höchstens alle 5 Minuten. Bei Fehlern wartet Juicebar länger; beim Ruhezustand stoppt die laufende Abfrage.")).font(.caption).foregroundStyle(.secondary)
+                    Text(tr("API-Kosten höchstens alle 5 Minuten. Bei Fehlern wartet Juicebars länger; beim Ruhezustand stoppt die laufende Abfrage.")).font(.caption).foregroundStyle(.secondary)
                     Toggle(tr("Beim Anmelden starten"), isOn: $loginEnabled).disabled(store.isDemo).onChange(of: loginEnabled) { _, enabled in
                         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; loginError = nil }
                         catch { loginError = error.localizedDescription }
@@ -68,7 +68,7 @@ struct PreferencesView: View {
             Panel {
                 VStack(alignment: .leading, spacing: 14) {
                     Label(tr("Lokal gespeichert"), systemImage: "internaldrive").font(.headline)
-                    Text(tr("Juicebar speichert Verbrauchsmessungen, Einstellungen und zugestellte Warnungen. Keine Gesprächsinhalte, keine Telemetrie. Zugangsschlüssel liegen separat im Schlüsselbund.")).font(.callout).foregroundStyle(.secondary)
+                    Text(tr("Juicebars speichert Verbrauchsmessungen, Einstellungen und zugestellte Warnungen. Keine Gesprächsinhalte, keine Telemetrie. Zugangsschlüssel liegen separat im Schlüsselbund.")).font(.callout).foregroundStyle(.secondary)
                     Button(tr("Verlaufsordner öffnen")) {
                         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Juicebar")
                         NSWorkspace.shared.open(url)

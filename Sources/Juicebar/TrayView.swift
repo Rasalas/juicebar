@@ -11,9 +11,9 @@ struct TrayView: View {
                 Button { DashboardWindow.shared.show(store: store) } label: {
                     HStack(spacing: 7) {
                         JuiceLogo().frame(width: 22, height: 22)
-                        Text("juicebar").font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.5)
+                        Text("juicebars").font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.5)
                     }.contentShape(Rectangle())
-                }.buttonStyle(.plain).help(tr("Juicebar öffnen")).accessibilityLabel(tr("Juicebar öffnen"))
+                }.buttonStyle(.plain).help(tr("Juicebars öffnen")).accessibilityLabel(tr("Juicebars öffnen"))
                 Spacer()
                 if store.isRefreshing { ProgressView().controlSize(.small) }
                 Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise") }
@@ -22,7 +22,7 @@ struct TrayView: View {
                     Button(store.isPaused ? tr("Abfragen fortsetzen") : tr("Abfragen pausieren")) { store.isPaused.toggle(); if !store.isPaused { store.refresh(force: true) } }
                     Button(tr("Warnungen 1 Stunde stummschalten")) { store.snooze() }
                     Divider()
-                    Button(tr("Juicebar beenden")) { store.stop(); NSApp.terminate(nil) }
+                    Button(tr("Juicebars beenden")) { store.stop(); NSApp.terminate(nil) }
                 } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.button).menuIndicator(.hidden).buttonStyle(JuiceButtonStyle()).fixedSize()
                     .help(tr("Weitere Aktionen"))

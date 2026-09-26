@@ -288,7 +288,7 @@ struct QuotaHistoryChart: View {
     var body: some View {
         let values = points
         VStack(alignment: .leading, spacing: 14) {
-            Text(tr("Direkte Messwerte der Anbieter seit dem ersten Juicebar-Start. Eine waagerechte Linie bedeutet, dass sich der gemeldete Stand nicht verändert hat. Abo-Prozente lassen sich nicht aus Log-Tokens rekonstruieren.")).font(.caption).foregroundStyle(.secondary)
+            Text(tr("Direkte Messwerte der Anbieter seit dem ersten Juicebars-Start. Eine waagerechte Linie bedeutet, dass sich der gemeldete Stand nicht verändert hat. Abo-Prozente lassen sich nicht aus Log-Tokens rekonstruieren.")).font(.caption).foregroundStyle(.secondary)
             if values.count < 2 { Text(tr("Nach weiteren Abfragen erscheint hier der Verlauf.")).foregroundStyle(.secondary) }
             else {
                 Chart(Array(values.enumerated()), id: \.offset) { _, point in

@@ -31,7 +31,7 @@ struct AccountsView: View {
             Panel {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(tr("Vorhandene Anmeldung verwenden"), systemImage: "lock.shield").font(.headline)
-                    Text(tr("Für Codex und Claude meldest du dich einmal in der jeweiligen CLI an. Juicebar liest deren Verbrauch, ohne eine Modellanfrage zu stellen. Mehrere CLI-Konten lassen sich über getrennte Profilverzeichnisse verbinden.")).font(.callout).foregroundStyle(.secondary)
+                    Text(tr("Für Codex und Claude meldest du dich einmal in der jeweiligen CLI an. Juicebars liest deren Verbrauch, ohne eine Modellanfrage zu stellen. Mehrere CLI-Konten lassen sich über getrennte Profilverzeichnisse verbinden.")).font(.callout).foregroundStyle(.secondary)
                     Text(tr("OpenCode Go kann den vorhandenen lokalen API-Key verwenden. Für Zen gibt es derzeit keinen verifizierten Guthabenabruf; lokale Aktivität findest du unter Nutzung.")).font(.callout).foregroundStyle(.secondary)
                 }
             }
@@ -39,7 +39,7 @@ struct AccountsView: View {
             .alert(tr("Konto entfernen?"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
                 Button(tr("Abbrechen"), role: .cancel) { removing = nil }
                 Button(tr("Entfernen"), role: .destructive) { if let account = removing { store.removeAccount(account) }; removing = nil }
-            } message: { Text(tr("Der lokale Verlauf, manuelle Fristen und der von Juicebar gespeicherte Schlüssel dieses Kontos werden gelöscht. Deine Anbieter-Anmeldung bleibt bestehen.")) }
+            } message: { Text(tr("Der lokale Verlauf, manuelle Fristen und der von Juicebars gespeicherte Schlüssel dieses Kontos werden gelöscht. Deine Anbieter-Anmeldung bleibt bestehen.")) }
     }
 }
 
@@ -73,7 +73,7 @@ struct AccountEditor: View {
                             Label(tr("Go-Key auf diesem Mac gefunden. API-Key unten leer lassen und Speichern wählen."), systemImage: "checkmark.circle")
                                 .font(.caption).foregroundStyle(Palette.green)
                         }
-                        Text(tr("Ein hier gespeicherter Key hat Vorrang. Ohne eigenen Key liest Juicebar den Eintrag opencode-go auf diesem Mac. Ein Browser-Login allein ändert diesen Key nicht.")).font(.caption).foregroundStyle(.secondary)
+                        Text(tr("Ein hier gespeicherter Key hat Vorrang. Ohne eigenen Key liest Juicebars den Eintrag opencode-go auf diesem Mac. Ein Browser-Login allein ändert diesen Key nicht.")).font(.caption).foregroundStyle(.secondary)
                     }
                     SecureField(tr("API-Key"), text: $secret, prompt: Text(tr("Leer lassen, um gespeicherten Key zu behalten")))
                     Text(configuration.provider.keyHelp).font(.caption).foregroundStyle(.secondary)
@@ -109,7 +109,7 @@ struct OpenCodeSetupHelp: View {
             Text(tr("Mit OpenCode Go verbinden")).font(.system(size: 13, weight: .semibold))
             Text(tr("1. In der Konsole mit der bisherigen Anmeldeart anmelden und den Workspace wählen, in dem du Go abgeschlossen hast."))
             Text(tr("2. Wenn unten ein lokaler Go-Key erkannt wird, kannst du ihn direkt übernehmen. Sonst einen vorhandenen Go-Key in das API-Key-Feld eintragen."))
-            Text(tr("3. Speichern wählen. Juicebar prüft die Verbindung und lädt die Limits. Die neue CLI-Anmeldung über opencode console login richtet OpenCode ein; deren Sitzung unterstützt dieser Verbrauchsabruf noch nicht."))
+            Text(tr("3. Speichern wählen. Juicebars prüft die Verbindung und lädt die Limits. Die neue CLI-Anmeldung über opencode console login richtet OpenCode ein; deren Sitzung unterstützt dieser Verbrauchsabruf noch nicht."))
             HStack {
                 Button(tr("Konsole öffnen")) { NSWorkspace.shared.open(URL(string: "https://opencode.ai/console/")!) }
                 Button(tr("Go-Anleitung")) { NSWorkspace.shared.open(URL(string: "https://opencode.ai/v2/docs/console/go")!) }
@@ -131,7 +131,7 @@ struct CLISetupHelp: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(installed ? tr("CLI auf diesem Mac gefunden") : tr("CLI noch nicht gefunden"), systemImage: installed ? "checkmark.circle" : "terminal")
                 .font(.subheadline.weight(.medium))
-            Text(tr("1. CLI installieren, falls sie noch fehlt. 2. Im Terminal anmelden. 3. Hier speichern. Juicebar prüft die Verbindung automatisch."))
+            Text(tr("1. CLI installieren, falls sie noch fehlt. 2. Im Terminal anmelden. 3. Hier speichern. Juicebars prüft die Verbindung automatisch."))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text(command).font(.system(.caption, design: .monospaced)).textSelection(.enabled)

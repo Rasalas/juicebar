@@ -19,7 +19,7 @@ struct WarningsView: View {
                         } else { Button(tr("Aktivieren")) { Task { await store.enableNotifications() } }.buttonStyle(JuiceButtonStyle(prominent: true)).disabled(store.isDemo) }
                     }
                     Toggle(tr("Hinweiston abspielen"), isOn: $store.settings.soundEnabled)
-                    Text(tr("Nur in der Mitteilungszentrale sichtbar? macOS kann Banner und Ton während einer Bildschirmfreigabe oder bei aktivem Fokus unterdrücken, auch wenn beides für Juicebar erlaubt ist.")).font(.caption).foregroundStyle(.secondary)
+                    Text(tr("Nur in der Mitteilungszentrale sichtbar? macOS kann Banner und Ton während einer Bildschirmfreigabe oder bei aktivem Fokus unterdrücken, auch wenn beides für Juicebars erlaubt ist.")).font(.caption).foregroundStyle(.secondary)
                     Button(tr("macOS-Mitteilungseinstellungen öffnen")) { store.openNotificationSettings() }.disabled(store.isDemo)
                     HStack {
                         Button(tr("Testbenachrichtigung")) { Task { await store.testNotification() } }.disabled(!store.settings.notificationsEnabled || store.isDemo)
@@ -42,7 +42,7 @@ struct WarningsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle(tr("Bei zu hohem Verbrauch für den bisherigen Zeitraum"), isOn: $store.settings.paceEnabled)
                         Stepper(tr("Toleranz: {0} Prozentpunkte", Int(store.settings.paceBuffer)), value: $store.settings.paceBuffer, in: 0...40, step: 5).disabled(!store.settings.paceEnabled)
-                        Text(tr("Beispiel: Nach der halben Woche wären 50 % gleichmäßig. Mit 10 Punkten Toleranz warnt Juicebar oberhalb von 60 %.")).font(.caption).foregroundStyle(.secondary)
+                        Text(tr("Beispiel: Nach der halben Woche wären 50 % gleichmäßig. Mit 10 Punkten Toleranz warnt Juicebars oberhalb von 60 %.")).font(.caption).foregroundStyle(.secondary)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {

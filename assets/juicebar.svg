@@ -1,7 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="15" fill="#242824"/>
-  <defs><clipPath id="drop"><path d="M32 9C28 17 16 27 16 38a16 16 0 0 0 32 0C48 27 36 17 32 9Z"/></clipPath></defs>
-  <g fill="#ffb261" clip-path="url(#drop)">
-    <path d="M12 7h40v21H12zM12 32h40v8H12zM12 44h40v12H12z"/>
+  <g fill="#6BA8FF">
+    <rect x="13.0" y="11" width="10" height="42" rx="5" opacity=".2"/>
+    <rect x="13.0" y="21.5" width="10" height="31.5" rx="5"/>
+  </g>
+  <g fill="#ED9E73">
+    <rect x="27.0" y="11" width="10" height="42" rx="5" opacity=".2"/>
+    <rect x="27.0" y="36.2" width="10" height="16.8" rx="5"/>
+  </g>
+  <g fill="#B3A3DF">
+    <rect x="41.0" y="11" width="10" height="42" rx="5" opacity=".2"/>
+    <rect x="41.0" y="15.199999999999996" width="10" height="37.800000000000004" rx="5"/>
   </g>
 </svg>

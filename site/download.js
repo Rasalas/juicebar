@@ -21,9 +21,9 @@
   }
   if (windows || linux) {
     const os = windows ? 'Windows' : 'Linux';
-    unavailable(`${os} version not available yet`, 'Juicebar currently runs on Macs with Apple Silicon.');
+    unavailable(`${os} version not available yet`, 'Juicebars currently runs on Macs with Apple Silicon.');
   } else if (mobile) {
-    unavailable('Available for Mac', 'Open this page on your Mac to install Juicebar.');
+    unavailable('Available for Mac', 'Open this page on your Mac to install Juicebars.');
   } else if (mac) {
     // Safari's "Intel Mac" user-agent also appears on Apple Silicon. Never use it to infer a CPU.
     statuses.forEach(status => { status.textContent = 'Apple Silicon · macOS 14 or later'; });
