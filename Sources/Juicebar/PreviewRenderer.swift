@@ -100,7 +100,37 @@ import JuicebarCore
             throw ProviderFailure.unavailable("Menu artwork encoding failed")
         }
         try menuPNG.write(to: directory.appendingPathComponent("menu-limits.png"))
+        try renderMenuPopover(store: store, to: directory.appendingPathComponent("menu-popover-\(Localization.language).png"))
         print("Rendered previews: \(directory.path)")
+    }
+    /// The shipping views with fixture data, staged without unrelated desktop apps.
+    private static func renderMenuPopover(store: AppStore, to url: URL) throws {
+        let appearance = NSAppearance(named: .darkAqua)!
+        NSApp.appearance = appearance
+        let tray = TrayView(store: store, maximumHeight: 1000)
+            .environment(\.colorScheme, .dark)
+        let traySize = NSHostingView(rootView: tray).fittingSize
+        let view = VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                TrayLabel(store: store)
+                    .padding(.horizontal, 10).frame(height: 25)
+                    .background(.white.opacity(0.10), in: Capsule())
+                Spacer()
+            }
+            .padding(.horizontal, 24).frame(height: 34)
+            .background(Color(red: 0.24, green: 0.28, blue: 0.33))
+            tray
+                .frame(width: traySize.width, height: traySize.height)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.16)))
+                .shadow(color: .black.opacity(0.30), radius: 6, y: 3)
+                .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 16)
+        }
+        .frame(width: traySize.width + 28)
+        .background(Color(red: 0.10, green: 0.12, blue: 0.14))
+        .environment(\.colorScheme, .dark)
+        try renderView(view, size: NSSize(width: traySize.width + 28, height: traySize.height + 56),
+                       appearance: appearance, to: url)
     }
     private static func renderView<V: View>(_ view: V, size: NSSize, appearance: NSAppearance, to url: URL) throws {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
