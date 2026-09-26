@@ -1,5 +1,5 @@
 #!/bin/bash
-# Read-only package checks. Run on the second Mac after installing the official ZIP.
+# Read-only package checks. Run on the second Mac after installing from the official DMG.
 set -euo pipefail
 app="${1:-/Applications/Juicebar.app}"
 test -d "$app"
