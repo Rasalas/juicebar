@@ -59,6 +59,7 @@ struct QuotaBar: View {
     let color: Color
     let now: Date
     var compact = false
+    var status: QuotaStatus = .unavailable
     @Environment(\.quotaDisplay) private var mode
     private var displayed: Double { mode.value(used: window.usedPercent) }
     private var expired: Bool { window.resetsAt.map { $0 <= now } ?? false }
@@ -74,7 +75,7 @@ struct QuotaBar: View {
             GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
                     Capsule().fill(color.opacity(0.12)).frame(height: 6).offset(y: compact ? 7 : 12)
-                    Capsule().fill(expired ? Color.secondary : window.usedPercent >= 90 ? Color.red : color)
+                    Capsule().fill(expired ? Color.secondary : color)
                         .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
                         .offset(y: compact ? 7 : 12)
                     if !expired, let ideal = window.idealPercent(at: now) {
@@ -88,22 +89,65 @@ struct QuotaBar: View {
                 }
                 .frame(height: compact ? 13 : 18, alignment: .topLeading)
             }.frame(height: compact ? 13 : 18)
-            HStack(spacing: 4) {
-                if let reset = window.resetsAt {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 9))
-                    Text(expired ? tr("Reset erreicht · warte auf neuen Stand") : tr("Reset {0}", relativeTime(reset, now: now)))
-                        .help(reset.formatted(Date.FormatStyle(date: .complete, time: .shortened).locale(Localization.locale)))
-                } else { Text(tr("Resetzeit nicht verfügbar")) }
-                Spacer(minLength: 0)
-                if let ideal = window.idealPercent(at: now), !expired {
-                    Label(tr("Soll {0} %", Int(mode.value(used: ideal).rounded())), systemImage: "diamond.fill")
-                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
-                        .help(tr("Erwarteter Füllstand bei gleichmäßiger Nutzung über das gesamte Zeitfenster."))
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    resetLabel.fixedSize()
+                    Spacer(minLength: 0)
+                    statusLabel.fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    resetLabel
+                    statusLabel
                 }
             }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : ""))
+        .accessibilityValue(statusTitle)
+        .accessibilityHint(statusHelp)
+    }
+    private var resetLabel: some View {
+        HStack(spacing: 4) {
+            if let reset = window.resetsAt {
+                Image(systemName: "arrow.clockwise").font(.system(size: 9))
+                Text(expired ? tr("Reset erreicht · warte auf neuen Stand") : tr("Reset {0}", relativeTime(reset, now: now)))
+                    .help(reset.formatted(Date.FormatStyle(date: .complete, time: .shortened).locale(Localization.locale)))
+            } else { Text(tr("Resetzeit nicht verfügbar")) }
+        }
+    }
+    @ViewBuilder private var statusLabel: some View {
+        if status != .unavailable, !expired {
+            HStack(spacing: 3) {
+                if status == .exhausted { Image(systemName: "exclamationmark.circle.fill") }
+                else { Image(systemName: "exclamationmark.triangle") }
+                Text(statusTitle)
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(status == .exhausted ? Color.red : Palette.accent)
+            .help(statusHelp)
+        }
+    }
+    private var statusTitle: String {
+        guard !expired else { return "" }
+        switch status {
+        case .unavailable: return ""
+        case .exhausted: return tr("Limit erreicht")
+        case .projectedPaceCrossing(let date):
+            return tr("Soll in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
+        case .projectedExhaustion(let date):
+            return tr("Limit in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
+        }
+    }
+    private var statusHelp: String {
+        switch status {
+        case .unavailable: return ""
+        case .projectedPaceCrossing:
+            return tr("Bei deinem zuletzt gemessenen Tempo erreichst du voraussichtlich den Sollstand. Die Bewegung der Raute ist eingerechnet. Danach verbrauchst du mehr als gleichmäßig vorgesehen, das Kontingent ist aber noch nicht leer.")
+        case .exhausted:
+            return tr("Das gemeldete Kontingent ist ausgeschöpft. Warte auf den Reset oder nutze einen verfügbaren Reset.")
+        case .projectedExhaustion:
+            return tr("Bei deinem zuletzt gemessenen Tempo ist das Kontingent voraussichtlich vor dem Reset aufgebraucht. Die Schätzung ändert sich mit deiner Nutzung.")
+        }
     }
 }
 

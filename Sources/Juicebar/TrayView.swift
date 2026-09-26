@@ -28,14 +28,19 @@ struct TrayView: View {
                     .help(tr("Weitere Aktionen"))
             }
             accountSections.hidden().accessibilityHidden(true)
-            ScrollView { accountSections }.scrollBounceBehavior(.basedOnSize)
+            ViewThatFits(in: .vertical) {
+                accountSections
+                ScrollView { accountSections }
+                    .scrollIndicators(.hidden)
+                    .scrollBounceBehavior(.basedOnSize)
+            }
             VStack(alignment: .leading, spacing: 10) {
                 if store.expiringCount > 0 {
                     Label(tr("{0} {1} in den nächsten 3 Tagen", store.expiringCount, store.expiringCount == 1 ? tr("Reset-Frist") : tr("Reset-Fristen")), systemImage: "hourglass")
                         .font(.caption).foregroundStyle(Palette.accent)
                 }
                 HStack {
-                    Text(tr("Soll = gleichmäßiger Verbrauch"))
+                    Label(tr("Soll = gleichmäßiger Verbrauch"), systemImage: "diamond.fill")
                     Spacer(minLength: 4)
                     Text(store.isDemo ? tr("Beispieldaten") : store.isPaused ? tr("Pausiert") : updatedText(store.lastChecked, now: store.now))
                 }.font(.system(size: 9)).foregroundStyle(.secondary)
@@ -110,8 +115,11 @@ private struct TrayAccountView: View {
             }
             if let snapshot {
                 VStack(spacing: 14) {
-                    ForEach(visibleWindows) {
-                        QuotaBar(window: $0, color: Palette.provider(account.provider), now: store.now, compact: true)
+                    ForEach(visibleWindows) { window in
+                        QuotaBar(window: window, color: Palette.provider(account.provider), now: store.now, compact: true,
+                                 status: QuotaStatus.assess(window: window, snapshot: snapshot,
+                                                          history: store.history[account.id] ?? [], now: store.now,
+                                                          hasFailure: store.failures[account.id] != nil))
                     }
                 }
                 ForEach(snapshot.money) { metric in

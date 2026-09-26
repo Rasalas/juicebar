@@ -34,6 +34,10 @@ public enum WarningEngine {
         }
         points.append((snapshot.observedAt, window.usedPercent))
         points = Dictionary(points.map { ($0.0, $0.1) }, uniquingKeysWith: { _, new in new }).map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+        // A long unobserved interval cannot describe the current pace. Start again after the last gap.
+        if let restart = points.indices.dropFirst().last(where: { points[$0].0.timeIntervalSince(points[$0 - 1].0) > 600 }) {
+            points = Array(points[restart...])
+        }
         guard points.count >= 3, let first = points.first, let last = points.last,
               last.0.timeIntervalSince(first.0) >= 300, last.1 > first.1 else { return nil }
         var lastIncrease = first.0
@@ -42,13 +46,19 @@ public enum WarningEngine {
             if points[index].1 > points[index - 1].1 { lastIncrease = points[index].0 }
         }
         guard now.timeIntervalSince(lastIncrease) <= 600 else { return nil }
-        let xs = points.map { $0.0.timeIntervalSince(first.0) / 3600 }
-        let ys = points.map(\.1)
-        let xm = xs.reduce(0, +) / Double(xs.count), ym = ys.reduce(0, +) / Double(ys.count)
-        let numerator = zip(xs, ys).reduce(0) { $0 + ($1.0 - xm) * ($1.1 - ym) }
-        let denominator = xs.reduce(0) { $0 + pow($1 - xm, 2) }
-        guard denominator > 0 else { return nil }
-        let rate = numerator / denominator
+        // Average interval rates with a ten-minute half-life. Integrating weights over elapsed
+        // time includes observed idle periods and avoids giving frequent polls extra influence.
+        let decay = log(2.0) / 600
+        var weightedRate = 0.0, totalWeight = 0.0
+        for index in 1..<points.count {
+            let previous = points[index - 1], current = points[index]
+            let seconds = current.0.timeIntervalSince(previous.0)
+            let weight = exp(-now.timeIntervalSince(current.0) * decay) * -expm1(-seconds * decay)
+            weightedRate += (current.1 - previous.1) / seconds * 3600 * weight
+            totalWeight += weight
+        }
+        guard totalWeight > 0 else { return nil }
+        let rate = weightedRate / totalWeight
         guard rate > 0, rate.isFinite else { return nil }
         let date = now.addingTimeInterval((100 - window.usedPercent) / rate * 3600)
         guard date < reset else { return nil }

@@ -173,7 +173,10 @@ struct AccountCard: View {
                 }
                 if let snapshot = store.snapshots[account.id] {
                     ForEach(QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)) { window in
-                        QuotaBar(window: window, color: Palette.provider(account.provider), now: store.now)
+                        QuotaBar(window: window, color: Palette.provider(account.provider), now: store.now,
+                                 status: QuotaStatus.assess(window: window, snapshot: snapshot,
+                                                          history: store.history[account.id] ?? [], now: store.now,
+                                                          hasFailure: store.failures[account.id] != nil))
                     }
                     ForEach(snapshot.money) { metric in
                         HStack {

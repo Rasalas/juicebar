@@ -413,5 +413,11 @@
   "Kopiert": "Copied",
   "Befehl kopieren": "Copy command",
   "CLI installieren": "Install CLI",
-  "Ein gefundenes Programm bestätigt noch keine Anmeldung. Passwörter gehören nur in die Anmeldung des Anbieters.": "Finding the program does not confirm sign-in. Enter passwords only in your provider’s sign-in flow."
+  "Ein gefundenes Programm bestätigt noch keine Anmeldung. Passwörter gehören nur in die Anmeldung des Anbieters.": "Finding the program does not confirm sign-in. Enter passwords only in your provider’s sign-in flow.",
+  "Limit erreicht": "Limit reached",
+  "Das gemeldete Kontingent ist ausgeschöpft. Warte auf den Reset oder nutze einen verfügbaren Reset.": "The reported quota is exhausted. Wait for the reset or use an available reset.",
+  "Bei deinem zuletzt gemessenen Tempo ist das Kontingent voraussichtlich vor dem Reset aufgebraucht. Die Schätzung ändert sich mit deiner Nutzung.": "At your recently measured pace, the quota is expected to run out before reset. The estimate changes with your usage.",
+  "Soll in {0} Min.": "Target in {0} min",
+  "Limit in {0} Min.": "Limit in {0} min",
+  "Bei deinem zuletzt gemessenen Tempo erreichst du voraussichtlich den Sollstand. Die Bewegung der Raute ist eingerechnet. Danach verbrauchst du mehr als gleichmäßig vorgesehen, das Kontingent ist aber noch nicht leer.": "At your recently measured pace, you are expected to reach the target balance. This accounts for the moving target. After that, your usage exceeds the steady allowance, but the quota is not yet exhausted."
 }

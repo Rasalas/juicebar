@@ -18,6 +18,8 @@ import JuicebarCore
     }
     /// MenuBarExtra proposes an intrinsic size, unlike our fixed-size screenshot previews.
     static func verifyTrayLayout() throws {
+        try verifyTrayScrolling()
+        try verifyQuotaColor()
         let store = AppStore(demo: true)
         let host = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) })
         let size = host.fittingSize
@@ -39,6 +41,64 @@ import JuicebarCore
         let manyLimits = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
         guard abs(manyLimits.height - 1000) < 1 else {
             throw ProviderFailure.unavailable("Many limits must stay within the screen height")
+        }
+    }
+    private static func verifyTrayScrolling() throws {
+        let store = AppStore(demo: true)
+        for height: CGFloat in [1000, 500] {
+            let host = NSHostingView(rootView: TrayView(store: store, maximumHeight: height))
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: host.fittingSize),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            func scrollViews(in view: NSView) -> [NSScrollView] {
+                (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap { scrollViews(in: $0) }
+            }
+            let scrolls = scrollViews(in: host)
+            print("Tray at \(Int(height)) pt: \(scrolls.count) scroll views; vertical indicators: \(scrolls.filter(\.hasVerticalScroller).count)")
+            defer { window.close() }
+            if height == 1000 {
+                guard scrolls.isEmpty else { throw ProviderFailure.unavailable("A fitting tray must not create a scroll view") }
+            } else {
+                guard scrolls.count == 1, !scrolls[0].hasVerticalScroller,
+                      let document = scrolls[0].documentView,
+                      document.frame.height > scrolls[0].contentView.bounds.height else {
+                    throw ProviderFailure.unavailable("An overflowing tray must scroll without a persistent indicator")
+                }
+                scrolls[0].contentView.scroll(to: NSPoint(x: 0, y: 50))
+                guard scrolls[0].contentView.bounds.minY > 0 else {
+                    throw ProviderFailure.unavailable("Hidden indicators must not prevent scrolling")
+                }
+            }
+        }
+    }
+    /// Reproduces the reported 10% remaining / 6% expected balance without live accounts.
+    private static func verifyQuotaColor() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let window = QuotaWindow(id: "week", title: "Woche", usedPercent: 90,
+                                 resetsAt: now.addingTimeInterval(10 * 3600 + 35 * 60), duration: 604800)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("quota-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try renderView(QuotaBar(window: window, color: .blue, now: now, compact: true).padding(16),
+                       size: NSSize(width: 380, height: 100), appearance: NSAppearance(named: .darkAqua)!, to: url)
+        let bitmap = NSBitmapImageRep(data: try Data(contentsOf: url))!
+        var redPixels = 0
+        var bluePixels = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                   color.alphaComponent > 0.5, color.redComponent > 0.7,
+                   color.greenComponent < 0.4, color.blueComponent < 0.4 { redPixels += 1 }
+                if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                   color.alphaComponent > 0.5, color.blueComponent > 0.7,
+                   color.redComponent < 0.4 { bluePixels += 1 }
+            }
+        }
+        print("Quota with 10% remaining and 6% expected: \(redPixels) red pixels")
+        guard redPixels == 0, bluePixels > 0 else {
+            throw ProviderFailure.unavailable("A balance above the expected remaining quota must keep its provider color")
         }
     }
     static func render() throws {
@@ -101,7 +161,40 @@ import JuicebarCore
         }
         try menuPNG.write(to: directory.appendingPathComponent("menu-limits.png"))
         try renderMenuPopover(store: store, to: directory.appendingPathComponent("menu-popover-\(Localization.language).png"))
+        try renderQuotaStates(to: directory)
         print("Rendered previews: \(directory.path)")
+    }
+    private static func renderQuotaStates(to directory: URL) throws {
+        let store = AppStore(demo: true)
+        let now = store.now
+        store.snapshots["demo-codex"]?.windows = [
+            QuotaWindow(id: "week", title: tr("Woche"), usedPercent: 90,
+                        resetsAt: now.addingTimeInterval(38100), duration: 604800)
+        ]
+        // Include the reported balance plus every hint and a window without pace data.
+        store.snapshots["demo-claude"]?.windows = [
+            QuotaWindow(id: "five_hour", title: tr("5 Stunden"), usedPercent: 10,
+                        resetsAt: now.addingTimeInterval(14400), duration: 18000),
+            QuotaWindow(id: "seven_day", title: tr("Woche"), usedPercent: 90,
+                        resetsAt: now.addingTimeInterval(38100), duration: 604800),
+            QuotaWindow(id: "model.fable", title: "Fable · \(tr("Woche"))", usedPercent: 100,
+                        resetsAt: now.addingTimeInterval(86400), duration: 604800)
+        ]
+        let snapshot = store.snapshots["demo-claude"]!
+        store.history["demo-claude"] = [600.0, 300.0].map { age in
+            var sample = snapshot
+            sample.observedAt = now.addingTimeInterval(-age)
+            sample.windows[0].usedPercent -= 44 * age / 3600
+            sample.windows[1].usedPercent -= 24 * age / 3600
+            return sample
+        }
+        for mode in QuotaDisplay.allCases {
+            store.settings.quotaDisplay = mode
+            let view = TrayView(store: store, maximumHeight: 1000)
+                .environment(\.colorScheme, .dark).background(Color(nsColor: .windowBackgroundColor))
+            try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: NSAppearance(named: .darkAqua)!,
+                           to: directory.appendingPathComponent("quota-states-\(mode.rawValue)-\(Localization.language).png"))
+        }
     }
     /// The shipping views with fixture data, staged without unrelated desktop apps.
     private static func renderMenuPopover(store: AppStore, to url: URL) throws {

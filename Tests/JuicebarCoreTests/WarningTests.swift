@@ -43,6 +43,38 @@ final class WarningTests: XCTestCase {
         current.identity = "other-login"
         XCTAssertNil(WarningEngine.projection(window: current.windows[0], snapshot: current, history: samples, now: now))
     }
+    func testProjectionWeightsRecentIntervalsMoreHeavilyWithoutDependingOnPollCount() throws {
+        let current = snapshot(percent: 40, resetOffset: 7200)
+        let sparse = [snapshot(percent: 10, age: 1200, resetOffset: 7200), snapshot(percent: 30, age: 600, resetOffset: 7200)]
+        let dense = sparse + [snapshot(percent: 20, age: 900, resetOffset: 7200), snapshot(percent: 35, age: 300, resetOffset: 7200)]
+        for samples in [sparse, dense] {
+            let projection = try XCTUnwrap(WarningEngine.projection(window: current.windows[0], snapshot: current, history: samples, now: now))
+            // Recent ten minutes: 60 points/hour; preceding ten minutes: 120. Recent weight is twice as large.
+            XCTAssertEqual(projection.percentPerHour, 80, accuracy: 0.01)
+        }
+        let accelerating = [snapshot(percent: 10, age: 1200, resetOffset: 7200), snapshot(percent: 20, age: 600, resetOffset: 7200)]
+        let faster = try XCTUnwrap(WarningEngine.projection(window: current.windows[0], snapshot: current, history: accelerating, now: now))
+        XCTAssertEqual(faster.percentPerHour, 100, accuracy: 0.01)
+    }
+    func testIdleMeasurementsReduceRateAndThenHideProjection() throws {
+        let current = snapshot(percent: 80, resetOffset: 7200)
+        let samples = [snapshot(percent: 60, age: 1200, resetOffset: 7200), snapshot(percent: 70, age: 900, resetOffset: 7200),
+                       snapshot(percent: 80, age: 600, resetOffset: 7200), snapshot(percent: 80, age: 300, resetOffset: 7200)]
+        let slowing = try XCTUnwrap(WarningEngine.projection(window: current.windows[0], snapshot: current, history: samples, now: now))
+        XCTAssertEqual(slowing.percentPerHour, 40, accuracy: 0.01)
+        let paused = samples.map { sample in var older = sample; older.observedAt.addTimeInterval(-60); return older }
+        XCTAssertNil(WarningEngine.projection(window: current.windows[0], snapshot: current, history: paused, now: now))
+        let yesterday = samples.map { sample in var older = sample; older.observedAt.addTimeInterval(-86400); return older }
+        XCTAssertNil(WarningEngine.projection(window: current.windows[0], snapshot: current, history: yesterday, now: now))
+    }
+    func testProjectionRestartsAfterAGapInMeasurements() throws {
+        let current = snapshot(percent: 80, resetOffset: 7200)
+        let beforeGap = [snapshot(percent: 20, age: 1800, resetOffset: 7200), snapshot(percent: 30, age: 1500, resetOffset: 7200)]
+        XCTAssertNil(WarningEngine.projection(window: current.windows[0], snapshot: current, history: beforeGap, now: now))
+        let afterGap = [snapshot(percent: 60, age: 600, resetOffset: 7200), snapshot(percent: 70, age: 300, resetOffset: 7200)]
+        let resumed = try XCTUnwrap(WarningEngine.projection(window: current.windows[0], snapshot: current, history: beforeGap + afterGap, now: now))
+        XCTAssertEqual(resumed.percentPerHour, 120, accuracy: 0.01)
+    }
     func testExpiryMostUrgentStageAndManualOffline() {
         var s = snapshot(age: 1000); s.windows = []
         s.benefits = [.init(id: "r", title: "Reset", scope: "week", expiresAt: now.addingTimeInterval(7200), isManual: true)]

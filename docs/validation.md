@@ -17,6 +17,14 @@ All 42 Swift tests and all three Python collector tests pass locally. The Swift 
 
 The tray regression uses SwiftUI's intrinsic size proposal, verifies that ordinary accounts fit, and caps the viewport only when available height is exhausted. The persistence check opens a fresh store over an isolated database and verifies cost/history data before any import. Render previews use synthetic data; they are not screenshots of real accounts.
 
+### Quota hints and tray scrolling, 26 September
+
+The quota bars keep their provider color. Hints show an approaching target crossing, imminent exhaustion or an exhausted limit; the bar and diamond already express the current balance. Predictions use recent history and appear only for events before reset within the next two hours, with exhaustion taking priority. Target crossing accounts for the moving marker: time = current headroom / (measured usage rate − steady target rate). It requires a positive headroom, a faster measured rate, and at least 5% of the window elapsed. Failed, stale and expired measurements do not produce current-status hints; notification preferences are unchanged.
+
+The shared forecast engine averages interval rates from at most the last hour with an exponential ten-minute half-life. Weights cover elapsed time, including observed zero-usage intervals, so a denser polling schedule does not itself change the rate. It requires three measurements spanning at least five minutes and a usage increase within ten minutes. A measurement gap over ten minutes discards the preceding segment. No yesterday-average fallback is used; after a pause, forecasts remain absent until recent observations support them again. Tests cover weighting, polling cadence, idle periods and gaps.
+
+The quota tests cover the moving target, stable or growing headroom, a crossing beyond the prediction horizon, usage already above the target, and limit-warning priority. `--verify-tray-layout` reproduces the reported 90% used / roughly 94% expected case and checks the rendered bar for its provider color. It also verifies that a fitting tray has no native scroll view and that an overflowing tray can scroll with its indicators hidden. Both German and English pass, including the 500 pt height constraint. `--render-previews` additionally writes `quota-states-{remaining,used}-{de,en}.png` for visual inspection of the hints in both display modes. These checks do not install or publish a release.
+
 ## Integrations checked locally
 
 Codex quota and reset data, Claude limits, OpenCode Go limits, local OpenCode history and SSH activity collection were exercised on a development Mac. Existing log files and remote files were not modified. API organization-cost integrations and OpenRouter have fixture coverage but have not been exercised with real admin/management keys.
