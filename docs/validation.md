@@ -117,3 +117,14 @@ The app now uses three blue, terracotta and lavender bars, generated from one ge
 The app and DMG passed Developer ID signing, notarization, stapling and Gatekeeper assessment. The public DMG matched the local artifact byte for byte. The updater archive verified against the bundled Ed25519 public key; a modified archive failed verification.
 
 Installed 0.1.4 updated through Sparkle to the 0.1.5 prerelease, build 7. The installed app's name and icon match the new assets, and signature/notarization checks passed. Account, settings, SSH and path configuration hashes remained unchanged; both usage caches were retained and observations increased from 1,550 to 1,556. The temporary candidate feed override was removed before promoting the tested artifacts to stable. Existing bundle, executable, storage and URL identifiers remain unchanged for compatibility.
+
+
+## Juicebars 0.1.7 quota hints and scrollbar fix, 26 September
+
+All 62 Swift tests, three SSH collector tests, activity persistence and native tray checks pass. The tray checks include the system setting that always shows scrollbars. Both macOS CI runs for release commit `8c38d6e` passed. Updated synthetic screenshots were checked on the website at 1280 and 390 px without horizontal overflow or broken images.
+
+The app and DMG passed Developer ID signing, Apple notarization, ticket stapling and Gatekeeper assessment. The downloaded public DMG matched the local artifact, and copying its app out preserved signature and notarization. The Sparkle archive passed Ed25519 verification; a modified copy failed.
+
+Installed 0.1.5 found the 0.1.7 candidate. Dismissing the offer and checking again worked. Sparkle then downloaded, installed and relaunched 0.1.7 build 9. Four configuration hashes remained identical, both usage caches were retained, and quota observations increased from 1,789 to 1,805. Codex, Claude/Fable and OpenCode Go returned fresh quotas. The live popover showed the new forecast text without a scroll view when its content fitted.
+
+A separate localhost test feed deliberately pointed to a missing update archive. Sparkle displayed a download error and left 0.1.5 installed; the error could be dismissed before the successful update. The temporary feed override was removed, restoring the normal stable feed. The same tested release assets were then promoted to stable. Installation on a second Mac remains outstanding.
