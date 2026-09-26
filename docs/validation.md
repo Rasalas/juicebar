@@ -79,3 +79,11 @@ The website uses the actual `MenuLimitImage` renderer for its quota symbols and 
 A fresh second-Mac installation test remains outstanding. The measured App Store sandbox blockers are unchanged; submission is authorized but no working store build has been submitted.
 
 After publication, the installed 0.1.1 app found 0.1.2 through the stable Sparkle feed, downloaded it, installed it and relaunched as build 4. Deep signature verification passed. Hashes for all four account/settings/SSH/path preference groups remained identical; quota observations increased from 408 to 411. The public Pages deployment succeeded and its primary buttons point directly to the verified DMG. The preview browser reported macOS with `architecture: arm` and displayed the Mac download correctly.
+
+## Store feasibility and Claude access, 26 September
+
+The isolated sandbox probe now supports a bundled Codex helper, official browser login into its own container, quota/reset-offer reads, restart without folder grants and an explicit token-refresh request. A separate Claude Code statusLine experiment exports real five-hour and weekly percentages with reset times. The sandbox consumer reads the selected export folder and retains the original receipt time after restart; access without a grant is denied. See [full results and limits](sandbox-feasibility.md). This is not a submitted store build.
+
+All 50 Swift tests and three Python collector tests passed. Tray layout remains 677 pt normally and 500 pt when constrained. Activity persistence passed. Additional tests cover bounded credential-free exports, malformed input, expired windows and an explicit process working directory containing spaces.
+
+The 0.1.3 build removes direct extraction of Claude OAuth credentials and the private reset-offer request. Its live diagnostic returned Codex quotas/reset inventory, Claude five-hour/weekly/Fable limits, and all three OpenCode Go limits. Claude reset inventory correctly remains unknown. The candidate is Developer ID signed; notarization and public release are pending recovery of Apple authentication. No unnotarized artifact was published or installed over 0.1.2.
