@@ -12,7 +12,9 @@ jobs:
       - name: SSH collector privacy tests
         run: python3 Tests/ssh_usage_test.py
       - name: Menu bar layout regression
-        run: swift run Juicebar --verify-tray-layout
+        run: |
+          swift run Juicebar --verify-tray-layout
+          swift run Juicebar --verify-tray-layout -AppleShowScrollBars Always
       - name: Usage survives restart
         run: swift run Juicebar --verify-activity-persistence
       - name: Build app

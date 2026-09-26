@@ -25,6 +25,8 @@ The shared forecast engine averages interval rates from at most the last hour wi
 
 The quota tests cover the moving target, stable or growing headroom, a crossing beyond the prediction horizon, usage already above the target, and limit-warning priority. `--verify-tray-layout` reproduces the reported 90% used / roughly 94% expected case and checks the rendered bar for its provider color. It also verifies that a fitting tray has no native scroll view and that an overflowing tray can scroll with its indicators hidden. Both German and English pass, including the 500 pt height constraint. `--render-previews` additionally writes `quota-states-{remaining,used}-{de,en}.png` for visual inspection of the hints in both display modes. These checks do not install or publish a release.
 
+The first release candidate, tagged `v0.1.6`, failed the macOS CI scrollbar check and was not published. The same failure reproduces locally with `--verify-tray-layout -AppleShowScrollBars Always`: SwiftUI's `.hidden` still permits the system to show a scroller. The corrected 0.1.7 candidate uses `.never`; the original check and the forced Always case both pass locally. CI now runs both configurations.
+
 ## Integrations checked locally
 
 Codex quota and reset data, Claude limits, OpenCode Go limits, local OpenCode history and SSH activity collection were exercised on a development Mac. Existing log files and remote files were not modified. API organization-cost integrations and OpenRouter have fixture coverage but have not been exercised with real admin/management keys.

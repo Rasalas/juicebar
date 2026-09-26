@@ -31,7 +31,7 @@ struct TrayView: View {
             ViewThatFits(in: .vertical) {
                 accountSections
                 ScrollView { accountSections }
-                    .scrollIndicators(.hidden)
+                    .scrollIndicators(.never)
                     .scrollBounceBehavior(.basedOnSize)
             }
             VStack(alignment: .leading, spacing: 10) {
