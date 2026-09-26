@@ -24,7 +24,7 @@ Juicebar is open source under the MIT license. Buying this edition supports main
 
 English and German. Requires macOS 14 or later and separately obtained provider accounts. Juicebar is an independent project, not affiliated with OpenAI, Anthropic or OpenCode.
 
-Before submission: revise the provider and SSH claims to match the tested sandbox implementation. Do not advertise direct-edition features that the store edition cannot perform.
+Before submission: satisfy the [release criteria](release-criteria.md). The paid edition must be functionally equivalent to the direct edition. Reducing the listing's claims does not justify missing functionality. Then check every claim against the tested sandbox build.
 
 Support URL: https://rasalas.github.io/juicebar/help.html
 

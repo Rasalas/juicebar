@@ -24,6 +24,6 @@ Juicebar ist Open Source unter der MIT-Lizenz. Mit dem Kauf unterstützt du die 
 
 Deutsch und Englisch. Benötigt macOS 14 oder neuer und separat abgeschlossene Anbieter-Konten. Juicebar ist ein unabhängiges Projekt ohne Verbindung zu OpenAI, Anthropic oder OpenCode.
 
-Vor der Einreichung: Beschreibung mit dem tatsächlichen Funktionsumfang des geprüften Sandbox-Builds abgleichen. Keine Funktionen der Direktversion versprechen, die im Store-Build nicht verfügbar sind.
+Vor der Einreichung: Die [Freigabekriterien](release-criteria.md) müssen erfüllt sein. Die Kaufversion muss zur Direktversion funktional gleichwertig sein. Eine gekürzte Beschreibung rechtfertigt keine fehlenden Funktionen. Anschließend alle Angaben mit dem geprüften Sandbox-Build abgleichen.
 
 Preisvorschlag: einmalig 9,99 €. Noch nicht in App Store Connect eingestellt.

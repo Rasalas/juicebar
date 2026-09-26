@@ -1,6 +1,10 @@
 # Distribution and funding
 
+Current decision, 26 September: defer Mac App Store work and promote the free direct app. No store submission or provider inquiry is being sent. Revisit store distribution only when an equivalent, provider-compliant integration is available.
+
 Decision, 25 September 2026: publish Juicebar as MIT-licensed open source. Keep direct downloads and their updates free. Offer a paid Mac App Store edition when its integrations work within the sandbox and it passes review. No purchase check belongs in quota collection, warnings, history or the direct updater.
+
+Release requirement, 26 September: the paid store edition must provide equivalent functionality to the direct edition. A warning in the listing does not justify missing providers, less complete limits or worse background freshness. Do not weaken the direct app to make the comparison pass. See the [store release criteria](app-store/release-criteria.md).
 
 The proposed store price is EUR 9.99 once; it has not been configured or published. See the [pricing proposal](app-store/pricing.md). GitHub Sponsors and one-time contributions are optional support channels, not conditions for using the app. Ordinary fixes and provider compatibility updates are included. This does not promise perpetual maintenance.
 

@@ -27,6 +27,16 @@ for data in arguments.contains("--no-grants") ? [] : UserDefaults.standard.array
 }
 Task {
     var report: [String: Any] = ["date": ISO8601DateFormatter().string(from: Date()), "sandboxed": ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil, "grants": grants.count]
+    if arguments.contains("--bundled-claude-launch") {
+        do { try BundledClaudeLaunchProbe.run(report: &report) }
+        catch { report["error"] = "\((error as NSError).domain) \((error as NSError).code)" }
+        try? FileManager.default.createDirectory(at: reportURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: reportURL.deletingLastPathComponent().appendingPathComponent("bundled-claude-launch-report.json"), options: .atomic)
+        }
+        grants.forEach { $0.stopAccessingSecurityScopedResource() }
+        exit(0)
+    }
     if let path = argument("--claude-statusline") {
         do {
             let observation = try ClaudeStatuslineObservation.read(Data(contentsOf: URL(fileURLWithPath: path)))

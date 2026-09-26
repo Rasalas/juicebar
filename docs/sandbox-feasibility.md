@@ -50,16 +50,36 @@ The Claude exporter writes only validated quota windows and a local receipt time
 
 The actual CLI test used a separate, trusted empty project with project-only settings. Passing statusLine solely through `--settings` while using an empty `--setting-sources` did not invoke it in 2.1.241; project settings did. No global Claude settings were changed. Only short explicit test responses were generated. Automatic monitoring never sends prompts. Claude's ordinary terminal operation and the test exporter run outside the app sandbox; the consumer runs inside it with an explicit folder grant. This is not proof that the sandbox app can launch the external CLI.
 
-The official [statusLine documentation](https://code.claude.com/docs/en/statusline) describes the supported data. Model-specific limits, reset-offer inventory, account identity/multiple accounts and a fresh background poll without an active CLI are not covered by this prototype. The original direct Claude OAuth reset supplement has been removed; see [provider access](provider-access.md). Before calling a store edition equivalent to the direct app, resolve those differences or describe them clearly. Review-compliant exporter onboarding and preservation of an existing user status line also remain unfinished.
+The official [statusLine documentation](https://code.claude.com/docs/en/statusline) describes the supported data. Model-specific limits, reset-offer inventory, account identity/multiple accounts and a fresh background poll without an active CLI are not covered by this prototype. The original direct Claude OAuth reset supplement has been removed; see [provider access](provider-access.md). The maintainer requires functional parity for a paid edition. Merely disclosing these differences does not meet that requirement. A passive exporter may be an additional source, but cannot be the only Claude connection in the paid edition.
 
 Next implementation work:
 
 1. Turn the measured bundled Codex integration into production onboarding and validate failure/account-switch paths. Pin the component and preserve its license/notices. It must always inherit the app sandbox.
 2. Introduce scoped folder connections in the production app. Persist bookmarks, refresh stale bookmarks, release scopes on disconnect and retain history when a folder is temporarily unavailable. The prototype demonstrates the mechanism but is not a production account setup flow.
-3. Turn the credential-free Claude export into a reversible folder connection, preserve existing status-line output and expose freshness/coverage honestly. Do not replace missing fields with private OAuth calls.
+3. Establish a provider-permitted Claude connection with equivalent background freshness and limit coverage. Investigate an unmodified bundled component, including its authentication and distribution conditions. Do not replace missing fields with private OAuth calls. A statusLine-only connection does not meet the release criteria.
 4. Exercise the full SSH collector, keys requiring an agent and offline/reconnect behavior within the sandbox.
 5. Add a store build that excludes Sparkle and external funding links as appropriate, sign with the distribution profile, validate the package and run the same functional checks as the direct app.
-6. Finalize metadata, privacy answers, account/legal details and price, then submit for review. Drafts and sample-data screenshots live in `docs/app-store/`.
+6. Pass the [release criteria](app-store/release-criteria.md), finalize metadata, privacy answers, account/legal details and price, then submit for review. Drafts and sample-data screenshots live in `docs/app-store/`.
+
+## Unmodified bundled Claude launch, 26 September
+
+An additional offline probe copies the installed Claude Code 2.1.241 executable into the app without replacing its upstream signature or changing its bytes. `cmp` and `codesign --verify --strict` pass. A Developer-ID-signed sandbox parent with a fresh bundle ID starts that copy with `--version`, an empty app-owned profile, a minimal environment and no folder grants. The child exits normally with status 0. The report records `sandboxed: true`, `grants: 0` and `version-command-ok: true`.
+
+This rules out a blanket claim that the unchanged binary cannot start from a sandboxed parent. It does not test authenticated SDK control, background quota reads, child access restrictions, an Apple Distribution-signed package or App Store acceptance. No Claude login or model request was performed. Apple documents signing embedded helpers with the developer's team and sandbox inheritance entitlements; Anthropic's published hosting conditions require the binary to remain unmodified. The implications for redistribution and quota-only monitoring are questions for the [provider inquiry](app-store/anthropic-inquiry.md), not conclusions from this launch test.
+
+The first attempt reused the existing probe's bundle ID with a changed signing identity and stalled in macOS sandbox initialization before application code ran. It was terminated. The successful test used its own bundle ID and empty container, preserving the existing Codex test profile. Do not count that initial container-identity stall as a Claude launch failure.
+
+```sh
+JUICEBAR_PROBE_DIRECTORY="$HOME/Applications/Juicebar Claude Launch Probe.app" \
+JUICEBAR_PROBE_BUNDLE_ID=app.juicebar.claude-launch-probe \
+JUICEBAR_PROBE_CLAUDE=/absolute/path/to/claude \
+JUICEBAR_SIGN_IDENTITY='Developer ID Application: your identity' \
+bash scripts/build-sandbox-probe.sh
+open -n "$HOME/Applications/Juicebar Claude Launch Probe.app" --args \
+  --bundled-claude-launch --no-grants
+```
+
+Read `bundled-claude-launch-report.json` in that probe container's `Data/Library/Application Support` directory. The parent gives the child ten seconds, then terminates it. This is a local packaging experiment, not a distributable store component.
 
 ## Reproduce
 
