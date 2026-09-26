@@ -11,13 +11,13 @@ public final class ProcessClient {
     private var bytesRead = 0
     private let maximumResponseBytes: Int
     private let deadline: Date
-    public init(executable: URL, arguments: [String], environment: [String: String] = [:], timeout: TimeInterval = 15, maximumResponseBytes: Int = 2_000_000) throws {
+    public init(executable: URL, arguments: [String], environment: [String: String] = [:], timeout: TimeInterval = 15, maximumResponseBytes: Int = 2_000_000, diagnosticOutput: FileHandle = .nullDevice, workingDirectory: URL = URL(fileURLWithPath: "/private/tmp", isDirectory: true)) throws {
         self.maximumResponseBytes = maximumResponseBytes
         deadline = Date().addingTimeInterval(timeout)
         process.executableURL = executable; process.arguments = arguments
         // The working directory and its environment representation must agree.
         // Otherwise a CLI may inspect the app launcher's unrelated project.
-        process.currentDirectoryURL = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+        process.currentDirectoryURL = workingDirectory
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
         environment.forEach { env[$0] = $1 }
@@ -25,7 +25,7 @@ public final class ProcessClient {
         env.removeValue(forKey: "OLDPWD")
         process.environment = env
         process.standardInput = input; process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
+        process.standardError = diagnosticOutput
         try process.run()
     }
     deinit { close() }

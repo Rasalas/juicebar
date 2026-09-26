@@ -16,6 +16,8 @@ Juicebar ignoriert den exakten Claude-Identifier `nimbus_quill` beim Einlesen un
 
 ## Reset-Fristen und Logos
 
+Ab 0.1.3 liest Juicebar keine Claude-OAuth-Tokens mehr und ruft den privaten Endpunkt für Claude-Reset-Angebote nicht mehr auf. Claude-Ablaufdaten können weiterhin manuell erfasst werden. Hintergrund und verbleibende Grenzen stehen unter [Anbieterzugriff](provider-access.md).
+
 Reset-Fristen stammen aus `rateLimitResetCredits.credits[].expiresAt`. Die Kontokarte und der Popover zeigen den frühesten gemeldeten Ablauf verfügbarer Resets mit Datum und Uhrzeit. Fehlende Fristen bleiben als unbekannt erkennbar.
 
 Das OpenCode-Zeichen verwendet die Geometrie aus `assets/providers/opencode.svg` mit getrennten Farben für Rahmen und inneren Schatten. Einfarbige Template-Darstellung würde diese Unterscheidung verlieren.

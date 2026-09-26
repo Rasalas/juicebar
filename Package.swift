@@ -17,6 +17,7 @@ let package = Package(
                           swiftSettings: directDownload ? [.define("JUICEBAR_DIRECT")] : [],
                           linkerSettings: directDownload ? [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])] : []),
         .executableTarget(name: "SandboxProbe", dependencies: ["JuicebarCore"], path: "scripts/sandbox"),
+        .executableTarget(name: "StatuslineExport", dependencies: ["JuicebarCore"], path: "scripts/statusline-export"),
         .testTarget(name: "JuicebarCoreTests", dependencies: ["JuicebarCore"])
     ],
     swiftLanguageModes: [.v5]

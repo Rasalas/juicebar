@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import Security
 import JuicebarCore
 
 // Standalone feasibility app. Never writes provider credentials or the Juicebar database.
@@ -22,12 +21,39 @@ if arguments.contains("--grant") {
         UserDefaults.standard.set((UserDefaults.standard.array(forKey: "grants") as? [Data] ?? []) + bookmarks, forKey: "grants")
     }
 }
-for data in UserDefaults.standard.array(forKey: "grants") as? [Data] ?? [] {
+for data in arguments.contains("--no-grants") ? [] : UserDefaults.standard.array(forKey: "grants") as? [Data] ?? [] {
     var stale = false
     if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale), !stale, url.startAccessingSecurityScopedResource() { grants.append(url) }
 }
 Task {
     var report: [String: Any] = ["date": ISO8601DateFormatter().string(from: Date()), "sandboxed": ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil, "grants": grants.count]
+    if let path = argument("--claude-statusline") {
+        do {
+            let observation = try ClaudeStatuslineObservation.read(Data(contentsOf: URL(fileURLWithPath: path)))
+            report["source"] = "Claude Code statusLine export"
+            report["receivedAt"] = ISO8601DateFormatter().string(from: observation.receivedAt)
+            report["active-windows"] = observation.activeWindows().map { ["id": $0.id, "usedPercent": $0.usedPercent] as [String: Any] }
+        } catch { report["error"] = "\((error as NSError).domain) \((error as NSError).code)" }
+        try? FileManager.default.createDirectory(at: reportURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: reportURL.deletingLastPathComponent().appendingPathComponent("claude-statusline-report.json"), options: .atomic)
+        }
+        grants.forEach { $0.stopAccessingSecurityScopedResource() }
+        exit(0)
+    }
+    if arguments.contains("--bundled-codex") {
+        func save(_ report: [String: Any]) {
+            try? FileManager.default.createDirectory(at: reportURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: reportURL.deletingLastPathComponent().appendingPathComponent("bundled-codex-report.json"), options: .atomic)
+            }
+        }
+        do { try BundledCodexProbe.run(profile: argument("--codex-profile"), login: arguments.contains("--login") || arguments.contains("--login-browser"), browserLogin: arguments.contains("--login-browser"), refresh: arguments.contains("--refresh"), report: &report, save: save) }
+        catch { report["error"] = "\((error as NSError).domain) \((error as NSError).code)" }
+        save(report)
+        grants.forEach { $0.stopAccessingSecurityScopedResource() }
+        exit(0)
+    }
     for (name, path) in [("codex-profile", ".codex/auth.json"), ("claude-history", ".claude/projects"), ("claude-metadata", ".claude.json"), ("opencode-database", ".local/share/opencode/opencode.db"), ("opencode-auth", ".local/share/opencode/auth.json"), ("ssh-config", ".ssh/config")] {
         let url = URL(fileURLWithPath: realHome).appendingPathComponent(path)
         do {
@@ -36,11 +62,6 @@ Task {
             report[name] = "readable"
         } catch { report[name] = "blocked: \((error as NSError).domain) \((error as NSError).code)" }
     }
-    SecKeychainSetUserInteractionAllowed(false)
-    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "Claude Code-credentials", kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
-    var credential: CFTypeRef?
-    report["claude-keychain-status"] = SecItemCopyMatching(query as CFDictionary, &credential)
-    credential = nil
     if let path = argument("--codex") {
         do { let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); try file.close(); report["codex-binary-read"] = "readable" }
         catch { report["codex-binary-read"] = "blocked" }

@@ -87,28 +87,9 @@ public struct ClaudeProvider: UsageProvider {
             }
             return snapshot
         }
-        var snapshot = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
-        // Supplementary reset offers never trigger a Keychain prompt or refresh a CLI-owned token.
-        if configuration.useLocalCredentials, let token = Self.localOAuthToken(configuration: configuration) {
-            if let payload = try? await HTTPTransport.get(URL(string: "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1")!, headers: ["Authorization": "Bearer \(token)", "anthropic-beta": "oauth-2025-04-20"]),
-               let inventory = ProviderParsing.claudeBenefits(payload) {
-                snapshot.benefits = inventory.benefits; snapshot.benefitCount = inventory.count
-                snapshot.benefitsChecked = true; snapshot.notice = nil
-            }
-        }
-        return snapshot
-    }
-    private static func localOAuthToken(configuration: AccountConfiguration) -> String? {
-        let fm = FileManager.default
-        let directory = configuration.profileDirectory.isEmpty ? fm.homeDirectoryForCurrentUser.appendingPathComponent(".claude") : URL(fileURLWithPath: NSString(string: configuration.profileDirectory).expandingTildeInPath)
-        var text: String?
-        let url = directory.appendingPathComponent(".credentials.json")
-        if let attributes = try? fm.attributesOfItem(atPath: url.path), (attributes[.size] as? Int ?? 0) < 100_000 { text = try? String(contentsOf: url, encoding: .utf8) }
-        if text == nil && configuration.profileDirectory.isEmpty { text = SecretStore.read(service: "Claude Code-credentials") }
-        guard let text, let raw = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
-              let auth = raw["claudeAiOauth"] as? [String: Any], let token = auth["accessToken"] as? String else { return nil }
-        if let expiry = JSONValue.number(auth["expiresAt"]), expiry / 1000 < Date().timeIntervalSince1970 { return nil }
-        return token
+        // Subscription authentication stays inside the unmodified Claude CLI.
+        // Never extract its OAuth credentials or call private subscription endpoints.
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
     private static func localAccount(configuration: AccountConfiguration) -> [String: Any]? {
         let root = FileManager.default.homeDirectoryForCurrentUser

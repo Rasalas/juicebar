@@ -29,8 +29,8 @@ Run the documented validation suite first. Use a clean checkout of the source ta
 ```sh
 python3 -m venv .artifacts/dmg-tools
 .artifacts/dmg-tools/bin/pip install -r scripts/dmg-requirements.txt
-export JUICEBAR_VERSION=0.1.2
-export JUICEBAR_BUILD=4
+export JUICEBAR_VERSION=0.1.3
+export JUICEBAR_BUILD=5
 export JUICEBAR_SIGN_IDENTITY='Developer ID Application: YOUR NAME (TEAMID)'
 export JUICEBAR_NOTARY_PROFILE=juicebar-notary
 bash scripts/package-release.sh

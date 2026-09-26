@@ -9,7 +9,7 @@ Juicebar stores usage information on your Mac. It has no analytics, advertising 
 - Claude's statistics cache to recover aggregate days when detailed logs are unavailable.
 - Optional SSH sources that you configure. The bundled collector runs on the selected host and returns usage metadata, not conversations. No collector is installed on that host.
 
-Keys entered into Juicebar are stored in the macOS Keychain. Some integrations read existing CLI credentials or their Keychain entries. Connecting a source can require an operating-system permission prompt. Juicebar does not ask for full disk access.
+Keys entered into Juicebar are stored in the macOS Keychain. OpenCode can use an API key from its local authentication file. Codex and Claude subscription authentication stays with their CLIs. From version 0.1.3, Juicebar no longer reads Claude OAuth tokens from credential files or Keychain, and no longer calls Claude's private subscription endpoint for reset offers. Connecting a source can require an operating-system permission prompt. Juicebar does not ask for full disk access.
 
 ## What is stored
 

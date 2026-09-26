@@ -85,18 +85,6 @@ public enum ProviderParsing {
                                notice: tr("Reset-Angebote sind noch nicht verfügbar. Ein Ablaufdatum kann manuell ergänzt werden."))
     }
 
-    public static func claudeBenefits(_ payload: [String: Any], now: Date = Date()) -> (benefits: [ResetBenefit], count: Int)? {
-        guard let program = payload["cedar_ember"] as? [String: Any], let grants = program["grants"] as? [[String: Any]] else { return nil }
-        let benefits = grants.compactMap { grant -> ResetBenefit? in
-            guard let id = grant["id"] as? String, let count = JSONValue.number(grant["resets_left"]), count >= 0 else { return nil }
-            let expiry = JSONValue.date(grant["ends_at"])
-            let status: BenefitStatus = count == 0 ? .used : (expiry.map { $0 <= now } ?? false) ? .expired :
-                (grant["paused"] as? Bool == true || grant["usable_now"] as? Bool == false) ? .paused : .available
-            return ResetBenefit(id: id, title: "Reset-Angebot", scope: tr("Geltungsbereich beim Anbieter prüfen"), count: Int(count), expiresAt: expiry, status: status)
-        }
-        return (benefits, benefits.filter { $0.status == .available }.reduce(0) { $0 + $1.count })
-    }
-
     public static func openCodeGo(_ payload: [String: Any], configuration: AccountConfiguration, identity: String, now: Date = Date()) throws -> AccountSnapshot {
         guard let usage = payload["usage"] as? [String: Any] else { throw ProviderFailure.invalidData(tr("OpenCode Go liefert ein unbekanntes Antwortformat.")) }
         let windows: [QuotaWindow] = usage.sorted(by: { $0.key < $1.key }).compactMap { key, value in

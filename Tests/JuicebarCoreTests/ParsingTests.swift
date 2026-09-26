@@ -29,16 +29,12 @@ final class ParsingTests: XCTestCase {
         XCTAssertNil(snapshot.windows.first(where: { $0.id == "five_hour" })?.resetsAt)
         XCTAssertFalse(snapshot.windows.first(where: { $0.id == "future_model" })!.supportsPace)
     }
-    func testClaudeResetStates() throws {
-        let now = Date(timeIntervalSince1970: 1800000000)
-        let result = ProviderParsing.claudeBenefits(["cedar_ember": ["grants": [
-            ["id": "available", "resets_left": 2, "ends_at": 1900000000, "usable_now": true],
-            ["id": "paused", "resets_left": 3, "ends_at": 1900000000, "paused": true],
-            ["id": "expired", "resets_left": 1, "ends_at": 1700000000],
-            ["id": "used", "resets_left": 0]
-        ]]], now: now)!
-        XCTAssertEqual(result.count, 2)
-        XCTAssertEqual(result.benefits.map(\.status), [.available, .paused, .expired, .used])
+    func testClaudeDoesNotClaimAutomaticResetInventory() throws {
+        let snapshot = try ProviderParsing.claude(["rate_limits": ["five_hour": ["utilization": 22, "resets_at": NSNull()]]], configuration: .init(provider: .claude))
+        XCTAssertFalse(snapshot.benefitsChecked)
+        XCTAssertNil(snapshot.benefitCount)
+        XCTAssertTrue(snapshot.benefits.isEmpty)
+        XCTAssertNotNil(snapshot.notice)
     }
     func testGoPercentIsNotFractionAndRollingHasNoPace() throws {
         let snapshot = try ProviderParsing.openCodeGo(["usage": ["rolling": ["percent": 0.5], "weekly": ["percent": 57]]], configuration: .init(provider: .opencodeGo), identity: "a")

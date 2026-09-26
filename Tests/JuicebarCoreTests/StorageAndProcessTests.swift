@@ -3,6 +3,18 @@ import CSQLite
 @testable import JuicebarCore
 
 final class StorageAndProcessTests: XCTestCase {
+    func testChildUsesExplicitDirectoryWithoutLauncherPWD() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar work \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = try ProcessClient(executable: URL(fileURLWithPath: "/usr/bin/python3"),
+            arguments: ["-c", "import os,json; print(json.dumps({'directoryMatches':os.path.samefile(os.getcwd(),os.environ['EXPECTED_DIRECTORY']),'pwdMatches':os.path.samefile(os.getcwd(),os.environ['PWD'])}))"],
+            environment: ["PWD": "/Volumes/unrelated-project", "EXPECTED_DIRECTORY": directory.path], workingDirectory: directory)
+        defer { client.close() }
+        let response = try client.receive { $0["directoryMatches"] != nil }
+        XCTAssertEqual(response["directoryMatches"] as? Bool, true)
+        XCTAssertEqual(response["pwdMatches"] as? Bool, true)
+    }
     func testChildDoesNotInheritUnrelatedProjectDirectory() throws {
         let client = try ProcessClient(executable: URL(fileURLWithPath: "/usr/bin/python3"),
                                        arguments: ["-c", "import os,json; print(json.dumps({'cwd':os.getcwd(),'pwd':os.environ.get('PWD'),'oldpwd':os.environ.get('OLDPWD')}))"],
