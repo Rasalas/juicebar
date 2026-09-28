@@ -18,6 +18,7 @@ final class ModelCatalogTests: XCTestCase {
     func testSignatureSchemaLimitsAndRollback() throws {
         let key = Curve25519.Signing.PrivateKey()
         var doc = ModelCatalog().snapshot
+        let baselineRevision = doc.revision
         try doc.validate()
         let store = ModelCatalog(document: doc, publicKey: key.publicKey.rawRepresentation)
         doc.revision += 1
@@ -35,7 +36,7 @@ final class ModelCatalogTests: XCTestCase {
         doc.schema = 1; doc.rates["gpt-6-astra"]?.input = -1
         XCTAssertThrowsError(try store.install(envelope(doc, key: key)))
         XCTAssertThrowsError(try ModelCatalog.verify(Data(repeating: 0, count: ModelCatalog.maximumBytes + 1), publicKey: key.publicKey.rawRepresentation))
-        XCTAssertEqual(store.snapshot.revision, 2)
+        XCTAssertEqual(store.snapshot.revision, baselineRevision + 1)
     }
     func testCacheSurvivesRestartAndDamagedUpdateFallsBack() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -43,15 +44,15 @@ final class ModelCatalogTests: XCTestCase {
         let key = Curve25519.Signing.PrivateKey(), base = ModelCatalog().snapshot
         func store() -> ModelCatalog { let s = ModelCatalog(document: base, publicKey: key.publicKey.rawRepresentation); s.configure(directory: directory); return s }
         let first = store()
-        var doc = base; doc.revision = 2
+        var doc = base; doc.revision = base.revision + 1
         XCTAssertTrue(try first.install(envelope(doc, key: key)))
-        doc.revision = 3
+        doc.revision = base.revision + 2
         XCTAssertTrue(try first.install(envelope(doc, key: key)))
-        XCTAssertEqual(store().snapshot.revision, 3)
+        XCTAssertEqual(store().snapshot.revision, base.revision + 2)
         try Data("damaged".utf8).write(to: directory.appendingPathComponent("model-catalog.signed.json"))
-        XCTAssertEqual(store().snapshot.revision, 2)
+        XCTAssertEqual(store().snapshot.revision, base.revision + 1)
         try Data("damaged".utf8).write(to: directory.appendingPathComponent("model-catalog.previous.json"))
-        XCTAssertEqual(store().snapshot.revision, 1)
+        XCTAssertEqual(store().snapshot.revision, base.revision)
     }
     func testAliasCollisionAndInvalidProvenanceAreRejected() throws {
         var doc = ModelCatalog().snapshot

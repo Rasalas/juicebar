@@ -43,8 +43,8 @@ final class ActivityTests: XCTestCase {
         let date = ISO8601DateFormatter().date(from: "2026-09-25T23:00:00Z")!
         let events = ActivitySource.allCases.map { ActivityEvent(id: "same-id", source: $0, date: date, model: "m", tokens: 100) }
         let report = ActivityReport(events: events, now: date, calendar: calendar)
-        XCTAssertEqual(report.days.count, 3)
-        XCTAssertEqual(report.days.map(\.tokens).reduce(0, +), 300)
+        XCTAssertEqual(report.days.count, ActivitySource.allCases.count)
+        XCTAssertEqual(report.days.map(\.tokens).reduce(0, +), Double(ActivitySource.allCases.count) * 100)
         XCTAssertEqual(calendar.component(.day, from: report.days[0].day), 26)
     }
     func testCacheInvalidatesChangedFilesWithoutCopyingContent() throws {
@@ -101,15 +101,15 @@ final class ActivityTests: XCTestCase {
     func testMenuShowsEveryLimitInStableAccountOrder() {
         let accounts = [AccountConfiguration(id: "a", provider: .codex), AccountConfiguration(id: "b", provider: .claude)]
         let snapshots = ["a": AccountSnapshot(configurationID: "a", identity: "a", observedAt: now, source: "test", windows: [QuotaWindow(id: "w", title: "Woche", usedPercent: 20, duration: 604800)]),
-                         "b": AccountSnapshot(configurationID: "b", identity: "b", observedAt: now, source: "test", windows: [QuotaWindow(id: "s", title: "5 Stunden", usedPercent: 27, duration: 18000), QuotaWindow(id: "w", title: "Woche", usedPercent: 36, duration: 604800)])]
+                         "b": AccountSnapshot(configurationID: "b", identity: "b", observedAt: now, source: "test", windows: [QuotaWindow(id: "five_hour", title: "5 Stunden", usedPercent: 27, duration: 18000), QuotaWindow(id: "seven_day", title: "Woche", usedPercent: 36, duration: 604800)])]
         var settings = MonitorSettings()
         let meters = TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: [], settings: settings, now: now)
         XCTAssertEqual(meters.map(\.account.id), ["a", "b", "b"])
         XCTAssertEqual(meters.map(\.windowLabel), ["W", "5h", "W"])
         XCTAssertEqual(meters.map { $0.window?.usedPercent }, [20, 27, 36])
         settings.trayStyle = .focused; settings.selectedTrayAccount = "b"
-        XCTAssertEqual(TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: [], settings: settings, now: now).first?.window?.id, "w")
-        settings.selectedTrayWindow = "s"
+        XCTAssertEqual(TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: [], settings: settings, now: now).first?.window?.id, "seven_day")
+        settings.selectedTrayWindow = "five_hour"
         XCTAssertEqual(TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: ["b"], settings: settings, now: now).first?.fresh, false)
         settings.selectedTrayWindow = "removed"
         XCTAssertNil(TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: [], settings: settings, now: now).first?.window)
@@ -130,14 +130,15 @@ final class ActivityTests: XCTestCase {
         let claude = AccountConfiguration(id: "cl", provider: .claude)
         let go = AccountConfiguration(id: "go", provider: .opencodeGo)
         let disabled = AccountConfiguration(id: "off", provider: .codex, enabled: false)
-        let windows = [QuotaWindow(id: "nimbus_quill", title: "Nimbus Quill", usedPercent: 0),
+        let windows = [QuotaWindow(id: "iguana_necktie", title: "Iguana Necktie", usedPercent: 0),
+                       QuotaWindow(id: "nimbus_quill", title: "Nimbus Quill", usedPercent: 0),
                        QuotaWindow(id: "model.fable", title: "Fable · Woche", usedPercent: 95, duration: 604800),
-                       QuotaWindow(id: "week", title: "Woche", usedPercent: 12, resetsAt: now.addingTimeInterval(-1), duration: 604800),
-                       QuotaWindow(id: "short", title: "5 Stunden", usedPercent: 65, duration: 18000)]
+                       QuotaWindow(id: "seven_day", title: "Woche", usedPercent: 12, resetsAt: now.addingTimeInterval(-1), duration: 604800),
+                       QuotaWindow(id: "five_hour", title: "5 Stunden", usedPercent: 65, duration: 18000)]
         let snapshot = AccountSnapshot(configurationID: "cl", identity: "cl", observedAt: now, source: "test", windows: windows)
         let meters = TraySelection.meters(accounts: [go, claude, disabled, codex], snapshots: ["cl": snapshot], failures: ["cl"], settings: MonitorSettings(), now: now)
         XCTAssertEqual(meters.map(\.account.id), ["cx", "cl", "cl", "cl", "go"])
-        XCTAssertEqual(meters.compactMap { $0.window?.id }, ["short", "week", "model.fable"])
+        XCTAssertEqual(meters.compactMap { $0.window?.id }, ["five_hour", "seven_day", "model.fable"])
         XCTAssertTrue(meters[2].expired)
         XCTAssertFalse(meters[1].fresh)
         XCTAssertNil(meters.last?.window)

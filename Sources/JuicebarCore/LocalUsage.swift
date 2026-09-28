@@ -3,6 +3,7 @@ import CSQLite
 
 public struct LocalUsageReport: Codable, Sendable {
     public var events: [ActivityEvent] = []
+    public var importWarnings: [String]?
     public var days: [UsageDay]
     public var models: [ModelUsage]
     public var messageCount: Int
@@ -21,7 +22,7 @@ public struct ModelUsage: Codable, Identifiable, Sendable {
 }
 
 public enum OpenCodeHistory {
-    public static func read(path: String? = nil, now: Date = Date(), lookbackDays: Int = 30) throws -> LocalUsageReport {
+    public static func read(path: String? = nil, now: Date = Date(), lookbackDays: Int = 30, source: ActivitySource = .opencode) throws -> LocalUsageReport {
         let root = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share").path
         let file = path ?? URL(fileURLWithPath: root).appendingPathComponent("opencode/opencode.db").path
         guard FileManager.default.fileExists(atPath: file) else { throw ProviderFailure.unavailable(tr("Keine lokale OpenCode-Datenbank gefunden. OpenCode einmal verwenden oder den Datenbankpfad auswählen.")) }
@@ -81,7 +82,8 @@ public enum OpenCodeHistory {
             + (limited ? tr(" Anzeige auf die neuesten 100.000 Zeilen je Tabelle begrenzt.") : "")
             + (missingCosts ? tr(" Für einige Nachrichten fehlen Kosten.") : "")
         var report = LocalUsageReport(days: days.values.sorted { $0.day < $1.day }, models: models.values.sorted { $0.tokens > $1.tokens }, messageCount: rows.count, notice: note, observedAt: now)
-        report.events = rows.map { id, row in ActivityEvent(id: stableID(id), source: .opencode, date: row.date, model: row.model, provider: row.provider, tokens: row.tokens, usage: row.usage) }
+        report.importWarnings = limited ? [tr("{0}: Import auf die neuesten 100.000 Zeilen je Tabelle begrenzt.", source.name)] : []
+        report.events = rows.map { id, row in ActivityEvent(id: stableID(id), source: source, date: row.date, model: row.model, provider: row.provider, tokens: row.tokens, usage: row.usage, reportedCost: source == .kilo ? row.cost : nil) }
         return report
     }
 }

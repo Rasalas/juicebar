@@ -5,7 +5,7 @@ Juicebars stores usage information on your Mac. It has no analytics, advertising
 ## What the app reads
 
 - Subscription quotas through the Codex and Claude Code CLIs and supported provider endpoints. These tools may contact their providers using your existing login.
-- Local Codex, Claude Code and OpenCode logs and databases to extract timestamps, model identifiers, token counts and reported costs. The parser reads log files containing conversations, but does not retain or upload conversation text.
+- Local Codex, Claude Code, OpenCode, Pi, Gemini CLI, Cline, Roo Code, Kilo and Qwen Code logs and databases, including additional log folders you configure, to extract timestamps, model identifiers, token counts and reported costs. The parser reads log files containing conversations, but does not retain or upload conversation text.
 - Claude's statistics cache to recover aggregate days when detailed logs are unavailable.
 - Optional SSH sources that you configure. The bundled collector runs on the selected host and returns usage metadata, not conversations. No collector is installed on that host.
 
@@ -13,7 +13,7 @@ Keys entered into Juicebars are stored in the macOS Keychain. OpenCode can use a
 
 ## What is stored
 
-Settings, configured account labels and SSH hosts, quota snapshots, warning history and usage metadata are stored under `~/Library/Application Support/Juicebar`. Usage caches retain up to 90 days of metadata; quota storage is capped at 12,000 snapshots and warning history at 180 days. These files can include model names, source paths and opaque message identifiers. They should not be attached to public issues.
+Settings, configured account labels, additional log folder paths and SSH hosts, quota snapshots, warning history and usage metadata are stored under `~/Library/Application Support/Juicebar`. Usage caches retain up to 90 days of metadata; quota storage is capped at 12,000 snapshots and warning history at 180 days. These files can include model names, source paths and opaque message identifiers. They should not be attached to public issues.
 
 Original CLI logs are never modified. Removing Juicebars does not remove these application-support files or Keychain items automatically.
 

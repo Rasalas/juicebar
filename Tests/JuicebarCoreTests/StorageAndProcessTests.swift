@@ -3,6 +3,29 @@ import CSQLite
 @testable import JuicebarCore
 
 final class StorageAndProcessTests: XCTestCase {
+    func testClaudePrefersNativeInstallationOverOlderPackageManagerCopy() throws {
+        let home = URL(fileURLWithPath: "/Users/fixture")
+        let native = home.appendingPathComponent(".local/bin/claude").path
+        let installed = [native, "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+        let result = try ProcessClient.resolveExecutable("claude", homeDirectory: home, isExecutableFile: installed.contains)
+        XCTAssertEqual(result.path, native)
+    }
+
+    func testExecutableFallbacksAndExplicitPaths() throws {
+        let home = URL(fileURLWithPath: "/Users/fixture")
+        let installed = ["/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/opt/homebrew/bin/codex", "/Users/fixture/.local/bin/codex"]
+        XCTAssertEqual(try ProcessClient.resolveExecutable("claude", homeDirectory: home, isExecutableFile: installed.contains).path,
+                       "/opt/homebrew/bin/claude")
+        XCTAssertEqual(try ProcessClient.resolveExecutable("claude", homeDirectory: home, isExecutableFile: { $0 == "/usr/local/bin/claude" }).path,
+                       "/usr/local/bin/claude")
+        XCTAssertEqual(try ProcessClient.resolveExecutable("codex", homeDirectory: home, isExecutableFile: installed.contains).path,
+                       "/opt/homebrew/bin/codex")
+        XCTAssertEqual(try ProcessClient.resolveExecutable("claude", custom: "/custom/claude", homeDirectory: home, isExecutableFile: { _ in true }).path,
+                       "/custom/claude")
+        XCTAssertThrowsError(try ProcessClient.resolveExecutable("claude", custom: "/missing/claude", homeDirectory: home, isExecutableFile: installed.contains))
+        XCTAssertThrowsError(try ProcessClient.resolveExecutable("claude", homeDirectory: home, isExecutableFile: { _ in false }))
+    }
+
     func testChildUsesExplicitDirectoryWithoutLauncherPWD() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar work \(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

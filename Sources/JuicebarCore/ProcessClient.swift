@@ -73,8 +73,18 @@ public final class ProcessClient {
     }
     public static func executable(_ name: String, custom: String = "") throws -> URL {
         let fm = FileManager.default
-        let paths = custom.isEmpty ? ["/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)", "\(fm.homeDirectoryForCurrentUser.path)/.local/bin/\(name)"] : [NSString(string: custom).expandingTildeInPath]
-        guard let path = paths.first(where: { fm.isExecutableFile(atPath: $0) }) else { throw ProviderFailure.missingExecutable(name) }
+        return try resolveExecutable(name, custom: custom, homeDirectory: fm.homeDirectoryForCurrentUser,
+                                     isExecutableFile: fm.isExecutableFile(atPath:))
+    }
+    static func resolveExecutable(_ name: String, custom: String = "", homeDirectory: URL,
+                                  isExecutableFile: (String) -> Bool) throws -> URL {
+        let native = "\(homeDirectory.path)/.local/bin/\(name)"
+        let system = ["/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)"]
+        // Claude's native installer updates this copy. An older npm installation
+        // can remain in Homebrew's bin directory and return cached quota data.
+        let defaults = name == "claude" ? [native] + system : system + [native]
+        let paths = custom.isEmpty ? defaults : [NSString(string: custom).expandingTildeInPath]
+        guard let path = paths.first(where: isExecutableFile) else { throw ProviderFailure.missingExecutable(name) }
         return URL(fileURLWithPath: path)
     }
 }

@@ -10,11 +10,14 @@ import JuicebarCore
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         let event = ActivityEvent(id: "persist", source: .claude, date: Date(), model: "claude-opus-5", tokens: 120, usage: TokenBreakdown(input: 100, output: 20))
         try database.write(ActivityReport(events: [event]), key: "activity-report-v2")
+        let root = ActivityLogs.Root(source: .pi, url: directory.appendingPathComponent("custom-sessions"))
+        try database.write([root], key: "activity-roots")
         let reopened = AppStore(directory: directory)
-        guard reopened.activity?.days.first?.tokens == 120, reopened.activity?.days.first?.apiCost ?? 0 > 0 else {
+        guard reopened.activity?.days.first?.tokens == 120, reopened.activity?.days.first?.apiCost ?? 0 > 0,
+              reopened.activityRoots == [root] else {
             throw ProviderFailure.unavailable("Restart lost the cached usage and cost")
         }
-        print("Activity survives restart with costs, before any import starts")
+        print("Activity, costs and custom log folders survive restart, before any import starts")
     }
     /// MenuBarExtra proposes an intrinsic size, unlike our fixed-size screenshot previews.
     static func verifyTrayLayout() throws {
@@ -30,13 +33,15 @@ import JuicebarCore
             throw ProviderFailure.unavailable("Tray must fit all demo accounts and only scroll at the available screen height")
         }
         let claudeID = store.accounts.first { $0.provider == .claude }!.id
-        store.snapshots[claudeID]?.windows.append(QuotaWindow(id: "nimbus_quill", title: "Nimbus Quill", usedPercent: 0))
-        let withNimbus = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
-        guard abs(withNimbus.height - size.height) < 1 else {
-            throw ProviderFailure.unavailable("Nimbus Quill must not occupy popover space")
+        for id in ["nimbus_quill", "iguana_necktie", "future_internal"] {
+            store.snapshots[claudeID]?.windows.append(QuotaWindow(id: id, title: id, usedPercent: 0))
+        }
+        let withInternalRows = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
+        guard abs(withInternalRows.height - size.height) < 1 else {
+            throw ProviderFailure.unavailable("Internal Claude fields must not occupy popover space")
         }
         for index in 0..<20 {
-            store.snapshots[claudeID]?.windows.append(QuotaWindow(id: "extra-\(index)", title: "Extra \(index)", usedPercent: 10))
+            store.snapshots[claudeID]?.windows.append(QuotaWindow(id: "model.Extra-\(index)", title: "Extra \(index)", usedPercent: 10))
         }
         let manyLimits = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
         guard abs(manyLimits.height - 1000) < 1 else {
