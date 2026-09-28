@@ -315,7 +315,7 @@ final class AppStore: ObservableObject {
         guard !isDemo, ActivitySource.logFormats.contains(format) else { return }
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
         panel.allowsMultipleSelection = false; panel.showsHiddenFiles = true
-        panel.message = tr("Ordner mit {0}-Logs auswählen. Unterordner werden mitgelesen.", format.name)
+        panel.message = format == .kilo ? tr("Ordner mit Kilo-Datenbanken auswählen.") : tr("Ordner mit {0}-Logs auswählen. Unterordner werden mitgelesen.", format.name)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let root = ActivityLogs.Root(source: format, url: url.standardizedFileURL.resolvingSymlinksInPath())
         guard !activityRoots.contains(where: { $0.url == root.url }) else { return }

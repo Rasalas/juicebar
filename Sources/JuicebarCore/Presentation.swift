@@ -99,10 +99,22 @@ public enum TraySelection {
 }
 
 public enum ActivitySource: String, Codable, CaseIterable, Identifiable, Sendable {
-    case codex, claude, opencode, pi
+    case codex, claude, opencode, pi, gemini, cline, roo, kilo, qwen
     public var id: String { rawValue }
-    public var name: String { switch self { case .codex: "Codex"; case .claude: "Claude"; case .opencode: "OpenCode"; case .pi: "Pi" } }
-    public static var logFormats: [Self] { [.codex, .claude, .pi] }
+    public var name: String {
+        switch self {
+        case .codex: "Codex"
+        case .claude: "Claude"
+        case .opencode: "OpenCode"
+        case .pi: "Pi"
+        case .gemini: "Gemini CLI"
+        case .cline: "Cline"
+        case .roo: "Roo Code"
+        case .kilo: "Kilo"
+        case .qwen: "Qwen Code"
+        }
+    }
+    public static var logFormats: [Self] { allCases.filter { $0 != .opencode } }
 }
 /// Usage metadata. Tool usage can contribute tokens without adding a model response.
 public struct ActivityEvent: Codable, Sendable, Identifiable {
@@ -161,7 +173,7 @@ public struct ActivityReport: Codable, Sendable {
             let day = calendar.startOfDay(for: event.date), key = "\(event.source.rawValue)-\(calendar.startOfDay(for: event.date).timeIntervalSince1970)"
             var value = groups[key] ?? ActivityDay(day: day, source: event.source, tokens: 0, responses: 0)
             value.tokens += event.tokens; value.responses += event.responseCount ?? 1
-            if event.source == .pi, let cost = event.reportedCost, cost.isFinite, cost >= 0 {
+            if let cost = event.reportedCost, cost.isFinite, cost >= 0 {
                 value.apiCost += cost; value.pricedTokens += event.tokens
             } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let cost = APICost.estimate(model: event.model, provider: event.provider, usage: usage) {
                 value.apiCost += cost; value.pricedTokens += event.tokens

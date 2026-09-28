@@ -1,6 +1,6 @@
 # Aktivität und Kontingente
 
-Die Nutzungsseite zeigt standardmäßig Codex, Claude, OpenCode und Pi gemeinsam. Ein Filter grenzt die Werkzeuge ein. Der Tagesverlauf umfasst 30 oder 90 Tage und schaltet zwischen Tokens und Modellantworten um. Der Kalender zeigt 90 Tage mit Antworten als Intensität und einer anklickbaren Tagesaufschlüsselung. Datumsgrenzen richten sich nach der lokalen Zeitzone.
+Die Nutzungsseite zeigt standardmäßig Codex, Claude, OpenCode, Pi, Gemini CLI, Cline, Roo Code, Kilo und Qwen Code gemeinsam. Ein Filter grenzt die Werkzeuge ein. Der Tagesverlauf umfasst 30 oder 90 Tage und schaltet zwischen Tokens und Modellantworten um. Der Kalender zeigt 90 Tage mit Antworten als Intensität und einer anklickbaren Tagesaufschlüsselung. Datumsgrenzen richten sich nach der lokalen Zeitzone.
 
 Kontingent-Prozente kommen weiterhin direkt vom Anbieter. Die 24-Stunden-Kurve besteht aus Juicebars gespeicherten Abfragen seit dem ersten Start. Eine flache Linie bedeutet einen gleich gebliebenen gemeldeten Stand. Tokens können Abo-Prozente nicht verlässlich rekonstruieren. Diese Kurve steht separat unterhalb des Aktivitätsverlaufs, jetzt mit allen Konten und benannten Limits.
 
@@ -16,7 +16,7 @@ OpenCode liest beide bekannten Tabellen mit maximal 100.000 Zeilen pro Tabelle. 
 
 ## Pi und zusätzliche Ordner
 
-Unter Nutzung → Zusätzliche Log-Ordner ein Format auswählen und einen Ordner hinzufügen. Die Formate Codex, Claude und Pi werden rekursiv gelesen. Tau-Sitzungen verwenden das Pi-Format und erscheinen unter Pi. OpenCode hat weiterhin eine eigene Datenbankauswahl. Die Ordnerauswahl gilt für diesen Mac.
+Unter Nutzung → Zusätzliche Log-Ordner ein Format auswählen und einen Ordner hinzufügen. Die JSON-/JSONL-Formate werden rekursiv gelesen; Kilo liest die Datenbanken direkt im gewählten Ordner. Tau-Sitzungen verwenden das Pi-Format und erscheinen unter Pi. OpenCode hat weiterhin eine eigene Datenbankauswahl. Die Ordnerauswahl gilt für diesen Mac.
 
 Die Standardpfade berücksichtigen `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR` und `PI_CODING_AGENT_SESSION_DIR`, sofern sie beim Start von Juicebars gesetzt sind. Bei Pi hat `PI_CODING_AGENT_SESSION_DIR` Vorrang vor `<PI_CODING_AGENT_DIR>/sessions`, ansonsten gilt `~/.pi/agent/sessions`. Eine über Finder gestartete App erbt keine Variablen aus der Shell-Konfiguration. Abweichende Pfade aus Pis `--session-dir` oder `sessionDir` lassen sich über die Ordnerauswahl hinzufügen.
 
@@ -27,6 +27,26 @@ Pi liest `message`-Einträge mit `assistant` oder `toolResult`, `compaction`, `b
 Kopierte Pi-Einträge werden anhand ihrer ID und ihres Zeitpunkts zusammengeführt. Bei Abweichungen gewinnt die älteste Sitzung, unabhängig von Dateireihenfolge, Cache oder SSH-Host. Dafür wird der Sitzungsbeginn aus dem Header gespeichert. Ohne Eintrags-ID bleibt die Entdoppelung auf die jeweilige Datei beschränkt. Pis `usage.cost.total` ist die bevorzugte API-Kostenschätzung. Fehlende Kosten werden mit dem vorhandenen Preiskatalog berechnet; unbekannte Modelle ohne Kostenschätzung bleiben unbepreist. Auch bei `openai-codex` und Claude-Abos sind diese Werte keine Rechnung und keine Abo-Prozente.
 
 Format geprüft am 28. September 2026 anhand der [Pi-Sitzungstypen](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/session-manager.ts), der [Pi-Sitzungsdokumentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sessions.md) und [Taus Usage-Reader](https://github.com/Rasalas/tau/blob/main/kits/usage/pi-sessions.ts). Tests verwenden synthetische Sitzungen.
+
+## Weitere Werkzeuge
+
+Alle folgenden Quellen werden lokal und per SSH gelesen und sind auch in der manuellen Formatauswahl verfügbar. Die [Recherche mit Primärquellen](coding-tool-logs.md) hält die geprüften Dateiverträge fest.
+
+| Format | Automatisch gelesener Pfad | Besonderheiten |
+| --- | --- | --- |
+| Gemini CLI | `~/.gemini/tmp`, zusätzlich `~/.cache/.gemini/tmp` | Aktuelle JSONL-Dateien und ältere `session-*.json`; `GEMINI_CLI_HOME` ersetzt das Home-Verzeichnis |
+| Cline | `~/.cline/data/sessions/**/*.messages.json` | SDK-Vertrag v1; unbekannte Versionen werden abgewiesen |
+| Roo Code | `~/Library/Application Support/<Editor>/User/globalStorage/rooveterinaryinc.roo-cline/tasks/**/ui_messages.json` | Code, Code - Insiders, VSCodium, Cursor und Windsurf; benutzerdefinierte Speicherorte manuell ergänzen |
+| Kilo | `${XDG_DATA_HOME:-~/.local/share}/kilo/*.db` | `KILO_DB` wählt alternativ eine absolute Datei oder einen relativen Namen im Kilo-Datenordner |
+| Qwen Code | `~/.qwen/projects/**/*.jsonl` | `QWEN_RUNTIME_DIR` hat Vorrang vor `QWEN_HOME`; zusätzliche Managed-Runtime-Pfade manuell ergänzen |
+
+Auf SSH-Rechnern erkennt Roo außerdem die entsprechenden Linux-Verzeichnisse unter `${XDG_CONFIG_HOME:-~/.config}` sowie VS-Code-Server-Verzeichnisse. Die dortige Installation von Roo in Cursor ist keine Integration von Cursors eigenem Nutzungsverlauf.
+
+Gemini zählt Thinking separat zum Output. Qwen enthält Reasoning bereits im Output. Bei beiden ist Cache eine Teilmenge des Inputs. Cline SDK und Roo führen ebenfalls Input einschließlich Cache-Lesen und Cache-Schreiben; diese Anteile werden für die Preisberechnung herausgerechnet. Bei Roo bleibt das Modell unbekannt, weil seine Nutzungszeile keines speichert. Eine vorhandene Kostenschätzung bleibt trotzdem sichtbar. Bei Cline zählen nur Assistant-Nachrichten mit Turn-Metriken. Ältere Cline- und Kilo-Extension-Formate sind keine kompatiblen Varianten der hier unterstützten Formate.
+
+Gemini-Nachrichten-IDs verhindern Doppelzählungen bei wiederholten JSONL-Versionen, Checkpoints und der Migration von JSON zu JSONL. Ein Rewind des Gesprächs löscht keinen bereits angefallenen Verbrauch. Roo verwendet Aufgaben-ID und Zeitstempel; beliebig umbenannte oder geforkte Aufgaben ohne stabile Anfrage-ID können nicht zuverlässig über mehrere Ordner zusammengeführt werden.
+
+Ganze JSON-Dokumente sind auf 32 MiB begrenzt. Bei einer unvollständigen Überschreibung bleibt der letzte erfolgreiche Dateicache erhalten. Unveränderte JSON- und JSONL-Dateien werden anhand von Größe und Änderungszeit wiederverwendet. Kilo prüft Größe, Änderungszeit und Dateiidentität von Datenbank, WAL und Journal sowie die Liste der Datenbanken. Ohne Änderung wird der gespeicherte Metadatenstand genutzt; spätestens nach einer Stunde wird neu gelesen. Datenbanken werden ausschließlich lesend geöffnet, mit höchstens 100.000 Nachrichten pro Tabelle. SSH liest die Quelldaten bei jedem Import neu und schreibt keinen entfernten Cache.
 
 ## SSH
 

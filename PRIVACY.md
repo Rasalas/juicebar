@@ -5,7 +5,7 @@ Juicebars stores usage information on your Mac. It has no analytics, advertising
 ## What the app reads
 
 - Subscription quotas through the Codex and Claude Code CLIs and supported provider endpoints. These tools may contact their providers using your existing login.
-- Local Codex, Claude Code, OpenCode and Pi logs and databases, including additional log folders you configure, to extract timestamps, model identifiers, token counts and reported costs. The parser reads log files containing conversations, but does not retain or upload conversation text.
+- Local Codex, Claude Code, OpenCode, Pi, Gemini CLI, Cline, Roo Code, Kilo and Qwen Code logs and databases, including additional log folders you configure, to extract timestamps, model identifiers, token counts and reported costs. The parser reads log files containing conversations, but does not retain or upload conversation text.
 - Claude's statistics cache to recover aggregate days when detailed logs are unavailable.
 - Optional SSH sources that you configure. The bundled collector runs on the selected host and returns usage metadata, not conversations. No collector is installed on that host.
 

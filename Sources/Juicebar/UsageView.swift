@@ -14,10 +14,12 @@ struct UsageView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            PageHeading(title: tr("Deine Nutzung."), subtitle: tr("Codex, Claude, OpenCode und Pi. Deine Aktivität auf diesem Mac und per SSH, gemeinsam im Verlauf."))
+            PageHeading(title: tr("Deine Nutzung."), subtitle: tr("Deine Coding-Werkzeuge auf diesem Mac und per SSH, gemeinsam im Verlauf."))
             HStack(spacing: 8) {
-                sourceButton(nil, title: tr("Alle"))
-                ForEach(ActivitySource.allCases) { item in sourceButton(item, title: item.name) }
+                Picker(tr("Werkzeug"), selection: $source) {
+                    Text(tr("Alle")).tag(ActivitySource?.none)
+                    ForEach(ActivitySource.allCases) { item in Text(item.name).tag(Optional(item)) }
+                }.pickerStyle(.menu).frame(width: 250)
                 Spacer(minLength: 8)
                 if store.localUsageLoading {
                     ProgressView().controlSize(.small)
@@ -76,13 +78,13 @@ struct UsageView: View {
                             }
                             .frame(height: 220)
                         }
-                        Text(metric == .cost ? tr("API-Gegenwert in USD. Pi verwendet die im Log geschätzten Kosten, sonst gelten heutige Standardpreise. Unbepreiste Nutzung fehlt in diesen Balken.") : tr("Tokens einschließlich Cache. Wiederholte Modellantworten zählen einmal. Archivierte Nachrichten werden separat ausgewiesen."))
+                        Text(metric == .cost ? tr("API-Gegenwert in USD. Protokollierte Kostenschätzungen haben Vorrang, sonst gelten heutige Standardpreise. Unbepreiste Nutzung fehlt in diesen Balken.") : tr("Tokens einschließlich Cache. Wiederholte Modellantworten zählen einmal. Archivierte Nachrichten werden separat ausgewiesen."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if source == nil {
-                    HStack(spacing: 12) {
-                        ForEach(ActivitySource.allCases) { item in
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+                        ForEach(ActivitySource.allCases.filter { item in filtered.contains { $0.source == item } }) { item in
                             let values = filtered.filter { $0.source == item }
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 6) { Circle().fill(activityColor(item)).frame(width: 6, height: 6); Text(item.name).font(.system(size: 12, weight: .semibold)) }
@@ -99,7 +101,7 @@ struct UsageView: View {
                             Text(tr("Logs dieses Macs und der eingerichteten SSH-Rechner, einschließlich Unteragenten. Keine verlässliche Zuordnung zu einzelnen Abos. Vor dem ersten Import gelöschte Logs und nicht verbundene Geräte können fehlen. Anbieter-Tageswerte werden nicht zusätzlich addiert."))
                             Text(tr("Stand: {0}. Automatischer Import beim Start und alle fünf Minuten. Unveränderte Dateien werden aus dem Cache gelesen. Bereits erfasste Nutzungsdaten bleiben 90 Tage erhalten, auch wenn ein Chat gelöscht wird.", report.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale))))
                             Text(tr("API-Gegenwert: aktuelle Standardpreise in USD, Stand {0}. Input, Output und Cache werden getrennt berechnet; lange Kontexte berücksichtigen modellabhängige Aufpreise. Ohne Steuern, Toolgebühren, Fast-Modus oder Batch-Rabatte. Keine Abo-Rechnung. Fehlt die Cache-Dauer, wird die kurze Dauer angenommen.", APICost.priceDate))
-                            Text(tr("Pi: Kosten aus dem Sitzungslog haben Vorrang. Fehlen sie, verwenden wir den Preiskatalog. Auch bei Abo-Anbietern ist dies ein API-Gegenwert, keine Rechnung. Tool-Verbrauch und Cache-Warming erhöhen die Tokenzahl, nicht die Anzahl der Antworten."))
+                            Text(tr("Pi, Cline, Roo Code und Kilo: Kosten aus dem Log haben Vorrang. Fehlen sie, verwenden wir den Preiskatalog. Roo protokolliert dabei keinen Modellnamen. Auch bei Abo-Anbietern ist dies ein API-Gegenwert, keine Rechnung. Pi-Tool-Verbrauch und Cache-Warming erhöhen die Tokenzahl, nicht die Anzahl der Antworten."))
                             HStack {
                                 Link(tr("OpenAI-Preise"), destination: URL(string: "https://developers.openai.com/api/docs/pricing")!)
                                 Link(tr("OpenCode-Preise"), destination: URL(string: "https://opencode.ai/docs/zen/")!)
@@ -193,11 +195,6 @@ struct UsageView: View {
             }.font(.caption)
         }.padding(22).background(Palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
     }
-    private func sourceButton(_ item: ActivitySource?, title: String) -> some View {
-        Button { source = item } label: { Text(title) }
-            .buttonStyle(JuiceButtonStyle(prominent: source == item))
-            .accessibilityAddTraits(source == item ? .isSelected : [])
-    }
 }
 
 enum ActivityMetric: String, CaseIterable, Identifiable {
@@ -213,6 +210,11 @@ func activityColor(_ source: ActivitySource) -> Color {
     case .claude: Palette.provider(.claude)
     case .opencode: Palette.provider(.opencodeGo)
     case .pi: Color(red: 0.55, green: 0.42, blue: 0.77)
+    case .gemini: Color(red: 0.15, green: 0.63, blue: 0.67)
+    case .cline: Color(red: 0.72, green: 0.48, blue: 0.15)
+    case .roo: Color(red: 0.64, green: 0.40, blue: 0.35)
+    case .kilo: Color(red: 0.54, green: 0.59, blue: 0.16)
+    case .qwen: Color(red: 0.75, green: 0.38, blue: 0.62)
     }
 }
 func compactNumber(_ number: Double) -> String { number.formatted(.number.notation(.compactName).precision(.fractionLength(0...1))) }

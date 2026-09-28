@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 script = pathlib.Path(__file__).resolve().parents[1] / 'Sources/JuicebarCore/Resources/ssh-usage.py'
-with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'HOME': root, 'CODEX_HOME': root, 'CLAUDE_CONFIG_DIR': root, 'XDG_DATA_HOME': root, 'PI_CODING_AGENT_DIR': root, 'PI_CODING_AGENT_SESSION_DIR': root}), contextlib.redirect_stdout(io.StringIO()):
+with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'HOME': root, 'CODEX_HOME': root, 'CLAUDE_CONFIG_DIR': root, 'XDG_DATA_HOME': root, 'PI_CODING_AGENT_DIR': root, 'PI_CODING_AGENT_SESSION_DIR': root, 'GEMINI_CLI_HOME': root, 'QWEN_RUNTIME_DIR': root, 'XDG_CONFIG_HOME': root, 'KILO_DB': ':memory:'}), contextlib.redirect_stdout(io.StringIO()):
     spec = importlib.util.spec_from_file_location('collector', script)
     collector = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(collector)
@@ -70,7 +70,8 @@ class SSHPrivacyTests(unittest.TestCase):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
                 base = pathlib.Path(root)
                 env = {**os.environ, 'HOME': root, 'CODEX_HOME': str(base / 'codex'),
-                       'CLAUDE_CONFIG_DIR': str(base / 'claude'), 'XDG_DATA_HOME': str(base / 'xdg')}
+                       'CLAUDE_CONFIG_DIR': str(base / 'claude'), 'XDG_DATA_HOME': str(base / 'xdg'),
+                       'GEMINI_CLI_HOME': root, 'QWEN_RUNTIME_DIR': root, 'XDG_CONFIG_HOME': root, 'KILO_DB': ':memory:'}
                 env.pop('PI_CODING_AGENT_DIR', None)
                 env.pop('PI_CODING_AGENT_SESSION_DIR', None)
                 directory = base / '.pi/agent/sessions'
@@ -97,6 +98,53 @@ class SSHPrivacyTests(unittest.TestCase):
                 self.assertEqual(rows[-1], {'done': True})
                 self.assertNotIn('PRIVATE_', result.stdout)
                 self.assertNotIn(root, result.stdout)
+
+    def test_new_sources_transmit_only_allowlisted_usage_metadata(self):
+        fixtures = {
+            'gemini': {'type': 'gemini', 'id': 'g', 'timestamp': '2026-09-28T12:00:00Z', 'model': 'gemini',
+                       'tokens': {'input': 100, 'cached': 60, 'output': 20, 'thoughts': 15, 'private': 'PRIVATE_CONTENT'}},
+            'qwen': {'type': 'assistant', 'uuid': 'q', 'timestamp': '2026-09-28T12:00:00Z', 'model': 'qwen',
+                     'usageMetadata': {'promptTokenCount': 100, 'candidatesTokenCount': 20, 'cachedContentTokenCount': 60, 'private': 'PRIVATE_CONTENT'}},
+            'cline': {'role': 'assistant', 'id': 'c', 'ts': 1800000000000, 'modelInfo': {'id': 'custom', 'provider': 'custom'},
+                      'metrics': {'inputTokens': 100, 'outputTokens': 20, 'cost': 0.3, 'private': 'PRIVATE_CONTENT'}},
+            'roo': {'type': 'say', 'say': 'api_req_started', 'ts': 1800000000000,
+                    'text': json.dumps({'tokensIn': 100, 'tokensOut': 20, 'cost': 0.4, 'request': 'PRIVATE_CONTENT'})},
+        }
+        for source, value in fixtures.items():
+            with self.subTest(source=source):
+                value.update(content='PRIVATE_CONTENT', cwd='PRIVATE_PATH', tools='PRIVATE_CONTENT', credentials='PRIVATE_CONTENT')
+                result = collector.sanitized(source, value)
+                self.assertIsNotNone(result)
+                self.assertNotIn('PRIVATE_', str(result))
+        checkpoint = collector.sanitized('gemini', {'$set': {'messages': [fixtures['gemini']], 'summary': 'PRIVATE_CONTENT'}})
+        self.assertNotIn('PRIVATE_', str(checkpoint))
+        self.assertEqual(len(checkpoint['messages']), 1)
+
+    def test_document_versions_and_unrelated_records_are_rejected(self):
+        for version in (None, 2, True):
+            with self.assertRaises(ValueError):
+                collector.document_records('cline', {'version': version, 'messages': []})
+        self.assertEqual(collector.document_records('cline', {'version': 1, 'messages': []}), [])
+        self.assertIsNone(collector.sanitized('gemini', {'type': 'user', 'tokens': {'input': 10}}))
+        self.assertIsNone(collector.sanitized('qwen', {'type': 'user', 'usageMetadata': {'promptTokenCount': 10}}))
+        self.assertIsNone(collector.sanitized('cline', {'role': 'user', 'metrics': {'inputTokens': 10}}))
+        self.assertIsNone(collector.sanitized('roo', {'type': 'say', 'say': 'text', 'text': '{}'}))
+        self.assertFalse(collector.accepts_log('roo', 'api_conversation_history.json'))
+        self.assertFalse(collector.accepts_log('cline', 'ui_messages.json'))
+
+    def test_gemini_and_qwen_environment_overrides(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = pathlib.Path(root)
+            gemini = base / 'gemini-home/.gemini/tmp/project/chats/session-test.jsonl'
+            qwen = base / 'runtime/projects/project/chats/session.jsonl'
+            for path in (gemini, qwen): path.parent.mkdir(parents=True)
+            gemini.write_text(json.dumps({'type': 'gemini', 'id': 'g', 'tokens': {'input': 10, 'output': 5}}) + '\n')
+            qwen.write_text(json.dumps({'type': 'assistant', 'uuid': 'q', 'usageMetadata': {'promptTokenCount': 10, 'candidatesTokenCount': 5}}) + '\n')
+            env = {'HOME': root, 'GEMINI_CLI_HOME': str(base / 'gemini-home'), 'QWEN_HOME': str(base / 'ignored'), 'QWEN_RUNTIME_DIR': str(base / 'runtime')}
+            result = subprocess.run([sys.executable, str(script)], env=env, text=True, capture_output=True, check=True)
+            rows = [json.loads(line) for line in result.stdout.splitlines()]
+            self.assertEqual({row['source'] for row in rows if 'file' in row}, {'gemini', 'qwen'})
+            self.assertEqual(sum('record' in row for row in rows), 2)
 
 if __name__ == '__main__':
     unittest.main()

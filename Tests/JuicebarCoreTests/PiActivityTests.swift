@@ -165,7 +165,7 @@ final class PiActivityTests: XCTestCase {
         let merged = ActivityLogs.defaultRoots(accounts: [], additional: restored, home: home,
                                               environment: ["PI_CODING_AGENT_DIR": "~/ignored", "PI_CODING_AGENT_SESSION_DIR": session.path])
         XCTAssertEqual(merged.filter { $0.source == .pi }.count, 1)
-        XCTAssertEqual(merged.last?.url.path, session.path)
+        XCTAssertEqual(merged.first { $0.source == .pi }?.url.path, session.path)
     }
 
     func testOldCachedEventsStillDecodeAsOneResponse() throws {
@@ -193,7 +193,7 @@ final class PiActivityTests: XCTestCase {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [try XCTUnwrap(Bundle.module.url(forResource: "ssh-usage", withExtension: "py")).path]
         process.environment = ["HOME": root.path, "PI_CODING_AGENT_SESSION_DIR": logs.path,
-                               "CODEX_HOME": root.path, "CLAUDE_CONFIG_DIR": root.path, "XDG_DATA_HOME": root.path]
+                               "CODEX_HOME": root.appendingPathComponent("codex").path, "CLAUDE_CONFIG_DIR": root.appendingPathComponent("claude").path, "XDG_DATA_HOME": root.path]
         process.standardOutput = output
         try process.run()
         let data = output.fileHandleForReading.readDataToEndOfFile()
