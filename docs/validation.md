@@ -6,6 +6,14 @@ A live `get_usage` probe reproduced the stalled five-hour window: Claude 2.1.241
 
 The installation-selection regression failed before the change and passed afterward. `swift test` passed 82 tests, with the optional performance test skipped. Parser and cached-display regressions now reject unknown top-level Claude fields, including Iguana Necktie and Nimbus Quill, while retaining supported windows and Fable. Native tray checks confirm those fields consume no space. The installed app was configured through its account editor to use the native CLI, without replacing the installed release. Its saved settings and fresh observation were checked, and the UI showed 97% session quota remaining and 4% weekly quota remaining.
 
+## Juicebars 0.1.8 release, 28 September
+
+Version 0.1.8, build 10, includes the additional usage importers and Claude fixes. All 82 regular Swift tests and nine Python collector tests passed; the optional performance workload was skipped. Persistence, both scrollbar configurations and direct-updater compilation passed locally and in both PR CI runs. Main and tag CI also passed. English and German previews were refreshed; the website was checked at 1280 and 390 px without horizontal overflow or missing images.
+
+The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. All four downloaded GitHub assets matched their local originals. Copying the public DMG's app preserved its signature and notarization. The Sparkle archive passed Ed25519 verification; a changed byte caused rejection.
+
+Installed 0.1.7 first exercised a localhost feed with a missing archive. Sparkle reported the download error and left 0.1.7 unchanged. The real 0.1.8 candidate could be dismissed and offered again, then downloaded, installed and relaunched as build 10. Recorded account/settings/source hashes were unchanged, both usage caches remained present, and quota observations increased from 7,130 to 7,148. Claude showed current session/weekly usage and Fable without Iguana Necktie. The temporary feed override was removed before promoting the same tested assets to stable. Second-Mac installation remains untested.
+
 ## Reproducible checks
 
 ```sh
