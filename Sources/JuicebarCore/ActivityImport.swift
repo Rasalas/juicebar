@@ -15,11 +15,10 @@ public enum ActivityImport {
             let previous = (try? Data(contentsOf: url)).flatMap { try? PropertyListDecoder().decode(Archive.self, from: $0) }
             do {
                 let result = try read()
-                var unique = Dictionary((previous?.events ?? []).filter { $0.date >= since && $0.date <= now }.map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: { $0.tokens >= $1.tokens ? $0 : $1 })
+                var unique = Dictionary((previous?.events ?? []).filter { $0.date >= since && $0.date <= now }.map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
                 for event in result.events {
                     let key = "\(event.source.rawValue)|\(event.id)"
-                    if let old = unique[key], old.tokens > event.tokens { continue }
-                    unique[key] = event
+                    unique[key] = unique[key].map { ActivityEvent.preferred($0, event) } ?? event
                 }
                 let events = Array(unique.values)
                 let encoder = PropertyListEncoder(); encoder.outputFormat = .binary

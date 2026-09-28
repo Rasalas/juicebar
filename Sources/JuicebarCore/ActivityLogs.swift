@@ -2,10 +2,11 @@ import Foundation
 
 /// Reads usage metadata from JSONL. Conversation text is discarded in memory, never cached.
 public enum ActivityLogs {
-    public struct Root: Sendable {
+    public struct Root: Codable, Identifiable, Equatable, Sendable {
         public var source: ActivitySource
         public var url: URL
         public init(source: ActivitySource, url: URL) { self.source = source; self.url = url }
+        public var id: String { "\(source.rawValue)|\(url.standardizedFileURL.resolvingSymlinksInPath().path)" }
     }
     private struct CachedFile: Codable {
         var version = 2
@@ -14,17 +15,30 @@ public enum ActivityLogs {
         var events: [ActivityEvent]
         var skipped: Int
     }
-    public static func defaultRoots(accounts: [AccountConfiguration]) -> [Root] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        var roots = [Root(source: .codex, url: home.appendingPathComponent(".codex/sessions")),
-                     Root(source: .codex, url: home.appendingPathComponent(".codex/archived_sessions")),
-                     Root(source: .claude, url: home.appendingPathComponent(".claude/projects"))]
+    public static func defaultRoots(accounts: [AccountConfiguration], additional: [Root] = [],
+                                    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                                    environment: [String: String] = ProcessInfo.processInfo.environment) -> [Root] {
+        func path(_ key: String, fallback: URL) -> URL {
+            guard let value = environment[key], !value.isEmpty else { return fallback }
+            if value == "~" { return home }
+            if value.hasPrefix("~/") { return home.appendingPathComponent(String(value.dropFirst(2))) }
+            return URL(fileURLWithPath: value)
+        }
+        let codex = path("CODEX_HOME", fallback: home.appendingPathComponent(".codex"))
+        let claude = path("CLAUDE_CONFIG_DIR", fallback: home.appendingPathComponent(".claude"))
+        let pi = path("PI_CODING_AGENT_DIR", fallback: home.appendingPathComponent(".pi/agent"))
+        var roots = [Root(source: .codex, url: codex.appendingPathComponent("sessions")),
+                     Root(source: .codex, url: codex.appendingPathComponent("archived_sessions")),
+                     Root(source: .claude, url: claude.appendingPathComponent("projects")),
+                     Root(source: .pi, url: path("PI_CODING_AGENT_SESSION_DIR", fallback: pi.appendingPathComponent("sessions")))]
         for account in accounts where !account.profileDirectory.isEmpty && (account.provider == .codex || account.provider == .claude) {
             let root = URL(fileURLWithPath: (account.profileDirectory as NSString).expandingTildeInPath)
             roots.append(Root(source: account.provider == .codex ? .codex : .claude, url: root.appendingPathComponent(account.provider == .codex ? "sessions" : "projects")))
         }
+        roots += additional.filter { ActivitySource.logFormats.contains($0.source) }
         var seen = Set<String>()
-        return roots.filter { seen.insert($0.url.standardizedFileURL.path).inserted }
+        return roots.map { Root(source: $0.source, url: $0.url.standardizedFileURL.resolvingSymlinksInPath()) }
+            .filter { seen.insert($0.url.path).inserted }
     }
     public static func read(roots: [Root], cacheDirectory: URL?, now: Date = Date(),
                             progress: @Sendable (String) -> Void = { _ in }) throws -> (events: [ActivityEvent], notices: [String]) {
@@ -84,7 +98,7 @@ public enum ActivityLogs {
     }
     private static func knownNonUsagePrefix(_ data: Data, source: ActivitySource) -> Bool {
         let text = String(decoding: data.prefix(1024), as: UTF8.self)
-        let kinds = source == .codex ? "response_item|compacted" : "user|progress|file-history-snapshot"
+        let kinds = source == .codex ? "response_item|compacted" : source == .pi ? "custom|label|session_info" : "user|progress|file-history-snapshot"
         // Anchored to the envelope. A type mentioned in conversation text never qualifies.
         let pattern = #"^\s*\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?"type"\s*:\s*"("# + kinds + #")""#
         return text.range(of: pattern, options: .regularExpression) != nil
@@ -94,7 +108,7 @@ public enum ActivityLogs {
         defer { try? handle.close() }
         var parser = UsageLogParser(source: source, fileID: stableID(file.path))
         var buffer = Data(), discardLine = false, skipped = 0, searchOffset = 0
-        let markers = (source == .codex ? ["\"token_count\"", "\"token_usage_record\"", "\"turn_context\"", "\"session_meta\""] : ["\"usage\""]).map { Data($0.utf8) }
+        let markers = (source == .codex ? ["\"token_count\"", "\"token_usage_record\"", "\"turn_context\"", "\"session_meta\""] : source == .pi ? ["\"usage\"", "\"session\""] : ["\"usage\""]).map { Data($0.utf8) }
         while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty {
             try Task.checkCancellation()
             buffer.append(chunk)
@@ -137,9 +151,11 @@ struct UsageLogParser {
     private var legacy: [ActivityEvent] = []
     private var responses: [ActivityEvent] = []
     private let dates = LogDateParser()
-    init(source: ActivitySource, fileID: String) { self.source = source; self.fileID = fileID }
-    var events: [ActivityEvent] { responses + legacy.filter { event in modernSince.map { event.date < $0 } ?? true } }
+    private var pi: PiUsageParser
+    init(source: ActivitySource, fileID: String) { self.source = source; self.fileID = fileID; pi = PiUsageParser(fileID: fileID) }
+    var events: [ActivityEvent] { source == .pi ? pi.events : responses + legacy.filter { event in modernSince.map { event.date < $0 } ?? true } }
     mutating func consume(_ record: [String: Any]) {
+        if source == .pi { pi.consume(record); return }
         if source == .claude { consumeClaude(record); return }
         guard let payload = record["payload"] as? [String: Any], let type = record["type"] as? String else { return }
         if type == "session_meta", !sawMeta {
@@ -185,7 +201,7 @@ struct UsageLogParser {
     private func number(_ object: [String: Any], _ key: String) -> Double { max(0, JSONValue.number(object[key]) ?? 0) }
 }
 
-private final class LogDateParser {
+final class LogDateParser {
     private let fractional = ISO8601DateFormatter()
     private let whole = ISO8601DateFormatter()
     init() { fractional.formatOptions.insert(.withFractionalSeconds) }

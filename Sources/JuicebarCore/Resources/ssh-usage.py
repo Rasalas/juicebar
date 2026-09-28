@@ -1,5 +1,5 @@
 # Sent to Python over SSH stdin. Read-only: no files, packages or credentials are written.
-import datetime, hashlib, json, os, pathlib, sqlite3, time, re
+import datetime, hashlib, json, os, pathlib, sqlite3, time, re, math
 
 now = time.time()
 since = now - 90 * 86400
@@ -14,13 +14,38 @@ def digest(value):
 def numbers(value, keys):
     if not isinstance(value, dict):
         return {}
-    return {key: value[key] for key in keys if isinstance(value.get(key), (int, float)) and not isinstance(value.get(key), bool)}
+    return {key: value[key] for key in keys if isinstance(value.get(key), (int, float)) and not isinstance(value.get(key), bool) and math.isfinite(value[key])}
 
 usage_keys = ['input_tokens', 'output_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'total_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
 
 def sanitized(source, row):
     kind = row.get('type')
     timestamp = row.get('timestamp')
+    if source == 'pi':
+        # Allow only scalar metadata. No cwd, summaries, content, tools or extension details.
+        def scalar(value):
+            return value if isinstance(value, str) or isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+        result = {'type': kind, 'id': scalar(row.get('id')), 'timestamp': scalar(timestamp)}
+        if kind == 'session':
+            return result
+        fields = row.get('message') if kind == 'message' else row
+        if not isinstance(fields, dict) or not isinstance(fields.get('usage'), dict):
+            return None
+        if kind == 'message':
+            if fields.get('role') not in ('assistant', 'toolResult'):
+                return None
+        elif kind not in ('compaction', 'branch_summary', 'usage'):
+            return None
+        usage = numbers(fields['usage'], ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'])
+        usage['cost'] = numbers(fields['usage'].get('cost'), ['total'])
+        selected = {key: scalar(fields.get(key)) for key in ['model', 'provider']}
+        selected['usage'] = usage
+        if kind == 'message':
+            selected.update(role=fields['role'], timestamp=scalar(fields.get('timestamp')))
+            result['message'] = selected
+        else:
+            result.update(selected)
+        return result
     if source == 'claude':
         message = row.get('message', {})
         if kind != 'assistant' or not isinstance(message, dict) or not isinstance(message.get('usage'), dict):
@@ -50,9 +75,11 @@ def sanitized(source, row):
     return {'type': kind, 'timestamp': timestamp, 'payload': selected}
 
 home = pathlib.Path.home()
+pi_dir = pathlib.Path(os.environ.get('PI_CODING_AGENT_DIR') or home / '.pi/agent').expanduser()
 roots = [('codex', pathlib.Path(os.environ.get('CODEX_HOME', home / '.codex')) / 'sessions'),
          ('codex', pathlib.Path(os.environ.get('CODEX_HOME', home / '.codex')) / 'archived_sessions'),
-         ('claude', pathlib.Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude')) / 'projects')]
+         ('claude', pathlib.Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude')) / 'projects'),
+         ('pi', pathlib.Path(os.environ.get('PI_CODING_AGENT_SESSION_DIR') or pi_dir / 'sessions').expanduser())]
 for source, root in roots:
     if not root.is_dir():
         continue
@@ -79,7 +106,7 @@ for source, root in roots:
                             continue
                         if not line.endswith(b'\n'):
                             continue
-                        markers = [b'"usage"'] if source == 'claude' else [b'"token_count"', b'"token_usage_record"', b'"turn_context"', b'"session_meta"']
+                        markers = [b'"usage"', b'"session"'] if source == 'pi' else [b'"usage"'] if source == 'claude' else [b'"token_count"', b'"token_usage_record"', b'"turn_context"', b'"session_meta"']
                         if not any(marker in line for marker in markers):
                             continue
                         try:

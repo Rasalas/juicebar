@@ -14,7 +14,7 @@ struct UsageView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            PageHeading(title: tr("Deine Nutzung."), subtitle: tr("Codex, Claude und OpenCode. Deine Aktivität auf diesem Mac und per SSH, gemeinsam im Verlauf."))
+            PageHeading(title: tr("Deine Nutzung."), subtitle: tr("Codex, Claude, OpenCode und Pi. Deine Aktivität auf diesem Mac und per SSH, gemeinsam im Verlauf."))
             HStack(spacing: 8) {
                 sourceButton(nil, title: tr("Alle"))
                 ForEach(ActivitySource.allCases) { item in sourceButton(item, title: item.name) }
@@ -76,7 +76,7 @@ struct UsageView: View {
                             }
                             .frame(height: 220)
                         }
-                        Text(metric == .cost ? tr("API-Gegenwert in USD zu heutigen Standardpreisen. Unbepreiste Nutzung fehlt in diesen Balken.") : tr("Tokens einschließlich Cache. Wiederholte Modellantworten zählen einmal. Archivierte Nachrichten werden separat ausgewiesen."))
+                        Text(metric == .cost ? tr("API-Gegenwert in USD. Pi verwendet die im Log geschätzten Kosten, sonst gelten heutige Standardpreise. Unbepreiste Nutzung fehlt in diesen Balken.") : tr("Tokens einschließlich Cache. Wiederholte Modellantworten zählen einmal. Archivierte Nachrichten werden separat ausgewiesen."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -99,6 +99,7 @@ struct UsageView: View {
                             Text(tr("Logs dieses Macs und der eingerichteten SSH-Rechner, einschließlich Unteragenten. Keine verlässliche Zuordnung zu einzelnen Abos. Vor dem ersten Import gelöschte Logs und nicht verbundene Geräte können fehlen. Anbieter-Tageswerte werden nicht zusätzlich addiert."))
                             Text(tr("Stand: {0}. Automatischer Import beim Start und alle fünf Minuten. Unveränderte Dateien werden aus dem Cache gelesen. Bereits erfasste Nutzungsdaten bleiben 90 Tage erhalten, auch wenn ein Chat gelöscht wird.", report.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale))))
                             Text(tr("API-Gegenwert: aktuelle Standardpreise in USD, Stand {0}. Input, Output und Cache werden getrennt berechnet; lange Kontexte berücksichtigen modellabhängige Aufpreise. Ohne Steuern, Toolgebühren, Fast-Modus oder Batch-Rabatte. Keine Abo-Rechnung. Fehlt die Cache-Dauer, wird die kurze Dauer angenommen.", APICost.priceDate))
+                            Text(tr("Pi: Kosten aus dem Sitzungslog haben Vorrang. Fehlen sie, verwenden wir den Preiskatalog. Auch bei Abo-Anbietern ist dies ein API-Gegenwert, keine Rechnung. Tool-Verbrauch und Cache-Warming erhöhen die Tokenzahl, nicht die Anzahl der Antworten."))
                             HStack {
                                 Link(tr("OpenAI-Preise"), destination: URL(string: "https://developers.openai.com/api/docs/pricing")!)
                                 Link(tr("OpenCode-Preise"), destination: URL(string: "https://opencode.ai/docs/zen/")!)
@@ -144,6 +145,7 @@ struct UsageView: View {
                     }
                 }
             }
+            ActivitySourcesView(store: store)
             SSHSourcesView(store: store)
             Panel {
                 DisclosureGroup(tr("Kontingent-Messungen · letzte 24 Stunden"), isExpanded: $showQuotas) {
@@ -183,7 +185,7 @@ struct UsageView: View {
                 }
             }
             HStack(alignment: .top) {
-                Text(priced < tokens ? tr("Teilbetrag · {0} % der Tokens bepreist", Int(tokens > 0 ? 100 * priced / tokens : 0)) : tr("API-Gegenwert zu Standardpreisen · keine Abo-Rechnung"))
+                Text(priced < tokens ? tr("Teilbetrag · {0} % der Tokens bepreist", Int(tokens > 0 ? 100 * priced / tokens : 0)) : tr("API-Gegenwert · keine Abo-Rechnung"))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(tr("{0} Modellantworten", filtered.reduce(0) { $0 + $1.responses }.formatted()) + (archived > 0 ? tr(" · {0} archivierte Nachrichten", archived.formatted()) : ""))
@@ -206,7 +208,12 @@ enum ActivityMetric: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 func activityColor(_ source: ActivitySource) -> Color {
-    Palette.provider(source == .codex ? .codex : source == .claude ? .claude : .opencodeGo)
+    switch source {
+    case .codex: Palette.provider(.codex)
+    case .claude: Palette.provider(.claude)
+    case .opencode: Palette.provider(.opencodeGo)
+    case .pi: Color(red: 0.55, green: 0.42, blue: 0.77)
+    }
 }
 func compactNumber(_ number: Double) -> String { number.formatted(.number.notation(.compactName).precision(.fractionLength(0...1))) }
 

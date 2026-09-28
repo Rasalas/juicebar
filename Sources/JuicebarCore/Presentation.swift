@@ -99,11 +99,12 @@ public enum TraySelection {
 }
 
 public enum ActivitySource: String, Codable, CaseIterable, Identifiable, Sendable {
-    case codex, claude, opencode
+    case codex, claude, opencode, pi
     public var id: String { rawValue }
-    public var name: String { switch self { case .codex: "Codex"; case .claude: "Claude"; case .opencode: "OpenCode" } }
+    public var name: String { switch self { case .codex: "Codex"; case .claude: "Claude"; case .opencode: "OpenCode"; case .pi: "Pi" } }
+    public static var logFormats: [Self] { [.codex, .claude, .pi] }
 }
-/// A completed model response, not a user prompt or a tool invocation. IDs are hashed before persistence.
+/// Usage metadata. Tool usage can contribute tokens without adding a model response.
 public struct ActivityEvent: Codable, Sendable, Identifiable {
     public var id: String
     public var source: ActivitySource
@@ -112,8 +113,21 @@ public struct ActivityEvent: Codable, Sendable, Identifiable {
     public var provider: String
     public var tokens: Double
     public var usage: TokenBreakdown?
-    public init(id: String, source: ActivitySource, date: Date, model: String, provider: String = "", tokens: Double, usage: TokenBreakdown? = nil) {
+    public var responseCount: Int?
+    public var reportedCost: Double?
+    public var sessionStartedAt: Date?
+    public init(id: String, source: ActivitySource, date: Date, model: String, provider: String = "", tokens: Double, usage: TokenBreakdown? = nil,
+                responseCount: Int? = nil, reportedCost: Double? = nil, sessionStartedAt: Date? = nil) {
         self.id = id; self.source = source; self.date = date; self.model = model; self.provider = provider; self.tokens = tokens; self.usage = usage
+        self.responseCount = responseCount; self.reportedCost = reportedCost; self.sessionStartedAt = sessionStartedAt
+    }
+    /// Independent of directory, host and cache traversal order: Pi originals win over forks.
+    static func preferred(_ first: Self, _ second: Self) -> Self {
+        if first.source == .pi, first.sessionStartedAt != second.sessionStartedAt {
+            return (first.sessionStartedAt ?? .distantFuture) < (second.sessionStartedAt ?? .distantFuture) ? first : second
+        }
+        if first.tokens > second.tokens || (first.tokens == second.tokens && first.usage != nil) { return first }
+        return second
     }
 }
 public struct ActivityDay: Codable, Identifiable, Sendable {
@@ -140,15 +154,16 @@ public struct ActivityReport: Codable, Sendable {
         for event in events where event.date <= now && event.tokens.isFinite && event.tokens > 0 {
             let key = Key(source: event.source, id: event.id)
             // Streaming blocks may repeat a message with an updated output count.
-            if let previous = unique[key], previous.tokens > event.tokens || (previous.tokens == event.tokens && previous.usage != nil) { continue }
-            unique[key] = event
+            unique[key] = unique[key].map { ActivityEvent.preferred($0, event) } ?? event
         }
         var groups: [String: ActivityDay] = [:]
         for event in unique.values {
             let day = calendar.startOfDay(for: event.date), key = "\(event.source.rawValue)-\(calendar.startOfDay(for: event.date).timeIntervalSince1970)"
             var value = groups[key] ?? ActivityDay(day: day, source: event.source, tokens: 0, responses: 0)
-            value.tokens += event.tokens; value.responses += 1
-            if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let cost = APICost.estimate(model: event.model, provider: event.provider, usage: usage) {
+            value.tokens += event.tokens; value.responses += event.responseCount ?? 1
+            if event.source == .pi, let cost = event.reportedCost, cost.isFinite, cost >= 0 {
+                value.apiCost += cost; value.pricedTokens += event.tokens
+            } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let cost = APICost.estimate(model: event.model, provider: event.provider, usage: usage) {
                 value.apiCost += cost; value.pricedTokens += event.tokens
             } else { value.unpricedModels.insert(event.model) }
             groups[key] = value

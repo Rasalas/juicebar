@@ -30,6 +30,7 @@ final class AppStore: ObservableObject {
     @Published var localUsageLoading = false
     @Published var activity: ActivityReport?
     @Published var sshHosts: [String] = []
+    @Published var activityRoots: [ActivityLogs.Root] = []
     @Published var activityProgress = ""
     private var nextActivityImport = Date.distantPast
     private let storageDirectory: URL
@@ -72,6 +73,7 @@ final class AppStore: ObservableObject {
         localDatabasePath = (try? database.read(String.self, key: "opencode-path")) ?? ""
         warnings = (try? database.warnings()) ?? []
         sshHosts = (try? database.read([String].self, key: "ssh-hosts")) ?? []
+        activityRoots = (try? database.read([ActivityLogs.Root].self, key: "activity-roots")) ?? []
         activity = try? database.read(ActivityReport.self, key: "activity-report-v2")
         localUsage = try? database.read(LocalUsageReport.self, key: "local-usage-v2")
         storageError = startupError
@@ -271,7 +273,7 @@ final class AppStore: ObservableObject {
         nextActivityImport = Date().addingTimeInterval(300)
         localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
         let path = localDatabasePath.isEmpty ? nil : localDatabasePath
-        let roots = ActivityLogs.defaultRoots(accounts: accounts)
+        let roots = ActivityLogs.defaultRoots(accounts: accounts, additional: activityRoots)
         let owner = self, hosts = sshHosts, directory = storageDirectory
         let worker = Task.detached(priority: .utility) {
             if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
@@ -309,6 +311,26 @@ final class AppStore: ObservableObject {
         Task { await previous?.value; loadLocalUsage() }
     }
     func cancelActivityImport() { activityWorker?.cancel(); activityTask?.cancel() }
+    func selectActivityDirectory(format: ActivitySource) {
+        guard !isDemo, ActivitySource.logFormats.contains(format) else { return }
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false; panel.showsHiddenFiles = true
+        panel.message = tr("Ordner mit {0}-Logs auswählen. Unterordner werden mitgelesen.", format.name)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let root = ActivityLogs.Root(source: format, url: url.standardizedFileURL.resolvingSymlinksInPath())
+        guard !activityRoots.contains(where: { $0.url == root.url }) else { return }
+        saveActivityRoots(activityRoots + [root])
+    }
+    func removeActivityRoot(_ root: ActivityLogs.Root) {
+        guard !isDemo else { return }
+        saveActivityRoots(activityRoots.filter { $0.id != root.id })
+    }
+    private func saveActivityRoots(_ roots: [ActivityLogs.Root]) {
+        do {
+            try database.write(roots, key: "activity-roots")
+            activityRoots = roots; reloadActivitySources()
+        } catch { storageError = error.localizedDescription }
+    }
     func selectLocalDatabase() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.message = tr("OpenCode-Datenbank nur lesend öffnen")
