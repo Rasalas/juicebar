@@ -1,5 +1,11 @@
 # Validation status · 25 September 2026
 
+## Claude installation discovery, 28 September
+
+A live `get_usage` probe reproduced the stalled five-hour window: Claude 2.1.241 at `/opt/homebrew/bin/claude` returned 58% used with an expired reset and 95% weekly usage. Changing only the executable to the native 2.1.283 installation returned 3% used with a future reset and 96% weekly usage. Claude discovery now prefers the native installation. Explicit paths still override discovery; package-manager fallbacks and Codex discovery retain their previous behavior.
+
+The installation-selection regression failed before the change and passed afterward. `swift test` passed 82 tests, with the optional performance test skipped. The installed app was configured through its account editor to use the native CLI, without replacing the installed release. Its saved settings and fresh observation were checked, and the UI showed 97% session quota remaining and 4% weekly quota remaining.
+
 ## Reproducible checks
 
 ```sh

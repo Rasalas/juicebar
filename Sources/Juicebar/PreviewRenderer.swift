@@ -30,13 +30,15 @@ import JuicebarCore
             throw ProviderFailure.unavailable("Tray must fit all demo accounts and only scroll at the available screen height")
         }
         let claudeID = store.accounts.first { $0.provider == .claude }!.id
-        store.snapshots[claudeID]?.windows.append(QuotaWindow(id: "nimbus_quill", title: "Nimbus Quill", usedPercent: 0))
-        let withNimbus = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
-        guard abs(withNimbus.height - size.height) < 1 else {
-            throw ProviderFailure.unavailable("Nimbus Quill must not occupy popover space")
+        for id in ["nimbus_quill", "iguana_necktie", "future_internal"] {
+            store.snapshots[claudeID]?.windows.append(QuotaWindow(id: id, title: id, usedPercent: 0))
+        }
+        let withInternalRows = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
+        guard abs(withInternalRows.height - size.height) < 1 else {
+            throw ProviderFailure.unavailable("Internal Claude fields must not occupy popover space")
         }
         for index in 0..<20 {
-            store.snapshots[claudeID]?.windows.append(QuotaWindow(id: "extra-\(index)", title: "Extra \(index)", usedPercent: 10))
+            store.snapshots[claudeID]?.windows.append(QuotaWindow(id: "model.Extra-\(index)", title: "Extra \(index)", usedPercent: 10))
         }
         let manyLimits = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) }).fittingSize
         guard abs(manyLimits.height - 1000) < 1 else {

@@ -58,7 +58,7 @@ public enum ProviderParsing {
         }
         var windows: [QuotaWindow] = []
         for (key, value) in limits.sorted(by: { $0.key < $1.key }) {
-            guard key != "extra_usage", key != "nimbus_quill", let raw = value as? [String: Any], raw["resets_at"] != nil,
+            guard ClaudeQuotaFields.windowIDs.contains(key), let raw = value as? [String: Any], raw["resets_at"] != nil,
                   let used = JSONValue.number(raw["utilization"]), used >= 0 else { continue }
             let duration: Double? = key == "five_hour" ? 18000 : key.hasPrefix("seven_day") ? 604800 : nil
             let title: String
@@ -97,5 +97,15 @@ public enum ProviderParsing {
         guard !windows.isEmpty else { throw ProviderFailure.invalidData(tr("OpenCode Go hat keine lesbaren Limitwerte geliefert.")) }
         return AccountSnapshot(configurationID: configuration.id, identity: identity, plan: "Go", observedAt: now,
                                source: "OpenCode Go", windows: windows)
+    }
+}
+
+/// Only fields with an established quota meaning belong in the UI. Claude also
+/// returns internal buckets with percentage/reset fields and opaque codenames.
+enum ClaudeQuotaFields {
+    static let windowIDs: Set<String> = ["five_hour", "seven_day", "seven_day_oauth_apps", "seven_day_opus", "seven_day_sonnet"]
+
+    static func supportsWindow(_ id: String) -> Bool {
+        windowIDs.contains(id) || (id.hasPrefix("model.") && id.count > "model.".count)
     }
 }

@@ -69,7 +69,7 @@ This builds the current app and renders its real views offscreen with synthetic 
 | Provider | Data | Prerequisite or limitation |
 | --- | --- | --- |
 | ChatGPT / Codex | Reported quota windows and banked reset expiry | Logged-in Codex CLI; app-server integration tested with 0.157.0 |
-| Claude subscription | Short, weekly and additional model limits; plan tier | Logged-in Claude Code CLI; experimental usage interface tested with 2.1.241 |
+| Claude subscription | Short, weekly and additional model limits; plan tier | Logged-in Claude Code CLI; experimental usage interface tested with 2.1.283 |
 | Claude reset offers | Manual expiry reminders | Automatic reset inventory is not available; no subscription-token extraction or private reset endpoint |
 | OpenCode Go | Short, weekly and monthly quota | Active Go subscription and local OpenCode Go API key, or a key entered in Juicebars |
 | OpenCode Zen | Local activity and estimated API equivalent | No verified balance endpoint |

@@ -21,7 +21,7 @@ public enum TrayStyle: String, Codable, CaseIterable, Sendable {
 /// Stable order across refreshes, shared by the menu bar and its detail popover.
 public enum QuotaOrder {
     public static func visibleWindows(_ windows: [QuotaWindow], provider: ProviderKind) -> [QuotaWindow] {
-        self.windows(windows.filter { provider != .claude || $0.id != "nimbus_quill" })
+        self.windows(windows.filter { provider != .claude || ClaudeQuotaFields.supportsWindow($0.id) })
     }
     public static func accounts(_ accounts: [AccountConfiguration]) -> [AccountConfiguration] {
         let order: [ProviderKind] = [.codex, .claude, .opencodeGo, .opencodeZen, .openaiAPI, .anthropicAPI, .openrouter]
