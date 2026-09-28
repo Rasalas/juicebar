@@ -24,7 +24,8 @@ public enum SSHActivity {
                     events += parser?.events.filter { $0.date >= since && $0.date <= now } ?? []; parser = nil
                 } else if let event = row["event"] as? [String: Any], let id = event["id"] as? String,
                           let date = JSONValue.date(event["date"]), let tokens = JSONValue.number(event["tokens"]), date >= since, date <= now, tokens > 0 {
-                    events.append(ActivityEvent(id: id, source: .opencode, date: date, model: event["model"] as? String ?? tr("Unbekannt"), provider: event["provider"] as? String ?? "", tokens: tokens, usage: (event["tokenBreakdown"] as? [String: Any]).flatMap(TokenBreakdown.opencode)))
+                    guard let name = event["source"] as? String, let source = ActivitySource(rawValue: name), source == .opencode || source == .kilo else { continue }
+                    events.append(ActivityEvent(id: id, source: source, date: date, model: event["model"] as? String ?? tr("Unbekannt"), provider: event["provider"] as? String ?? "", tokens: tokens, usage: (event["tokenBreakdown"] as? [String: Any]).flatMap(TokenBreakdown.opencode), reportedCost: source == .kilo ? JSONValue.number(event["reportedCost"]) : nil))
                 } else if let notice = row["notice"] as? String { notices.append("\(host): \(notice)") }
             }
         } catch is CancellationError { throw CancellationError() }

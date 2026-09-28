@@ -13,6 +13,19 @@ public struct TokenBreakdown: Codable, Sendable {
     }
     public var total: Double { input + output + cacheRead + cacheWrite + cacheWriteHour }
     public var isValid: Bool { [input, output, cacheRead, cacheWrite, cacheWriteHour].allSatisfy { $0.isFinite && $0 >= 0 } }
+    static func gemini(_ tokens: [String: Any]) -> Self? {
+        guard let input = JSONValue.number(tokens["input"]), let output = JSONValue.number(tokens["output"]) else { return nil }
+        let cached = JSONValue.number(tokens["cached"]) ?? 0
+        let result = Self(input: input - cached + (JSONValue.number(tokens["tool"]) ?? 0),
+                          output: output + (JSONValue.number(tokens["thoughts"]) ?? 0), cacheRead: cached)
+        return result.isValid ? result : nil
+    }
+    static func pi(_ usage: [String: Any]) -> Self? {
+        guard let input = JSONValue.number(usage["input"]), let output = JSONValue.number(usage["output"]) else { return nil }
+        let result = Self(input: input, output: output, cacheRead: JSONValue.number(usage["cacheRead"]) ?? 0,
+                          cacheWrite: JSONValue.number(usage["cacheWrite"]) ?? 0)
+        return result.isValid ? result : nil
+    }
     static func codex(_ usage: [String: Any]) -> Self? {
         guard let input = JSONValue.number(usage["input_tokens"]), let output = JSONValue.number(usage["output_tokens"]) else { return nil }
         let read = JSONValue.number(usage["cached_input_tokens"]) ?? 0

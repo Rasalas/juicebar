@@ -10,11 +10,14 @@ import JuicebarCore
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         let event = ActivityEvent(id: "persist", source: .claude, date: Date(), model: "claude-opus-5", tokens: 120, usage: TokenBreakdown(input: 100, output: 20))
         try database.write(ActivityReport(events: [event]), key: "activity-report-v2")
+        let root = ActivityLogs.Root(source: .pi, url: directory.appendingPathComponent("custom-sessions"))
+        try database.write([root], key: "activity-roots")
         let reopened = AppStore(directory: directory)
-        guard reopened.activity?.days.first?.tokens == 120, reopened.activity?.days.first?.apiCost ?? 0 > 0 else {
+        guard reopened.activity?.days.first?.tokens == 120, reopened.activity?.days.first?.apiCost ?? 0 > 0,
+              reopened.activityRoots == [root] else {
             throw ProviderFailure.unavailable("Restart lost the cached usage and cost")
         }
-        print("Activity survives restart with costs, before any import starts")
+        print("Activity, costs and custom log folders survive restart, before any import starts")
     }
     /// MenuBarExtra proposes an intrinsic size, unlike our fixed-size screenshot previews.
     static func verifyTrayLayout() throws {

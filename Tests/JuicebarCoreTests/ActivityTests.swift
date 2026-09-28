@@ -43,8 +43,8 @@ final class ActivityTests: XCTestCase {
         let date = ISO8601DateFormatter().date(from: "2026-09-25T23:00:00Z")!
         let events = ActivitySource.allCases.map { ActivityEvent(id: "same-id", source: $0, date: date, model: "m", tokens: 100) }
         let report = ActivityReport(events: events, now: date, calendar: calendar)
-        XCTAssertEqual(report.days.count, 3)
-        XCTAssertEqual(report.days.map(\.tokens).reduce(0, +), 300)
+        XCTAssertEqual(report.days.count, ActivitySource.allCases.count)
+        XCTAssertEqual(report.days.map(\.tokens).reduce(0, +), Double(ActivitySource.allCases.count) * 100)
         XCTAssertEqual(calendar.component(.day, from: report.days[0].day), 26)
     }
     func testCacheInvalidatesChangedFilesWithoutCopyingContent() throws {

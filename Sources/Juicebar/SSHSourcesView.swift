@@ -9,7 +9,7 @@ struct SSHSourcesView: View {
         Panel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack { Label(tr("Weitere Rechner"), systemImage: "network").font(.headline); Spacer(); Text("SSH").font(.caption.monospaced()).foregroundStyle(.secondary) }
-                Text(tr("Vorhandene SSH-Aliase, zum Beispiel workstation. Liest Codex-, Claude- und OpenCode-Nutzung aus deinem Benutzerverzeichnis. Benötigt Python 3 und eine Anmeldung mit Schlüssel."))
+                Text(tr("Vorhandene SSH-Aliase, zum Beispiel workstation. Liest die unterstützten Nutzungslogs aus deinem Benutzerverzeichnis. Benötigt Python 3 und eine Anmeldung mit Schlüssel."))
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(store.sshHosts, id: \.self) { value in
                     HStack {

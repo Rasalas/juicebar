@@ -134,3 +134,17 @@ The app and DMG passed Developer ID signing, Apple notarization, ticket stapling
 Installed 0.1.5 found the 0.1.7 candidate. Dismissing the offer and checking again worked. Sparkle then downloaded, installed and relaunched 0.1.7 build 9. Four configuration hashes remained identical, both usage caches were retained, and quota observations increased from 1,789 to 1,805. Codex, Claude/Fable and OpenCode Go returned fresh quotas. The live popover showed the new forecast text without a scroll view when its content fitted.
 
 A separate localhost test feed deliberately pointed to a missing update archive. Sparkle displayed a download error and left 0.1.5 installed; the error could be dismissed before the successful update. The temporary feed override was removed, restoring the normal stable feed. The same tested release assets were then promoted to stable. Installation on a second Mac remains outstanding.
+
+## Additional activity formats and import performance
+
+The additional-source tests use synthetic Gemini JSON/JSONL, Cline SDK v1, Roo, Qwen and Kilo SQLite files. They compare local output with the bundled SSH collector, check cache and reasoning semantics, and verify that SQLite WAL writes invalidate cached metadata. No real sessions or credentials are test fixtures.
+
+Run the optional workload measurement with:
+
+```sh
+JUICEBAR_BENCHMARK=1 swift test --filter ActivityPerformanceTests
+```
+
+On the development Mac on 2026-09-28, the debug build read 10,000 Gemini JSONL entries in about 1.8 seconds initially and 0.06 seconds from cache. A complete import of 20,000 Kilo messages took about 0.99 seconds initially and 0.26 seconds unchanged after adding the database/WAL fingerprint cache, down from 0.95 seconds unchanged. These are local synthetic measurements, not timing guarantees for other machines or SSH hosts.
+
+The catalog signing helper now fails without opening authentication UI. Running an unsigned temporary build against the existing key returned status -25293 immediately. The wrapper also rejected the outdated installed helper before invoking it. The regular application already disables authentication UI for its Keychain reads; activity log parsers do not access Keychain.
