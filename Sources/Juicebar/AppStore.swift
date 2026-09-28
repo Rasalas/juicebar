@@ -182,6 +182,8 @@ final class AppStore: ObservableObject {
 
     private func notify(account: AccountConfiguration, snapshot: AccountSnapshot) async {
         guard settings.notificationsEnabled, !settings.isQuiet(at: Date()), !isDemo else { return }
+        var snapshot = snapshot
+        snapshot.windows = QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)
         let events = WarningEngine.events(snapshot: snapshot, accountName: account.displayName, history: history[account.id] ?? [],
                                           settings: settings, sent: Set(warnings.map(\.id)))
         guard !events.isEmpty else { return }
