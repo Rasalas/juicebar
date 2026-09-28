@@ -173,7 +173,7 @@ final class AdditionalActivityTests: XCTestCase {
         XCTAssertEqual(first.days.first?.source, .kilo); XCTAssertEqual(first.days.first?.tokens, 100)
         XCTAssertEqual(first.days.first?.apiCost, 0.2)
         let cacheFiles = try FileManager.default.contentsOfDirectory(at: archive.appendingPathComponent("activity-sources"), includingPropertiesForKeys: nil)
-        let cache = try XCTUnwrap(cacheFiles.first { $0.lastPathComponent == stableID("kilo|\(directory.path)") + ".plist" })
+        let cache = try XCTUnwrap(cacheFiles.first { $0.lastPathComponent == "kilo-" + stableID("kilo|\(directory.path)") + ".plist" })
         let cached = try Data(contentsOf: cache)
         _ = try ActivityImport.read(roots: roots, databasePath: root.appendingPathComponent("absent.db").path, hosts: [], directory: archive, now: now.addingTimeInterval(1))
         XCTAssertEqual(try Data(contentsOf: cache), cached, "Unchanged database and WAL must not rewrite the archive")
@@ -185,5 +185,10 @@ final class AdditionalActivityTests: XCTestCase {
         let remote = try collectRemote(root: root).compactMap { $0["event"] as? [String: Any] }
         XCTAssertEqual(remote.count, 2); XCTAssertTrue(remote.allSatisfy { $0["source"] as? String == "kilo" })
         XCTAssertTrue(remote.allSatisfy { JSONValue.number($0["reportedCost"]) == 0.2 })
+        let removed = try ActivityImport.read(roots: [], databasePath: root.appendingPathComponent("absent.db").path, hosts: [], directory: archive, now: now).0
+        XCTAssertEqual(removed.days.first?.responses, 2, "Removing a local folder retains already imported usage")
+        let expired = try ActivityImport.read(roots: [], databasePath: root.appendingPathComponent("absent.db").path, hosts: [], directory: archive, now: now.addingTimeInterval(91 * 86400)).0
+        XCTAssertTrue(expired.days.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.path))
     }
 }
