@@ -14,6 +14,12 @@ The app and DMG passed Developer ID signing, Apple notarization, stapling and Ga
 
 Installed 0.1.7 first exercised a localhost feed with a missing archive. Sparkle reported the download error and left 0.1.7 unchanged. The real 0.1.8 candidate could be dismissed and offered again, then downloaded, installed and relaunched as build 10. Recorded account/settings/source hashes were unchanged, both usage caches remained present, and quota observations increased from 7,130 to 7,148. Claude showed current session/weekly usage and Fable without Iguana Necktie. The temporary feed override was removed before promoting the same tested assets to stable. Second-Mac installation remains untested.
 
+## Juicebars 0.1.9 release, 5 October
+
+Version 0.1.9, build 11, fits the menu bar window to its content and adds hover details to quota bars. The installed 0.1.8 window measured 784 pt for 747 pt of content; a fresh launch measured 747 pt, so the window had kept an earlier, larger height. All regular Swift tests, the Python collector tests and the tray layout check passed locally; CI passed on the release commit. English and German previews were refreshed.
+
+The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. All four GitHub assets matched their local originals, and the stable feed served build 11. Window fitting and the hover popover inside the live menu bar panel were not verified by automation, because the test instance's status item could not be opened by script. The old-to-new update is being performed on the maintainer's installed 0.1.8.
+
 ## Reproducible checks
 
 ```sh
