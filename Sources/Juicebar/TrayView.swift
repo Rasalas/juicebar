@@ -4,6 +4,7 @@ import JuicebarCore
 struct TrayView: View {
     @ObservedObject var store: AppStore
     var maximumHeight: CGFloat = (NSScreen.main?.visibleFrame.height ?? 800) - 16
+    @State private var height: CGFloat = 0
     private var accounts: [AccountConfiguration] { QuotaOrder.accounts(store.accounts.filter(\.enabled)) }
     var body: some View {
         TrayLayout(maximumHeight: maximumHeight - 32) {
@@ -16,14 +17,14 @@ struct TrayView: View {
                 }.buttonStyle(.plain).help(tr("Juicebars öffnen")).accessibilityLabel(tr("Juicebars öffnen"))
                 Spacer()
                 if store.isRefreshing { ProgressView().controlSize(.small) }
-                Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise") }
+                Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 14, height: 14) }
                     .disabled(store.isRefreshing || store.isDemo).help(tr("Aktualisieren"))
                 Menu {
                     Button(store.isPaused ? tr("Abfragen fortsetzen") : tr("Abfragen pausieren")) { store.isPaused.toggle(); if !store.isPaused { store.refresh(force: true) } }
                     Button(tr("Warnungen 1 Stunde stummschalten")) { store.snooze() }
                     Divider()
                     Button(tr("Juicebars beenden")) { store.stop(); NSApp.terminate(nil) }
-                } label: { Image(systemName: "ellipsis") }
+                } label: { Image(systemName: "ellipsis").frame(width: 14, height: 14) }
                     .menuStyle(.button).menuIndicator(.hidden).buttonStyle(JuiceButtonStyle()).fixedSize()
                     .help(tr("Weitere Aktionen"))
             }
@@ -43,10 +44,12 @@ struct TrayView: View {
                     Label(tr("Soll = gleichmäßiger Verbrauch"), systemImage: "diamond.fill")
                     Spacer(minLength: 4)
                     Text(store.isDemo ? tr("Beispieldaten") : store.isPaused ? tr("Pausiert") : updatedText(store.lastChecked, now: store.now))
-                }.font(.system(size: 9)).foregroundStyle(.secondary)
+                }.font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
         .padding(16).frame(width: 380).background(.ultraThinMaterial)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .background(TrayWindowFit(height: height))
         .tint(Palette.accent).buttonStyle(JuiceButtonStyle())
         .environment(\.quotaDisplay, store.settings.displayMode).onAppear { store.start() }
     }
@@ -62,6 +65,20 @@ struct TrayView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// MenuBarExtra grows its window with the content but never shrinks it; the rest stays transparent.
+private struct TrayWindowFit: NSViewRepresentable {
+    let height: CGFloat
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard height > 0, let window = view.window, abs(window.contentLayoutRect.height - height) >= 0.5 else { return }
+            var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: CGSize(width: window.contentLayoutRect.width, height: height)))
+            frame.origin = NSPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)
+            window.setFrame(frame, display: true)
+        }
     }
 }
 
@@ -126,7 +143,7 @@ private struct TrayAccountView: View {
                     HStack {
                         Text(metric.title).foregroundStyle(.secondary)
                         Spacer()
-                        Text(metric.currency == "Credits" ? "\(metric.amount.formatted(.number.precision(.fractionLength(0...1)))) Credits" : metric.amount.formatted(.currency(code: metric.currency)))
+                        Text(metric.currency == "Credits" ? "\(metric.amount.formatted(.number.precision(.fractionLength(0)))) Credits" : metric.amount.formatted(.currency(code: metric.currency)))
                     }.font(.system(size: 11)).monospacedDigit()
                 }
                 if let count = snapshot.benefitCount, count > 0 {

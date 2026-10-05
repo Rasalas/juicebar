@@ -182,7 +182,7 @@ struct AccountCard: View {
                         HStack {
                             Text(metric.title).font(.system(size: 12)).foregroundStyle(.secondary)
                             Spacer()
-                            Text(metric.currency == "Credits" ? "\(metric.amount.formatted(.number.precision(.fractionLength(0...1)))) Credits" : metric.amount.formatted(.currency(code: metric.currency)))
+                            Text(metric.currency == "Credits" ? "\(metric.amount.formatted(.number.precision(.fractionLength(0)))) Credits" : metric.amount.formatted(.currency(code: metric.currency)))
                                 .font(.system(size: 20, weight: .medium, design: .rounded)).monospacedDigit()
                         }
                     }

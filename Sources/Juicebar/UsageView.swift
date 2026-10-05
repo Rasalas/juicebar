@@ -244,7 +244,7 @@ struct ActivityCalendar: View {
                 ForEach(0..<(dates.count / 7), id: \.self) { week in
                     let first = dates[week * 7]
                     VStack(spacing: 5) {
-                        Text(week == 0 || calendar.component(.day, from: first) <= 7 ? first.formatted(.dateTime.month(.abbreviated)) : " ")
+                        Text(week == 0 || calendar.component(.day, from: first) <= 7 ? first.formatted(.dateTime.month(.abbreviated).locale(Localization.locale)) : " ")
                             .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 16)
                         ForEach(0..<7) { row in
                             let date = dates[week * 7 + row], count = counts[date] ?? 0
