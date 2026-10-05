@@ -78,13 +78,19 @@ struct QuotaBar: View {
                     Capsule().fill(expired ? Color.secondary : color)
                         .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
                         .offset(y: compact ? 7 : 12)
+                    if !expired, let ideal = window.idealPercent(at: now), window.usedPercent - ideal > 1 {
+                        // Usage ahead of the even pace, between fill end and diamond in either display mode.
+                        let edges = [displayed, mode.value(used: ideal)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
+                        Hatch().stroke(Color.primary.opacity(0.5), lineWidth: 1).clipShape(Capsule())
+                            .frame(width: edges.max()! - edges.min()!, height: 6)
+                            .offset(x: edges.min()!, y: compact ? 7 : 12)
+                    }
                     if !expired, let ideal = window.idealPercent(at: now) {
                         Image(systemName: "diamond.fill")
                             .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
                             .frame(width: 10, height: 10)
                             // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
                             .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
-                            .help(tr("Sollstand bei gleichmäßigem Verbrauch: {0} %", Int(mode.value(used: ideal).rounded())))
                     }
                 }
                 .frame(height: compact ? 13 : 18, alignment: .topLeading)
@@ -101,6 +107,8 @@ struct QuotaBar: View {
                 }
             }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
+        .contentShape(Rectangle())
+        .hoverInfo { details }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : ""))
         .accessibilityValue(statusTitle)
@@ -111,7 +119,6 @@ struct QuotaBar: View {
             if let reset = window.resetsAt {
                 Image(systemName: "arrow.clockwise").font(.system(size: 9))
                 Text(expired ? tr("Reset erreicht · warte auf neuen Stand") : tr("Reset {0}", relativeTime(reset, now: now)))
-                    .help(reset.formatted(Date.FormatStyle(date: .complete, time: .shortened).locale(Localization.locale)))
             } else { Text(tr("Resetzeit nicht verfügbar")) }
         }
     }
@@ -124,8 +131,39 @@ struct QuotaBar: View {
             }
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(status == .exhausted ? Color.red : Palette.accent)
-            .help(statusHelp)
         }
+    }
+    @ViewBuilder private var details: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if !expired, let ideal = window.idealPercent(at: now) {
+                detail(tr("Soll jetzt"), tr("{0} %", Int(mode.value(used: ideal).rounded())))
+                if let recovery = window.paceRecovery(at: now) {
+                    detail(tr("Ohne weitere Nutzung im Soll"), pointInTime(recovery))
+                } else {
+                    detail(tr("Puffer zum Soll"), tr("{0} Prozentpunkte", Int((ideal - window.usedPercent).rounded())))
+                }
+            }
+            switch status {
+            case .projectedPaceCrossing(let date) where !expired: detail(tr("Soll erreicht voraussichtlich"), pointInTime(date))
+            case .projectedExhaustion(let date) where !expired: detail(tr("Limit erreicht voraussichtlich"), pointInTime(date))
+            default: EmptyView()
+            }
+            if !window.supportsPace {
+                Text(tr("Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn.")).foregroundStyle(.secondary)
+                    .frame(width: 260, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            }
+            if let reset = window.resetsAt { detail(tr("Reset"), pointInTime(reset)) }
+            if !statusHelp.isEmpty, !expired {
+                Text(statusHelp).foregroundStyle(.secondary).frame(width: 260, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    private func detail(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text(value).monospacedDigit()
+        }.frame(width: 260)
     }
     private var statusTitle: String {
         guard !expired else { return "" }
@@ -151,12 +189,49 @@ struct QuotaBar: View {
     }
 }
 
+private struct Hatch: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for x in stride(from: rect.minX - rect.height, to: rect.maxX, by: 3) {
+            path.move(to: CGPoint(x: x, y: rect.maxY)); path.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+        }
+        return path
+    }
+}
+
+func pointInTime(_ date: Date) -> String {
+    date.formatted(Date.FormatStyle(locale: Localization.locale).weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+}
+
+extension View {
+    /// `.help` tooltips rarely appear in the menu bar panel and cannot hold exact times compactly.
+    func hoverInfo<Info: View>(@ViewBuilder _ info: @escaping () -> Info) -> some View { modifier(HoverInfo(info: info)) }
+}
+
+private struct HoverInfo<Info: View>: ViewModifier {
+    let info: () -> Info
+    @State private var hovering = false
+    @State private var shown = false
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                hovering = inside
+                guard inside else { shown = false; return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { if hovering { shown = true } }
+            }
+            .popover(isPresented: $shown, arrowEdge: .bottom) {
+                info().font(.system(size: 11)).padding(12)
+            }
+    }
+}
+
 func relativeTime(_ date: Date, now: Date = Date()) -> String {
     let delta = date.timeIntervalSince(now)
     if delta <= 0 { return tr("jetzt") }
     if delta < 3600 { return tr("in {0} Min.", max(1, Int(delta / 60))) }
     if delta < 86400 { return tr("in {0} Std. {1} Min.", Int(delta / 3600), Int(delta.truncatingRemainder(dividingBy: 3600) / 60)) }
-    return tr("in {0} Tagen", Int(ceil(delta / 86400)))
+    if delta < 7 * 86400 { return tr("in {0} T. {1} Std.", Int(delta / 86400), Int(delta.truncatingRemainder(dividingBy: 86400) / 3600)) }
+    return tr("in {0} Tagen", Int(delta / 86400))
 }
 
 func updatedText(_ date: Date?, now: Date) -> String {
@@ -211,7 +286,7 @@ struct ResetAvailability: View {
                 .foregroundStyle(Palette.accent)
             if let expiry {
                 Text(expiry <= now ? tr("Ablauf erreicht · neuer Stand ausstehend") :
-                     "\(count == 1 ? tr("Läuft") : tr("Nächster Ablauf")) \(relativeTime(expiry, now: now))\(count == 1 ? tr(" ab") : "") · \(expiry.formatted(.dateTime.day().month(.abbreviated).hour().minute()))")
+                     "\(count == 1 ? tr("Läuft") : tr("Nächster Ablauf")) \(relativeTime(expiry, now: now))\(count == 1 ? tr(" ab") : "") · \(expiry.formatted(.dateTime.day().month(.abbreviated).hour().minute().locale(Localization.locale)))")
                     .foregroundStyle(.secondary)
                     .help(expiry.formatted(Date.FormatStyle(date: .complete, time: .shortened).locale(Localization.locale)))
             } else {

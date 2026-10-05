@@ -83,6 +83,11 @@ public struct QuotaWindow: Identifiable, Codable, Equatable, Sendable {
         guard supportsPace, let duration, duration > 0, let resetsAt, resetsAt > date else { return nil }
         return min(100, max(0, 100 * (1 - resetsAt.timeIntervalSince(date) / duration)))
     }
+    /// When the even-pace target catches up with usage that is ahead of it, assuming no further use.
+    public func paceRecovery(at date: Date) -> Date? {
+        guard let ideal = idealPercent(at: date), usedPercent > ideal, let duration, let resetsAt else { return nil }
+        return resetsAt.addingTimeInterval(-duration * (1 - min(usedPercent, 100) / 100))
+    }
 }
 
 public enum BenefitStatus: String, Codable, Sendable { case available, used, expired, paused, unknown }

@@ -431,5 +431,15 @@
   "Logdatei überschreitet 32 MiB.": "Log file exceeds 32 MiB.",
   "{0}: Import auf die neuesten 100.000 Zeilen je Tabelle begrenzt.": "{0}: import limited to the latest 100,000 rows per table.",
   "Kilo-Dateistand konnte nicht gelesen werden.": "Could not read Kilo file metadata.",
-  "Ordner mit Kilo-Datenbanken auswählen.": "Select a folder containing Kilo databases."
+  "Ordner mit Kilo-Datenbanken auswählen.": "Select a folder containing Kilo databases.",
+  "Soll jetzt": "Target now",
+  "{0} %": "{0}%",
+  "Ohne weitere Nutzung im Soll": "Back on target without further use",
+  "Puffer zum Soll": "Headroom to target",
+  "{0} Prozentpunkte": "{0} percentage points",
+  "Soll erreicht voraussichtlich": "Target expected to be reached",
+  "Limit erreicht voraussichtlich": "Limit expected to be reached",
+  "Reset": "Reset",
+  "in {0} T. {1} Std.": "in {0} d {1} hr",
+  "Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn.": "No target: the provider does not report when this window started."
 }
