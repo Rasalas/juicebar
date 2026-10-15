@@ -1,5 +1,15 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.10 release, 15 October
+
+Version 0.1.10, build 12, includes the review fixes and CPU improvements documented below. [PR #4](https://github.com/Rasalas/juicebar/pull/4) was merged after both macOS checks passed. Main and tag CI also passed: 106 regular Swift tests, nine Python collector tests, tray layout in both scrollbar modes, persistence, source packaging and direct-updater compilation. The new recovery test initially failed on the English CI host because it expected a German word; its assertion now uses the active translation.
+
+The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. All four assets downloaded from the public candidate matched the local originals. Both checksum entries passed; copying the app out of the public DMG preserved its signature and notarization. The Sparkle archive verified against the public key, while changing one byte caused rejection. Repeated signing completed without Keychain prompts. Tray and persistence checks also passed directly in the signed release bundle.
+
+Installed 0.1.9 exercised a localhost feed with a missing ZIP: Sparkle displayed a download error and retained the old version. The real 0.1.10 offer could be dismissed and offered again. Sparkle then downloaded, installed and relaunched build 12. All four account/settings/SSH/path configuration hashes stayed identical, both usage caches remained present, and the bounded quota history retained 12,000 observations. Codex, Claude/Fable and OpenCode Go returned fresh values. Quota details opened on click, and their reset/pace descriptions appeared in the native accessibility tree. The temporary feed override was removed before promoting the same tested artifacts to stable; the stable feed serves build 12.
+
+English and German screenshots were refreshed. The website was checked at 1280 and 390 px without missing images or horizontal overflow. Live VoiceOver and installation on a second Mac remain unverified. Component benchmarks below do not establish a whole-app CPU percentage for the installed release.
+
 ## Review fixes and CPU profiling, 15 October
 
 All six review findings are addressed: unreadable preferences cannot be silently replaced by defaults; quota periods tolerate fractional reset jitter without repeating warnings; partial OpenCode imports retain their warnings; provider work is bounded and independent per account; quota details can be opened by click or keyboard and include reset/pace accessibility values; removed or edited accounts reject late results. The 30/90-day selection now controls the calendar and active-day counts consistently. Recovery preserves original preference blobs before resetting affected settings.
@@ -17,7 +27,7 @@ The larger fixture has 4,000 archives and 77,872,320 bytes, with about twice the
 
 All 106 regular Swift tests and nine Python collector tests passed. The four optional release benchmarks passed, as did an isolated 50-test release subset covering import, cost, calendar and parser behavior. Regressions cover corrupt-account startup/recovery, bounded concurrency, cancellation, queued manual refresh, reset jitter and legacy warning migration, WAL writes and database replacement, expiry and future rows, DST boundaries, and retained partial-import warnings. Tray sizing, scrolling with both scrollbar settings, colors, English layout and activity persistence passed. The source app bundle built and passed deep signature verification and bundled layout/persistence checks. The direct-download updater build also passed.
 
-Synthetic previews were reviewed for the tray, usage page and 30-day calendar. Offscreen SwiftUI did not expose accessibility descendants on this Mac, so the native check reports that limitation; live VoiceOver verification remains outstanding. The installed app was left unchanged. The tested source build is in `dist/Juicebar.app`.
+Synthetic previews were reviewed for the tray, usage page and 30-day calendar. Offscreen SwiftUI did not expose accessibility descendants on this Mac, so the native check reports that limitation; live VoiceOver verification remains outstanding. The review checks left the installed app unchanged; the subsequent release installation is recorded above.
 
 Reproduce the optional measurements with:
 
