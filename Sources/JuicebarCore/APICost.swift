@@ -54,14 +54,17 @@ public struct TokenBreakdown: Codable, Sendable {
 public enum APICost {
     public static var priceDate: String { ModelCatalog.shared.snapshot.verifiedOn }
     public static func estimate(model: String, provider: String = "", usage: TokenBreakdown?) -> Double? {
-        guard let usage, usage.isValid else { return nil }
-        // Resolve identities when pricing, including archived events from the preview period.
-        let catalog = ModelCatalog.shared.snapshot
-        let rates = catalog.rates
+        guard let usage, usage.isValid,
+              let rate = rate(model: model, provider: provider, catalog: ModelCatalog.shared.snapshot) else { return nil }
+        return estimate(rate: rate, usage: usage)
+    }
+    static func rate(model: String, provider: String, catalog: CatalogDocument) -> CatalogDocument.Rate? {
         let canonical = catalog.resolve(model: model, provider: provider)?.canonicalModel ?? model.lowercased()
-        // The common case avoids running a regular expression for every logged response.
-        let name = rates[canonical] != nil ? canonical : canonical.replacingOccurrences(of: #"-(?:\d{8}|\d{4}-\d{2}-\d{2})$"#, with: "", options: .regularExpression)
-        guard let rate = rates[name] else { return nil }
+        let name = catalog.rates[canonical] != nil ? canonical : canonical.replacingOccurrences(of: #"-(?:\d{8}|\d{4}-\d{2}-\d{2})$"#, with: "", options: .regularExpression)
+        return catalog.rates[name]
+    }
+    static func estimate(rate: CatalogDocument.Rate, usage: TokenBreakdown) -> Double? {
+        guard usage.isValid else { return nil }
         guard (usage.cacheWrite == 0 || rate.write > 0), (usage.cacheWriteHour == 0 || rate.hour > 0) else { return nil }
         let long = rate.longContext.map { usage.input + usage.cacheRead + usage.cacheWrite + usage.cacheWriteHour > $0 } ?? false
         let inputCost = usage.input * rate.input + usage.cacheRead * rate.read + usage.cacheWrite * rate.write + usage.cacheWriteHour * rate.hour

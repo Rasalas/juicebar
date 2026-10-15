@@ -47,6 +47,20 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(report.days.map(\.tokens).reduce(0, +), Double(ActivitySource.allCases.count) * 100)
         XCTAssertEqual(calendar.component(.day, from: report.days[0].day), 26)
     }
+    func testDayAggregationMatchesCalendarAcrossMidnightAndDST() throws {
+        let formatter = ISO8601DateFormatter()
+        for (zone, start) in [("Europe/Berlin", "2026-03-28T00:00:00Z"), ("Europe/Berlin", "2026-10-24T00:00:00Z"),
+                              ("Australia/Lord_Howe", "2026-10-03T00:00:00Z"), ("Pacific/Apia", "2011-12-29T00:00:00Z")] {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = try XCTUnwrap(TimeZone(identifier: zone))
+            let first = try XCTUnwrap(formatter.date(from: start))
+            let events = (0..<288).map { index in ActivityEvent(id: "\(index)", source: .gemini, date: first.addingTimeInterval(Double(index) * 900), model: "fixture", tokens: 1) }
+            let expected = Dictionary(grouping: events, by: { calendar.startOfDay(for: $0.date) }).mapValues(\.count)
+            let report = ActivityReport(events: Array(events.reversed()), now: first.addingTimeInterval(4 * 86400), calendar: calendar)
+            XCTAssertEqual(Dictionary(uniqueKeysWithValues: report.days.map { ($0.day, $0.responses) }), expected, zone)
+        }
+    }
+
     func testCacheInvalidatesChangedFilesWithoutCopyingContent() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let logs = root.appendingPathComponent("logs"), cache = root.appendingPathComponent("cache")

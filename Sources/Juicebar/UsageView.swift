@@ -10,10 +10,11 @@ struct UsageView: View {
     @State private var showQuotas = false
     private var filtered: [ActivityDay] {
         let since = Calendar.current.date(byAdding: .day, value: -(days - 1), to: Calendar.current.startOfDay(for: store.now))!
-        return (store.activity?.days ?? []).filter { (source == nil || $0.source == source) && $0.day >= since }
+        return (store.activity?.days ?? []).filter { (source == nil || $0.source == source) && $0.day >= since && $0.day <= store.now }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        let filtered = self.filtered
+        return VStack(alignment: .leading, spacing: 20) {
             PageHeading(title: tr("Deine Nutzung."), subtitle: tr("Deine Coding-Werkzeuge auf diesem Mac und per SSH, gemeinsam im Verlauf."))
             HStack(spacing: 8) {
                 Picker(tr("Werkzeug"), selection: $source) {
@@ -37,19 +38,19 @@ struct UsageView: View {
                     Spacer()
                     JuiceSegments(title: tr("Zeitraum"), selection: $days, options: [(tr("30 Tage"), 30), (tr("90 Tage"), 90)]).frame(width: 175)
                 }
-                summary
+                summary(filtered)
                 Panel {
                     VStack(alignment: .leading, spacing: 20) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(tr("Aktivität")).font(.headline)
-                                Text(tr("90 Tage · Antworten und archivierte Nachrichten")).font(.caption).foregroundStyle(.secondary)
+                                Text(tr("{0} Tage · Antworten und archivierte Nachrichten", days)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(tr("{0} aktive Tage", Set(report.days.filter { source == nil || $0.source == source }.map(\.day)).count))
+                            Text(tr("{0} aktive Tage", Set(filtered.map(\.day)).count))
                                 .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.accent)
                         }
-                        ActivityCalendar(days: report.days.filter { source == nil || $0.source == source }, now: store.now)
+                        ActivityCalendar(days: filtered, now: store.now, numberOfDays: days)
                     }
                 }
                 Panel {
@@ -170,7 +171,7 @@ struct UsageView: View {
         guard values.contains(where: { $0.pricedTokens > 0 }) else { return "—" }
         return values.reduce(0) { $0 + $1.apiCost }.formatted(.currency(code: "USD"))
     }
-    private var summary: some View {
+    private func summary(_ filtered: [ActivityDay]) -> some View {
         let tokens = filtered.reduce(0) { $0 + $1.tokens }
         let priced = filtered.reduce(0) { $0 + $1.pricedTokens }
         let archived = filtered.reduce(0) { $0 + $1.archivedMessages }
@@ -222,17 +223,25 @@ func compactNumber(_ number: Double) -> String { number.formatted(.number.notati
 struct ActivityCalendar: View {
     let days: [ActivityDay]
     let now: Date
+    let numberOfDays: Int
+    private let groupedDays: [Date: [ActivityDay]]
+    init(days: [ActivityDay], now: Date, numberOfDays: Int = 90) {
+        self.days = days
+        self.now = now
+        self.numberOfDays = numberOfDays
+        groupedDays = Dictionary(grouping: days) { Calendar.current.startOfDay(for: $0.day) }
+    }
     @State private var selected: Date?
     private var calendar: Calendar { var value = Calendar.current; value.firstWeekday = 2; return value }
     private var start: Date {
-        let first = calendar.date(byAdding: .day, value: -89, to: calendar.startOfDay(for: now))!
+        let first = calendar.date(byAdding: .day, value: -(numberOfDays - 1), to: calendar.startOfDay(for: now))!
         return calendar.dateInterval(of: .weekOfYear, for: first)!.start
     }
     private var cells: [Date] {
         let count = calendar.dateComponents([.day], from: start, to: now).day! + 1
         return (0..<(Int(ceil(Double(count) / 7)) * 7)).map { calendar.date(byAdding: .day, value: $0, to: start)! }
     }
-    private var totals: [Date: Int] { Dictionary(grouping: days, by: \.day).mapValues { $0.reduce(0) { $0 + $1.responses + $1.archivedMessages } } }
+    private var totals: [Date: Int] { groupedDays.mapValues { $0.reduce(0) { $0 + $1.responses + $1.archivedMessages } } }
     var body: some View {
         let dates = cells, counts = totals, maximum = max(1, counts.values.max() ?? 1)
         VStack(alignment: .leading, spacing: 12) {
@@ -248,7 +257,7 @@ struct ActivityCalendar: View {
                             .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 16)
                         ForEach(0..<7) { row in
                             let date = dates[week * 7 + row], count = counts[date] ?? 0
-                            let valid = date <= now && date >= calendar.date(byAdding: .day, value: -89, to: calendar.startOfDay(for: now))!
+                            let valid = date <= now && date >= calendar.date(byAdding: .day, value: -(numberOfDays - 1), to: calendar.startOfDay(for: now))!
                             Button { selected = date } label: {
                                 RoundedRectangle(cornerRadius: 4)
                                     .fill(valid ? color(count, maximum: maximum) : Color.clear)
@@ -268,7 +277,7 @@ struct ActivityCalendar: View {
                 ForEach(0..<5) { index in RoundedRectangle(cornerRadius: 2).fill(index == 0 ? Color.primary.opacity(0.05) : Palette.green.opacity(Double(index) / 4)).frame(width: 9, height: 9) }
                 Text(tr("Viel")).font(.system(size: 9)).foregroundStyle(.secondary)
             }
-        }
+        }.onChange(of: numberOfDays) { _, _ in selected = nil }
     }
     private func color(_ count: Int, maximum: Int) -> Color {
         guard count > 0 else { return Color.primary.opacity(0.05) }
@@ -276,7 +285,7 @@ struct ActivityCalendar: View {
         return Palette.green.opacity(level / 4)
     }
     private func detail(_ date: Date) -> String {
-        let values = days.filter { calendar.isDate($0.day, inSameDayAs: date) }
+        let values = groupedDays[calendar.startOfDay(for: date)] ?? []
         let total = values.reduce(0) { $0 + $1.responses }
         let archived = values.reduce(0) { $0 + $1.archivedMessages }
         let breakdown = values.map { "\($0.source.name) \($0.responses)" }.joined(separator: " · ")
@@ -289,9 +298,19 @@ struct QuotaHistoryChart: View {
     @ObservedObject var store: AppStore
     private var points: [QuotaPoint] {
         store.accounts.filter(\.enabled).flatMap { account in
-            (store.history[account.id] ?? []).filter { $0.observedAt > store.now.addingTimeInterval(-86400) }.flatMap { snapshot in
-                QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).map { window in QuotaPoint(date: snapshot.observedAt, value: store.settings.displayMode.value(used: window.usedPercent), label: "\(account.displayName) · \(window.title)", series: "\(account.id)|\(snapshot.identity)|\(window.id)|\(window.resetsAt?.timeIntervalSince1970 ?? 0)") }
+            var previous: AccountSnapshot?
+            var values: [QuotaPoint] = []
+            for raw in (store.history[account.id] ?? []).sorted(by: { $0.observedAt < $1.observedAt }) {
+                let snapshot = QuotaPeriod.normalizing(raw, previous: previous)
+                previous = snapshot
+                guard snapshot.observedAt > store.now.addingTimeInterval(-86400) else { continue }
+                values += QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).map { window in
+                    QuotaPoint(date: snapshot.observedAt, value: store.settings.displayMode.value(used: window.usedPercent),
+                               label: "\(account.displayName) · \(window.title)",
+                               series: "\(account.id)|\(QuotaPeriod.key(window: window, snapshot: snapshot))")
+                }
             }
+            return values
         }
     }
     var body: some View {

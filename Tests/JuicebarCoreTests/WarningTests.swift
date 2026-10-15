@@ -36,6 +36,69 @@ final class WarningTests: XCTestCase {
         XCTAssertNil(WarningEngine.projection(window: current.windows[0], snapshot: current, history: [], now: now))
         XCTAssertNil(WarningEngine.projection(window: current.windows[0], snapshot: current, history: [snapshot(percent: 90, age: 600, resetOffset: 7200), samples[1]], now: now))
     }
+    func testProjectionAcceptsSubsecondResetJitter() throws {
+        let current = snapshot(percent: 80, resetOffset: 7200)
+        let samples = [snapshot(percent: 60, age: 600, resetOffset: 7200.4),
+                       snapshot(percent: 70, age: 300, resetOffset: 7199.7)]
+        let projection = try XCTUnwrap(WarningEngine.projection(window: current.windows[0], snapshot: current, history: samples, now: now))
+        XCTAssertEqual(projection.reachesLimitAt.timeIntervalSince(now), 600, accuracy: 0.01)
+        XCTAssertEqual(current.windows[0].resetsAt, now.addingTimeInterval(7200))
+    }
+    func testWarningDedupHandlesRoundingBoundaryButKeepsDistinctResets() {
+        var settings = MonitorSettings()
+        settings.paceEnabled = false; settings.forecastEnabled = false
+        let first = snapshot(resetOffset: 3630.4)
+        let sent = WarningEngine.events(snapshot: first, accountName: "Test", history: [], settings: settings, sent: [], now: now)
+        let ids = Set(sent.map(\.id))
+        let jittered = snapshot(resetOffset: 3629.7)
+        XCTAssertTrue(WarningEngine.events(snapshot: jittered, accountName: "Test", history: [first], settings: settings, sent: ids, now: now).isEmpty)
+        let distinct = snapshot(resetOffset: 3632)
+        XCTAssertEqual(WarningEngine.events(snapshot: distinct, accountName: "Test", history: [first], settings: settings, sent: ids, now: now).count, 1)
+    }
+    func testPersistedPeriodSurvivesHistoryEvictionAndKeepsRawReset() throws {
+        var settings = MonitorSettings(); settings.paceEnabled = false; settings.forecastEnabled = false
+        let first = QuotaPeriod.normalizing(snapshot(resetOffset: 3630.4), previous: nil)
+        let initial = WarningEngine.events(snapshot: first, accountName: "Test", history: [], settings: settings, sent: [], now: now)
+        var current = first
+        for index in 1...1201 {
+            var next = snapshot(resetOffset: index.isMultiple(of: 2) ? 3630.4 : 3629.7)
+            next.observedAt = now.addingTimeInterval(Double(index))
+            current = QuotaPeriod.normalizing(next, previous: current)
+        }
+        let data = try JSONEncoder().encode(current)
+        let restored = try JSONDecoder().decode(AccountSnapshot.self, from: data)
+        XCTAssertEqual(restored.windows[0].resetsAt, now.addingTimeInterval(3629.7))
+        XCTAssertTrue(WarningEngine.events(snapshot: restored, accountName: "Test", history: [], settings: settings, sent: Set(initial.map(\.id)), now: restored.observedAt).isEmpty)
+    }
+    func testPeriodDoesNotMergeRolloverOrChangedIdentityOrDuration() {
+        let first = snapshot(resetOffset: 0.4)
+        var next = snapshot(resetOffset: 1.1)
+        next.observedAt = now.addingTimeInterval(0.5)
+        let rolled = QuotaPeriod.normalizing(next, previous: first)
+        XCTAssertNotEqual(QuotaPeriod.key(window: first.windows[0], snapshot: first), QuotaPeriod.key(window: rolled.windows[0], snapshot: rolled))
+        var switched = snapshot(percent: 80, resetOffset: 7200)
+        switched.identity = "another-login"
+        let samples = [snapshot(percent: 60, age: 600, resetOffset: 7200.4), snapshot(percent: 70, age: 300, resetOffset: 7199.7)]
+        XCTAssertNil(WarningEngine.projection(window: switched.windows[0], snapshot: switched, history: samples, now: now))
+        switched.identity = "login"; switched.windows[0].duration = 3600
+        XCTAssertNil(WarningEngine.projection(window: switched.windows[0], snapshot: switched, history: samples, now: now))
+    }
+    func testLegacyWarningMigrationDoesNotSuppressNearbyNewPeriod() {
+        var settings = MonitorSettings(); settings.paceEnabled = false; settings.forecastEnabled = false
+        let legacy = snapshot(resetOffset: 3600)
+        let oldID = stableID("a|login|w|30000060|threshold|50.0")
+        let migrated = QuotaPeriod.normalizing(snapshot(resetOffset: 3600.4), previous: legacy)
+        XCTAssertTrue(WarningEngine.events(snapshot: migrated, accountName: "Test", history: [], settings: settings, sent: [oldID], now: now).isEmpty)
+        let newPeriod = QuotaPeriod.normalizing(snapshot(percent: 20, resetOffset: 3602), previous: migrated)
+        let later = QuotaPeriod.normalizing(snapshot(percent: 60, resetOffset: 3602.1), previous: newPeriod)
+        XCTAssertEqual(WarningEngine.events(snapshot: later, accountName: "Test", history: [], settings: settings, sent: [oldID], now: now).count, 1)
+    }
+    func testResetJitterCannotAccumulateAwayFromPeriodAnchor() {
+        let first = QuotaPeriod.normalizing(snapshot(resetOffset: 7200), previous: nil)
+        let jittered = QuotaPeriod.normalizing(snapshot(resetOffset: 7200.7), previous: first)
+        let moved = QuotaPeriod.normalizing(snapshot(resetOffset: 7201.4), previous: jittered)
+        XCTAssertNotEqual(QuotaPeriod.key(window: first.windows[0], snapshot: first), QuotaPeriod.key(window: moved.windows[0], snapshot: moved))
+    }
     func testProjectionRejectsAccountSwitchAndExhaustionAfterReset() {
         var current = snapshot(percent: 80, resetOffset: 300)
         let samples = [snapshot(percent: 60, age: 600, resetOffset: 300), snapshot(percent: 70, age: 300, resetOffset: 300)]

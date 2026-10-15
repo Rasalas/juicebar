@@ -72,12 +72,15 @@ public struct QuotaWindow: Identifiable, Codable, Equatable, Sendable {
     public var title: String
     public var usedPercent: Double
     public var resetsAt: Date?
+    /// Stable reset identity carried between polls; resetsAt remains the provider display value.
+    public var periodAnchor: Date?
+    public var legacyWarningPeriod: String?
     public var duration: TimeInterval?
     public var supportsPace: Bool
     public init(id: String, title: String, usedPercent: Double, resetsAt: Date? = nil,
                 duration: TimeInterval? = nil, supportsPace: Bool = true) {
         self.id = id; self.title = title; self.usedPercent = usedPercent
-        self.resetsAt = resetsAt; self.duration = duration; self.supportsPace = supportsPace
+        self.resetsAt = resetsAt; self.periodAnchor = nil; self.legacyWarningPeriod = nil; self.duration = duration; self.supportsPace = supportsPace
     }
     public func idealPercent(at date: Date) -> Double? {
         guard supportsPace, let duration, duration > 0, let resetsAt, resetsAt > date else { return nil }
@@ -87,6 +90,60 @@ public struct QuotaWindow: Identifiable, Codable, Equatable, Sendable {
     public func paceRecovery(at date: Date) -> Date? {
         guard let ideal = idealPercent(at: date), usedPercent > ideal, let duration, let resetsAt else { return nil }
         return resetsAt.addingTimeInterval(-duration * (1 - min(usedPercent, 100) / 100))
+    }
+}
+
+/// Reset timestamps may vary by fractions of a second between provider polls.
+public enum QuotaPeriod {
+    public static func matches(window: QuotaWindow, snapshot: AccountSnapshot,
+                               otherWindow: QuotaWindow, otherSnapshot: AccountSnapshot) -> Bool {
+        guard snapshot.configurationID == otherSnapshot.configurationID,
+              snapshot.identity == otherSnapshot.identity, window.id == otherWindow.id,
+              window.duration == otherWindow.duration else { return false }
+        switch (window.resetsAt, otherWindow.resetsAt) {
+        case let (reset?, otherReset?):
+            let latestObservation = max(snapshot.observedAt, otherSnapshot.observedAt)
+            guard min(reset, otherReset) > latestObservation else { return false }
+            if let anchor = window.periodAnchor, let otherAnchor = otherWindow.periodAnchor {
+                return anchor == otherAnchor
+            }
+            // Compare with the persisted anchor as well as the latest poll. Adjacent
+            // one-second changes must not accumulate into a different reset window.
+            let anchor = window.periodAnchor ?? otherWindow.periodAnchor
+            if let anchor, max(abs(reset.timeIntervalSince(anchor)), abs(otherReset.timeIntervalSince(anchor))) > 1 {
+                return false
+            }
+            return abs(reset.timeIntervalSince(otherReset)) <= 1
+        case (nil, nil): return true
+        default: return false
+        }
+    }
+
+    /// Persist the original period identity so history eviction cannot repeat warnings.
+    public static func normalizing(_ snapshot: AccountSnapshot, previous: AccountSnapshot?) -> AccountSnapshot {
+        var result = snapshot
+        let previousWindows = Dictionary((previous?.windows ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        for index in result.windows.indices {
+            let window = result.windows[index]
+            if let previous, previous.observedAt <= snapshot.observedAt,
+               let oldWindow = previousWindows[window.id],
+               matches(window: window, snapshot: snapshot, otherWindow: oldWindow, otherSnapshot: previous) {
+                result.windows[index].periodAnchor = oldWindow.periodAnchor ?? oldWindow.resetsAt
+                result.windows[index].legacyWarningPeriod = oldWindow.legacyWarningPeriod
+                if oldWindow.periodAnchor == nil {
+                    result.windows[index].legacyWarningPeriod = oldWindow.resetsAt.map { String(Int(($0.timeIntervalSince1970 / 60).rounded())) } ?? "unknown-period"
+                }
+            } else {
+                result.windows[index].periodAnchor = window.periodAnchor ?? window.resetsAt
+            }
+        }
+        return result
+    }
+
+    public static func key(window: QuotaWindow, snapshot: AccountSnapshot) -> String {
+        let reset = (window.periodAnchor ?? window.resetsAt).map { String($0.timeIntervalSince1970) } ?? "unknown-period"
+        let duration = window.duration.map(String.init(describing:)) ?? "unknown-duration"
+        return "\(snapshot.configurationID)|\(snapshot.identity)|\(window.id)|\(duration)|\(reset)"
     }
 }
 

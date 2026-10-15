@@ -19,6 +19,7 @@ enum Page: String, CaseIterable, Identifiable {
 struct DashboardView: View {
     @ObservedObject var store: AppStore
     @State private var page: Page = .overview
+    @FocusState private var focusedPage: Page?
     init(store: AppStore, page: Page = .overview) {
         self.store = store; _page = State(initialValue: page)
     }
@@ -44,7 +45,11 @@ struct DashboardView: View {
                             .padding(.horizontal, 12).padding(.vertical, 11)
                             .background(page == item ? Palette.accent.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
                             .contentShape(Rectangle())
-                    }.buttonStyle(.plain).padding(.horizontal, 12).padding(.bottom, 3)
+                    }.buttonStyle(.plain)
+                        .focused($focusedPage, equals: item)
+                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(focusedPage == item ? Palette.accent : .clear, lineWidth: 2))
+                        .padding(.horizontal, 12).padding(.bottom, 3)
+                        .accessibilityAddTraits(page == item ? .isSelected : [])
                         .accessibilityIdentifier("nav-\(item.id)")
                 }
                 Spacer()
@@ -73,6 +78,11 @@ struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         if let error = store.storageError {
                             Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange)
+                            if store.hasRecoverableStorageError {
+                                Text(tr("Die beschädigten Originaldaten bleiben gesichert. Nur betroffene Einstellungen werden zurückgesetzt."))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Button(tr("Beschädigte Einstellungen zurücksetzen")) { store.recoverStoredConfiguration() }
+                            }
                         }
                         switch page {
                         case .overview: overview
@@ -90,7 +100,7 @@ struct DashboardView: View {
     private var refreshButton: some View {
         Button { store.refresh(force: true) } label: {
             Label(store.isRefreshing ? tr("Wird aktualisiert …") : tr("Aktualisieren"), systemImage: "arrow.clockwise")
-        }.disabled(store.isRefreshing || store.isDemo).controlSize(.small).keyboardShortcut("r")
+        }.disabled(store.isPaused || store.isDemo).controlSize(.small).keyboardShortcut("r")
     }
     private var overviewAccounts: [AccountConfiguration] { QuotaOrder.accounts(store.accounts.filter(\.enabled)) }
     private var overview: some View {
@@ -166,7 +176,7 @@ struct AccountCard: View {
                         Text(store.snapshots[account.id]?.plan.capitalized ?? tr("Noch nicht verbunden")).font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if store.refreshingAccount == account.id { ProgressView().controlSize(.small) }
+                    if store.refreshingAccountIDs.contains(account.id) { ProgressView().controlSize(.small) }
                     else if let snapshot = store.snapshots[account.id], !snapshot.isFresh(at: store.now) || store.failures[account.id] != nil {
                         Text(tr("Letzter Stand")).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                     }
@@ -192,7 +202,7 @@ struct AccountCard: View {
                     if snapshot.windows.isEmpty && snapshot.money.isEmpty, let notice = snapshot.notice {
                         Text(notice).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
-                } else if store.refreshingAccount == account.id {
+                } else if store.refreshingAccountIDs.contains(account.id) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Verbrauch wird abgefragt …")).font(.callout)
                         Text(tr("Die Anmeldung bleibt bei deinem Anbieter.")).font(.caption).foregroundStyle(.secondary)

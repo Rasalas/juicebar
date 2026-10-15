@@ -4,6 +4,7 @@ import CSQLite
 /// All access is serialized by the owning store. Contains metadata only, never credentials or transcripts.
 public final class HistoryDatabase {
     private var database: OpaquePointer?
+    private var unreadablePreferences: Set<String> = []
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     public init(path: String) throws {
@@ -64,10 +65,56 @@ public final class HistoryDatabase {
     public func read<T: Decodable>(_ type: T.Type, key: String) throws -> T? {
         let stmt = try statement("SELECT payload FROM preferences WHERE id=?")
         defer { sqlite3_finalize(stmt) }; bind(key, to: stmt, at: 1)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return try decoder.decode(type, from: data(stmt, 0))
+        let status = sqlite3_step(stmt)
+        if status == SQLITE_DONE { return nil }
+        guard status == SQLITE_ROW else {
+            unreadablePreferences.insert(key)
+            throw ProviderFailure.unavailable(tr("Einstellung konnte nicht gelesen werden: {0}", key))
+        }
+        do { return try decoder.decode(type, from: data(stmt, 0)) }
+        catch {
+            unreadablePreferences.insert(key)
+            throw ProviderFailure.invalidData(tr("Gespeicherte Einstellung ist nicht lesbar: {0}. Die Originaldaten bleiben erhalten.", key))
+        }
+    }
+    public var unreadablePreferenceKeys: Set<String> { unreadablePreferences }
+
+    /// Explicit recovery preserves the exact original blobs in the same transaction.
+    @discardableResult
+    public func recoverUnreadablePreferences() throws -> Set<String> {
+        let keys = unreadablePreferences
+        guard !keys.isEmpty else { return [] }
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("CREATE TABLE IF NOT EXISTS preference_recovery (id INTEGER PRIMARY KEY, preference TEXT NOT NULL, time REAL NOT NULL, payload BLOB NOT NULL)")
+            for key in keys.sorted() {
+                let backup = try statement("INSERT INTO preference_recovery(preference,time,payload) SELECT id,strftime('%s','now'),payload FROM preferences WHERE id=?")
+                bind(key, to: backup, at: 1)
+                let status = sqlite3_step(backup)
+                sqlite3_finalize(backup)
+                guard status == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Originaldaten konnten nicht gesichert werden.")) }
+                let removal = try statement("DELETE FROM preferences WHERE id=?")
+                bind(key, to: removal, at: 1)
+                let removed = sqlite3_step(removal)
+                sqlite3_finalize(removal)
+                guard removed == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Einstellung konnte nicht zurückgesetzt werden.")) }
+            }
+            try execute("COMMIT")
+            unreadablePreferences.subtract(keys)
+            return keys
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func requireWritablePreference(_ key: String) throws {
+        guard !unreadablePreferences.contains(key) else {
+            throw ProviderFailure.invalidData(tr("Einstellung {0} ist zum Schutz der Originaldaten gesperrt. Mit „Beschädigte Einstellungen zurücksetzen“ können Sie fortfahren.", key))
+        }
     }
     public func write<T: Encodable>(_ value: T, key: String) throws {
+        try requireWritablePreference(key)
         let stmt = try statement("INSERT OR REPLACE INTO preferences(id,payload) VALUES(?,?)")
         defer { sqlite3_finalize(stmt) }; bind(key, to: stmt, at: 1); bind(try encoder.encode(value), to: stmt, at: 2)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Einstellung konnte nicht gespeichert werden.")) }

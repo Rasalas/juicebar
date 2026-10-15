@@ -168,23 +168,49 @@ public struct ActivityReport: Codable, Sendable {
             // Streaming blocks may repeat a message with an updated output count.
             unique[key] = unique[key].map { ActivityEvent.preferred($0, event) } ?? event
         }
-        var groups: [String: ActivityDay] = [:]
+        struct DayKey: Hashable { var source: ActivitySource; var day: Date }
+        struct ModelKey: Hashable { var model: String; var provider: String }
+        struct ResolvedModel { var rate: CatalogDocument.Rate?; var alias: String? }
+        let catalog = ModelCatalog.shared.snapshot
+        var models: [ModelKey: ResolvedModel] = [:]
+        var groups: [DayKey: ActivityDay] = [:]
+        // UTC buckets only index calendar-derived intervals. The intervals decide
+        // membership, including local midnight, short/long DST days, and date skips.
+        var dayIntervals: [Double: [DateInterval]] = [:]
+        func startOfDay(_ date: Date) -> Date {
+            let bucket = floor(date.timeIntervalSince1970 / 86400)
+            let intervals = dayIntervals[bucket] ?? []
+            if let interval = intervals.first(where: { date >= $0.start && date < $0.end }) { return interval.start }
+            guard let interval = calendar.dateInterval(of: .day, for: date) else { return calendar.startOfDay(for: date) }
+            if intervals.count < 4 && (dayIntervals.count < 256 || dayIntervals[bucket] != nil) {
+                dayIntervals[bucket] = intervals + [interval]
+            }
+            return interval.start
+        }
         for event in unique.values {
-            let day = calendar.startOfDay(for: event.date), key = "\(event.source.rawValue)-\(calendar.startOfDay(for: event.date).timeIntervalSince1970)"
+            let modelKey = ModelKey(model: event.model, provider: event.provider)
+            let resolved: ResolvedModel
+            if let existing = models[modelKey] { resolved = existing }
+            else {
+                let alias = catalog.resolve(model: event.model, provider: event.provider)
+                resolved = ResolvedModel(rate: APICost.rate(model: event.model, provider: event.provider, catalog: catalog),
+                                         alias: alias.map { "\(event.model) → \($0.displayName)" })
+                models[modelKey] = resolved
+            }
+            let day = startOfDay(event.date)
+            let key = DayKey(source: event.source, day: day)
             var value = groups[key] ?? ActivityDay(day: day, source: event.source, tokens: 0, responses: 0)
             value.tokens += event.tokens; value.responses += event.responseCount ?? 1
             if let cost = event.reportedCost, cost.isFinite, cost >= 0 {
                 value.apiCost += cost; value.pricedTokens += event.tokens
-            } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let cost = APICost.estimate(model: event.model, provider: event.provider, usage: usage) {
+            } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let rate = resolved.rate,
+                      let cost = APICost.estimate(rate: rate, usage: usage) {
                 value.apiCost += cost; value.pricedTokens += event.tokens
             } else { value.unpricedModels.insert(event.model) }
             groups[key] = value
         }
         days = groups.values.sorted { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
-        let resolved = Set(unique.values.compactMap { event -> String? in
-            guard let alias = ModelAliases.resolve(model: event.model, provider: event.provider) else { return nil }
-            return "\(event.model) → \(alias.displayName)"
-        }).sorted()
+        let resolved = Set(models.values.compactMap(\.alias)).sorted()
         self.notices = notices + (resolved.isEmpty ? [] : [tr("Veröffentlichte Modell-Aliase: ") + resolved.joined(separator: "; ") + tr(". Auch ältere Nutzung wird zum aktuellen API-Gegenwert bewertet; die damals kostenlose Preview bleibt in gemeldeten Kosten unverändert.")])
         self.warnings = warnings; observedAt = now
     }

@@ -22,10 +22,42 @@ public struct ModelUsage: Codable, Identifiable, Sendable {
 }
 
 public enum OpenCodeHistory {
+    // Only normalized usage metadata lives here. Bound retained events across databases,
+    // and validate main/WAL/journal metadata before reusing a successful read.
+    private final class CachedRead: NSObject {
+        let report: LocalUsageReport
+        let fingerprint: String
+        let nextFutureDate: Date?
+        let oldestDate: Date?
+        init(report: LocalUsageReport, fingerprint: String, nextFutureDate: Date?) {
+            self.report = report; self.fingerprint = fingerprint; self.nextFutureDate = nextFutureDate
+            self.oldestDate = report.events.map(\.date).min()
+        }
+    }
+    private static let recentReads: NSCache<NSString, CachedRead> = {
+        let cache = NSCache<NSString, CachedRead>()
+        cache.countLimit = 2; cache.totalCostLimit = 16 * 1024 * 1024
+        return cache
+    }()
+
     public static func read(path: String? = nil, now: Date = Date(), lookbackDays: Int = 30, source: ActivitySource = .opencode) throws -> LocalUsageReport {
         let root = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share").path
         let file = path ?? URL(fileURLWithPath: root).appendingPathComponent("opencode/opencode.db").path
         guard FileManager.default.fileExists(atPath: file) else { throw ProviderFailure.unavailable(tr("Keine lokale OpenCode-Datenbank gefunden. OpenCode einmal verwenden oder den Datenbankpfad auswählen.")) }
+        try Task.checkCancellation()
+        let fileURL = URL(fileURLWithPath: file).standardizedFileURL.resolvingSymlinksInPath()
+        let cacheKey = "\(fileURL.path)|\(source.rawValue)|\(lookbackDays)|\(TimeZone.current.identifier)|\(Calendar.current.identifier)" as NSString
+        let fingerprint = try KiloHistory.fingerprint(root: fileURL)
+        let cutoff = now.addingTimeInterval(-Double(lookbackDays) * 86400)
+        if let cached = recentReads.object(forKey: cacheKey), cached.fingerprint == fingerprint,
+           now >= cached.report.observedAt, now.timeIntervalSince(cached.report.observedAt) < 3600,
+           cached.nextFutureDate.map({ $0 > now }) ?? true,
+           cached.oldestDate.map({ $0 >= cutoff }) ?? true {
+            try Task.checkCancellation()
+            var report = cached.report
+            report.observedAt = now
+            return report
+        }
         var database: OpaquePointer?
         guard sqlite3_open_v2(file, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
             sqlite3_close(database); throw ProviderFailure.unavailable(tr("Die OpenCode-Datenbank ist nicht lesbar."))
@@ -35,6 +67,7 @@ public enum OpenCodeHistory {
         let since = now.addingTimeInterval(-Double(lookbackDays) * 86400).timeIntervalSince1970 * 1000
         var rows: [String: (day: Date, date: Date, tokens: Double, cost: Double?, provider: String, model: String, usage: TokenBreakdown?)] = [:]
         var supported = false, limited = false, missingCosts = false
+        var nextFutureDate: Date?
         // V2 is read after V1 so a migrated record replaces its legacy copy.
         for table in ["message", "session_message"] {
             var stmt: OpaquePointer?
@@ -64,7 +97,11 @@ public enum OpenCodeHistory {
                 if cost == nil { missingCosts = true }
                 let time = (message["time"] as? [String: Any]).flatMap { JSONValue.number($0["created"]) } ?? sqlite3_column_double(stmt, 2)
                 let date = Date(timeIntervalSince1970: time / 1000)
-                guard date <= now, date.timeIntervalSince1970 * 1000 >= since else { continue }
+                if date > now {
+                    nextFutureDate = min(nextFutureDate ?? date, date)
+                    continue
+                }
+                guard date.timeIntervalSince1970 * 1000 >= since else { continue }
                 let day = Calendar.current.startOfDay(for: date)
                 rows[id] = (day, date, total, cost, provider, name, TokenBreakdown.opencode(tokens))
             }
@@ -84,6 +121,13 @@ public enum OpenCodeHistory {
         var report = LocalUsageReport(days: days.values.sorted { $0.day < $1.day }, models: models.values.sorted { $0.tokens > $1.tokens }, messageCount: rows.count, notice: note, observedAt: now)
         report.importWarnings = limited ? [tr("{0}: Import auf die neuesten 100.000 Zeilen je Tabelle begrenzt.", source.name)] : []
         report.events = rows.map { id, row in ActivityEvent(id: stableID(id), source: source, date: row.date, model: row.model, provider: row.provider, tokens: row.tokens, usage: row.usage, reportedCost: source == .kilo ? row.cost : nil) }
+        try Task.checkCancellation()
+        let estimatedBytes = report.events.reduce(0) { $0 + 256 + $1.id.utf8.count + $1.model.utf8.count + $1.provider.utf8.count }
+        if report.events.count <= 50000, estimatedBytes <= 8 * 1024 * 1024,
+           try KiloHistory.fingerprint(root: fileURL) == fingerprint {
+            recentReads.setObject(CachedRead(report: report, fingerprint: fingerprint, nextFutureDate: nextFutureDate),
+                                  forKey: cacheKey, cost: max(1, estimatedBytes))
+        }
         return report
     }
 }

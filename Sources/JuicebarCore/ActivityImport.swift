@@ -50,6 +50,7 @@ public enum ActivityImport {
             } catch is CancellationError { throw CancellationError() }
             catch {
                 if let previous {
+                    warnings += previous.notices ?? []
                     warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(date: .abbreviated, time: .shortened), error.localizedDescription))
                     return previous.events.filter { $0.date >= since && $0.date <= now }
                 }
@@ -69,7 +70,7 @@ public enum ActivityImport {
         }
         events += try collect("opencode|\(databasePath ?? "default")", label: tr("OpenCode lokal")) {
             local = try OpenCodeHistory.read(path: databasePath, now: now, lookbackDays: 90)
-            return (local?.events ?? [], [])
+            return (local?.events ?? [], local?.importWarnings ?? [])
         }
         for host in hosts {
             try Task.checkCancellation(); progress(tr("SSH · {0} wird gelesen …", host))
@@ -83,6 +84,7 @@ public enum ActivityImport {
                   archive.retainedSource == .kilo else { continue }
             let retained = archive.events.filter { $0.date >= since && $0.date <= now }
             events += retained
+            if !retained.isEmpty { warnings += archive.notices ?? [] }
             if retained.isEmpty { try? fm.removeItem(at: file) }
             else if retained.count != archive.events.count {
                 archive.events = retained

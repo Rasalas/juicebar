@@ -18,7 +18,7 @@ struct TrayView: View {
                 Spacer()
                 if store.isRefreshing { ProgressView().controlSize(.small) }
                 Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 14, height: 14) }
-                    .disabled(store.isRefreshing || store.isDemo).help(tr("Aktualisieren"))
+                    .disabled(store.isPaused || store.isDemo).help(tr("Aktualisieren"))
                 Menu {
                     Button(store.isPaused ? tr("Abfragen fortsetzen") : tr("Abfragen pausieren")) { store.isPaused.toggle(); if !store.isPaused { store.refresh(force: true) } }
                     Button(tr("Warnungen 1 Stunde stummschalten")) { store.snooze() }

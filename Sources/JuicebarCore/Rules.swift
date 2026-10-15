@@ -29,7 +29,8 @@ public enum WarningEngine {
         var points: [(Date, Double)] = history.compactMap { sample in
             guard sample.identity == snapshot.identity, sample.configurationID == snapshot.configurationID,
                   now.timeIntervalSince(sample.observedAt) <= 3600, sample.observedAt <= snapshot.observedAt,
-                  let w = sample.windows.first(where: { $0.id == window.id }), w.resetsAt == reset else { return nil }
+                  let w = sample.windows.first(where: { $0.id == window.id }),
+                  QuotaPeriod.matches(window: window, snapshot: snapshot, otherWindow: w, otherSnapshot: sample) else { return nil }
             return (sample.observedAt, w.usedPercent)
         }
         points.append((snapshot.observedAt, window.usedPercent))
@@ -68,32 +69,38 @@ public enum WarningEngine {
     public static func events(snapshot: AccountSnapshot, accountName: String, history: [AccountSnapshot],
                               settings: MonitorSettings, sent: Set<String>, now: Date = Date()) -> [WarningEvent] {
         var result: [WarningEvent] = []
-        func append(_ key: String, _ kind: WarningEvent.Kind, _ message: String, manual: Bool = false) {
+        func append(_ key: String, _ kind: WarningEvent.Kind, _ message: String, manual: Bool = false, legacyKey: String? = nil) {
             let id = stableID("\(snapshot.configurationID)|\(manual ? "manual" : snapshot.identity)|\(key)")
             guard !sent.contains(id) else { return }
+            if let legacyKey, sent.contains(stableID("\(snapshot.configurationID)|\(snapshot.identity)|\(legacyKey)")) { return }
             result.append(WarningEvent(id: id, accountID: snapshot.configurationID, kind: kind,
                                        title: accountName, message: message, createdAt: now))
         }
         if snapshot.isFresh(at: now) {
-            for window in snapshot.windows {
+            let previous = history.lazy.filter {
+                $0.observedAt <= snapshot.observedAt && $0.configurationID == snapshot.configurationID && $0.identity == snapshot.identity
+            }.max { $0.observedAt < $1.observedAt }
+            let normalized = QuotaPeriod.normalizing(snapshot, previous: previous)
+            for window in normalized.windows {
                 guard window.resetsAt.map({ $0 > now }) ?? true else { continue }
-                // Provider reset timestamps can jitter by milliseconds between otherwise identical polls.
-                let epoch = window.resetsAt.map { String(Int(($0.timeIntervalSince1970 / 60).rounded())) } ?? "unknown-period"
-                let key = "\(window.id)|\(epoch)"
+                let key = QuotaPeriod.key(window: window, snapshot: snapshot)
+                // Only migrate a minute-rounded warning when a prior poll proves it
+                // belongs to this period. A nearby genuine reset must still warn.
+                let legacyKey = window.legacyWarningPeriod.map { "\(window.id)|\($0)" }
                 if settings.thresholdEnabled && window.usedPercent >= settings.threshold {
                     append("\(key)|threshold|\(settings.threshold)", .threshold,
-                           tr("{0}: {1} % verbraucht.", window.title, Int(window.usedPercent)))
+                           tr("{0}: {1} % verbraucht.", window.title, Int(window.usedPercent)), legacyKey: legacyKey.map { "\($0)|threshold|\(settings.threshold)" })
                 }
                 if settings.paceEnabled, let ideal = window.idealPercent(at: now), ideal >= 5,
                    window.usedPercent > ideal + settings.paceBuffer {
                     append("\(key)|pace", .pace,
-                           tr("{0}: {1} % verbraucht, gleichmäßig wären es {2} %.", window.title, Int(window.usedPercent), Int(ideal)))
+                           tr("{0}: {1} % verbraucht, gleichmäßig wären es {2} %.", window.title, Int(window.usedPercent), Int(ideal)), legacyKey: legacyKey.map { "\($0)|pace" })
                 }
                 if settings.forecastEnabled,
                    let forecast = projection(window: window, snapshot: snapshot, history: history, now: now),
                    forecast.reachesLimitAt.timeIntervalSince(now) <= settings.forecastHours * 3600 {
                     let minutes = max(1, Int(forecast.reachesLimitAt.timeIntervalSince(now) / 60))
-                    append("\(key)|forecast", .forecast, tr("{0}: Bei diesem Tempo voraussichtlich in {1} Min. ausgeschöpft, vor dem Reset.", window.title, minutes))
+                    append("\(key)|forecast", .forecast, tr("{0}: Bei diesem Tempo voraussichtlich in {1} Min. ausgeschöpft, vor dem Reset.", window.title, minutes), legacyKey: legacyKey.map { "\($0)|forecast" })
                 }
             }
         }
