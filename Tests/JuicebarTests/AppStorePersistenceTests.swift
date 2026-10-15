@@ -21,7 +21,7 @@ final class AppStorePersistenceTests: XCTestCase {
         XCTAssertFalse(store.hasRecoverableStorageError)
         XCTAssertEqual(store.accounts.map(\.id), ["default-codex", "default-claude"])
         XCTAssertNil(try database.read(String.self, key: "accounts"))
-        XCTAssertTrue(store.storageError?.contains("Originaldaten") == true)
+        XCTAssertEqual(store.storageError, tr("Zurückgesetzt: {0}. Die Originaldaten bleiben gesichert.", "accounts"))
     }
 
     func testMissingAccountsUseDefaultsWithoutRecoveryError() async throws {
