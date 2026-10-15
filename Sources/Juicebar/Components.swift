@@ -60,59 +60,66 @@ struct QuotaBar: View {
     let now: Date
     var compact = false
     var status: QuotaStatus = .unavailable
+    @State private var showingDetails = false
+    @FocusState private var detailsFocused: Bool
     @Environment(\.quotaDisplay) private var mode
     private var displayed: Double { mode.value(used: window.usedPercent) }
     private var expired: Bool { window.resetsAt.map { $0 <= now } ?? false }
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 4 : 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(tr(window.title)).font(.system(size: compact ? 12 : 13, weight: .medium))
-                Spacer()
-                Text(expired ? "—" : "\(Int(displayed.rounded()))")
-                    .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
-                if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(.system(size: compact ? 10 : 11)).foregroundStyle(.secondary) }
+        Button { showingDetails.toggle() } label: {
+            VStack(alignment: .leading, spacing: compact ? 4 : 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(tr(window.title)).font(.system(size: compact ? 12 : 13, weight: .medium))
+                    Spacer()
+                    Text(expired ? "—" : "\(Int(displayed.rounded()))")
+                        .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
+                    if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(.system(size: compact ? 10 : 11)).foregroundStyle(.secondary) }
+                }
+                GeometryReader { proxy in
+                    ZStack(alignment: .topLeading) {
+                        Capsule().fill(color.opacity(0.12)).frame(height: 6).offset(y: compact ? 7 : 12)
+                        Capsule().fill(expired ? Color.secondary : color)
+                            .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
+                            .offset(y: compact ? 7 : 12)
+                        if !expired, let ideal = window.idealPercent(at: now), window.usedPercent - ideal > 1 {
+                            // Usage ahead of the even pace, between fill end and diamond in either display mode.
+                            let edges = [displayed, mode.value(used: ideal)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
+                            Hatch().stroke(Color.primary.opacity(0.5), lineWidth: 1).clipShape(Capsule())
+                                .frame(width: edges.max()! - edges.min()!, height: 6)
+                                .offset(x: edges.min()!, y: compact ? 7 : 12)
+                        }
+                        if !expired, let ideal = window.idealPercent(at: now) {
+                            Image(systemName: "diamond.fill")
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
+                                .frame(width: 10, height: 10)
+                                // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
+                                .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
+                        }
+                    }
+                    .frame(height: compact ? 13 : 18, alignment: .topLeading)
+                }.frame(height: compact ? 13 : 18)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        resetLabel.fixedSize()
+                        Spacer(minLength: 0)
+                        statusLabel.fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        resetLabel
+                        statusLabel
+                    }
+                }.font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            GeometryReader { proxy in
-                ZStack(alignment: .topLeading) {
-                    Capsule().fill(color.opacity(0.12)).frame(height: 6).offset(y: compact ? 7 : 12)
-                    Capsule().fill(expired ? Color.secondary : color)
-                        .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
-                        .offset(y: compact ? 7 : 12)
-                    if !expired, let ideal = window.idealPercent(at: now), window.usedPercent - ideal > 1 {
-                        // Usage ahead of the even pace, between fill end and diamond in either display mode.
-                        let edges = [displayed, mode.value(used: ideal)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
-                        Hatch().stroke(Color.primary.opacity(0.5), lineWidth: 1).clipShape(Capsule())
-                            .frame(width: edges.max()! - edges.min()!, height: 6)
-                            .offset(x: edges.min()!, y: compact ? 7 : 12)
-                    }
-                    if !expired, let ideal = window.idealPercent(at: now) {
-                        Image(systemName: "diamond.fill")
-                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
-                            .frame(width: 10, height: 10)
-                            // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
-                            .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
-                    }
-                }
-                .frame(height: compact ? 13 : 18, alignment: .topLeading)
-            }.frame(height: compact ? 13 : 18)
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    resetLabel.fixedSize()
-                    Spacer(minLength: 0)
-                    statusLabel.fixedSize()
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    resetLabel
-                    statusLabel
-                }
-            }.font(.system(size: 11)).foregroundStyle(.secondary)
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
-        .hoverInfo { details }
+        .buttonStyle(.plain)
+        .focused($detailsFocused)
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(detailsFocused ? Palette.accent : .clear, lineWidth: 2).padding(-4))
+        .popover(isPresented: $showingDetails, arrowEdge: .bottom) { details.font(.system(size: 11)).padding(12) }
+        .help(detailText)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : ""))
-        .accessibilityValue(statusTitle)
-        .accessibilityHint(statusHelp)
+        .accessibilityValue(([statusTitle] + detailRows.map { "\($0.0): \($0.1)" } + [detailExplanation]).filter { !$0.isEmpty }.joined(separator: ". "))
     }
     private var resetLabel: some View {
         HStack(spacing: 4) {
@@ -133,28 +140,39 @@ struct QuotaBar: View {
             .foregroundStyle(status == .exhausted ? Color.red : Palette.accent)
         }
     }
-    @ViewBuilder private var details: some View {
+    private var detailRows: [(String, String)] {
+        var rows: [(String, String)] = []
+        if !expired, let ideal = window.idealPercent(at: now) {
+            rows.append((tr("Soll jetzt"), tr("{0} %", Int(mode.value(used: ideal).rounded()))))
+            if let recovery = window.paceRecovery(at: now) {
+                rows.append((tr("Ohne weitere Nutzung im Soll"), pointInTime(recovery)))
+            } else {
+                rows.append((tr("Puffer zum Soll"), tr("{0} Prozentpunkte", Int((ideal - window.usedPercent).rounded()))))
+            }
+        }
+        switch status {
+        case .projectedPaceCrossing(let date) where !expired: rows.append((tr("Soll erreicht voraussichtlich"), pointInTime(date)))
+        case .projectedExhaustion(let date) where !expired: rows.append((tr("Limit erreicht voraussichtlich"), pointInTime(date)))
+        default: break
+        }
+        rows.append((tr("Reset"), window.resetsAt.map(pointInTime) ?? tr("Resetzeit nicht verfügbar")))
+        return rows
+    }
+    private var detailExplanation: String {
+        [window.supportsPace ? "" : tr("Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn."), expired ? "" : statusHelp]
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+    private var detailText: String {
+        (detailRows.map { "\($0.0): \($0.1)" } + [detailExplanation]).filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+    private var details: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if !expired, let ideal = window.idealPercent(at: now) {
-                detail(tr("Soll jetzt"), tr("{0} %", Int(mode.value(used: ideal).rounded())))
-                if let recovery = window.paceRecovery(at: now) {
-                    detail(tr("Ohne weitere Nutzung im Soll"), pointInTime(recovery))
-                } else {
-                    detail(tr("Puffer zum Soll"), tr("{0} Prozentpunkte", Int((ideal - window.usedPercent).rounded())))
-                }
+            ForEach(detailRows.indices, id: \.self) { index in
+                detail(detailRows[index].0, detailRows[index].1)
             }
-            switch status {
-            case .projectedPaceCrossing(let date) where !expired: detail(tr("Soll erreicht voraussichtlich"), pointInTime(date))
-            case .projectedExhaustion(let date) where !expired: detail(tr("Limit erreicht voraussichtlich"), pointInTime(date))
-            default: EmptyView()
-            }
-            if !window.supportsPace {
-                Text(tr("Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn.")).foregroundStyle(.secondary)
+            if !detailExplanation.isEmpty {
+                Text(detailExplanation).foregroundStyle(.secondary)
                     .frame(width: 260, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-            }
-            if let reset = window.resetsAt { detail(tr("Reset"), pointInTime(reset)) }
-            if !statusHelp.isEmpty, !expired {
-                Text(statusHelp).foregroundStyle(.secondary).frame(width: 260, alignment: .leading).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -201,28 +219,6 @@ private struct Hatch: Shape {
 
 func pointInTime(_ date: Date) -> String {
     date.formatted(Date.FormatStyle(locale: Localization.locale).weekday(.abbreviated).day().month(.abbreviated).hour().minute())
-}
-
-extension View {
-    /// `.help` tooltips rarely appear in the menu bar panel and cannot hold exact times compactly.
-    func hoverInfo<Info: View>(@ViewBuilder _ info: @escaping () -> Info) -> some View { modifier(HoverInfo(info: info)) }
-}
-
-private struct HoverInfo<Info: View>: ViewModifier {
-    let info: () -> Info
-    @State private var hovering = false
-    @State private var shown = false
-    func body(content: Content) -> some View {
-        content
-            .onHover { inside in
-                hovering = inside
-                guard inside else { shown = false; return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { if hovering { shown = true } }
-            }
-            .popover(isPresented: $shown, arrowEdge: .bottom) {
-                info().font(.system(size: 11)).padding(12)
-            }
-    }
 }
 
 func relativeTime(_ date: Date, now: Date = Date()) -> String {

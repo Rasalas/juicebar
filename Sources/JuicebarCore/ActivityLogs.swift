@@ -237,12 +237,50 @@ struct UsageLogParser {
 }
 
 final class LogDateParser {
-    private let fractional = ISO8601DateFormatter()
-    private let whole = ISO8601DateFormatter()
-    init() { fractional.formatOptions.insert(.withFractionalSeconds) }
+    private let fractionalStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private let wholeStyle = Date.ISO8601FormatStyle()
+    private lazy var fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions.insert(.withFractionalSeconds)
+        return formatter
+    }()
+    private lazy var whole = ISO8601DateFormatter()
+
     func parse(_ value: Any?) -> Date? {
         if let seconds = JSONValue.number(value), seconds > 0 { return Date(timeIntervalSince1970: seconds) }
         guard let value = value as? String else { return nil }
+        // Log writers normally emit UTC with whole seconds or exactly three decimal places.
+        // Keep the legacy formatter for other precisions, offsets, and permissive inputs.
+        if let hasFraction = canonicalUTC(value),
+           let date = try? (hasFraction ? fractionalStyle : wholeStyle).parse(value) {
+            // ISO8601DateFormatter returns millisecond precision using the Unix epoch.
+            return Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1_000).rounded() / 1_000)
+        }
         return fractional.date(from: value) ?? whole.date(from: value)
+    }
+
+    private func canonicalUTC(_ value: String) -> Bool? {
+        let bytes = value.utf8
+        guard bytes.count == 20 || bytes.count == 24 else { return nil }
+        return bytes.withContiguousStorageIfAvailable { bytes -> Bool? in
+            for index in bytes.indices {
+                let expected: UInt8?
+                switch index {
+                case 4, 7: expected = 45
+                case 10: expected = 84
+                case 13, 16: expected = 58
+                case bytes.count - 1: expected = 90
+                case 19: expected = 46
+                default: expected = nil
+                }
+                if let expected {
+                    guard bytes[index] == expected else { return nil }
+                } else if !(48...57).contains(bytes[index]) { return nil }
+            }
+            // FormatStyle normalizes out-of-range minutes and leap seconds that ICU rejects.
+            guard bytes[11] < 50 || (bytes[11] == 50 && bytes[12] <= 51),
+                  bytes[14] <= 53, bytes[17] <= 53 else { return nil }
+            return bytes.count == 24
+        } ?? nil
     }
 }

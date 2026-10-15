@@ -2,6 +2,16 @@
 
 Die erste lauffähige Version verwendet SwiftUI/AppKit und SQLite unter macOS 14+. Der folgende ursprüngliche Entwurf beschreibt auch spätere Ausbaustufen; für tatsächlich verfügbare Funktionen und Grenzen gilt die [README](../README.md). Insbesondere sind Windows/Linux, ein generisches Plugin-Ladesystem, automatische Adapter-Reparaturen, vollständig isolierte Anbieter-Helfer und zusätzliche Sonderregeln zur Nachtruhe noch nicht implementiert.
 
+## Abrufe und Speicherung, 15. Oktober 2026
+
+`AppStore` verbindet Anbieter, Speicherung und Oberfläche. `AccountRefreshScheduler` begrenzt Anbieterabrufe auf drei gleichzeitig laufende Aufgaben und verhindert überlappende Abrufe desselben Kontos. Beim Bearbeiten, Entfernen, Pausieren oder Stoppen werden ihre Ergebnisse durch eine neue Generation ungültig. Auch ein Anbieter, der den Abbruch erst spät bemerkt, belegt bis zum tatsächlichen Ende einen Platz. `AccountRefreshPolicy` verwaltet Mindestintervalle, Wiederholungsabstände, `Retry-After` und die Häufigkeit von Kostenverläufen pro Konto.
+
+Der lokale und per SSH gelesene Aktivitätsverlauf läuft unabhängig davon auf einem Hintergrundtask, frühestens fünf Minuten nach Ende des vorherigen Imports. Fortschrittsmeldungen aktualisieren die Oberfläche höchstens einmal pro Sekunde. Unveränderte OpenCode-Datenbanken können ein begrenzt gespeichertes Ergebnis wiederverwenden; Änderungen an Datenbank, WAL oder Journal sowie Zeitgrenzen erzwingen einen neuen Abruf. Modellauflösung und Kalendertage werden innerhalb einer Auswertung wiederverwendet. Der Dateicache enthält weiterhin nur Nutzungsmetadaten.
+
+`QuotaPeriod` verbindet Messungen trotz kleiner Abweichungen des Reset-Zeitstempels. Ein gespeicherter Periodenanker hält Warnungs- und Diagrammzuordnung über Neustarts und das Kürzen des Verlaufs stabil. Der vom Anbieter gelieferte Reset bleibt als Anzeigewert erhalten.
+
+Fehlende Einstellungen verwenden Vorgaben. Nicht lesbare Einstellungen erzeugen einen sichtbaren Fehler und sperren das Überschreiben des betroffenen Werts. Das ausdrücklich gewählte Zurücksetzen sichert die ursprünglichen Bytes in derselben Datenbanktransaktion, bevor es nur die betroffenen Einstellungen entfernt.
+
 # Juicebar: Architekturvorschlag
 
 Stand: 25. September 2026. Entwurf, noch keine implementierte App. Die Modulstruktur ist unabhängig vom Stack. Tauri ist eine vorläufige Variante; Swift und Wails werden in [technology-choice.md](technology-choice.md) dagegen abgewogen.

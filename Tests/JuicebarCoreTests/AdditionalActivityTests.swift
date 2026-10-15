@@ -35,6 +35,74 @@ final class AdditionalActivityTests: XCTestCase {
         try data.write(to: file)
     }
 
+    func testCancelledOpenCodeReadDoesNotReturnCachedResult() async throws {
+        let root = try directory(), file = root.appendingPathComponent("opencode.db")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE message(id TEXT,data TEXT,time_created INTEGER)", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+        _ = try OpenCodeHistory.read(path: file.path, now: now)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try OpenCodeHistory.read(path: file.path, now: self.now)
+        }
+        do { _ = try await task.value; XCTFail("Cancelled imports must stop, including cache hits") }
+        catch is CancellationError { }
+    }
+
+    func testOpenCodeRepeatedReadSeesWALWritesExpiryAndFutureRows() throws {
+        let root = try directory(), file = root.appendingPathComponent("opencode.db")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, "PRAGMA journal_mode=WAL; CREATE TABLE message(id TEXT,data TEXT,time_created INTEGER)", nil, nil, nil), SQLITE_OK)
+        let record = #"{"role":"assistant","modelID":"custom","cost":0.2,"tokens":{"input":1}}"#
+        func insert(_ id: String, date: Date) {
+            XCTAssertEqual(sqlite3_exec(db, "INSERT INTO message VALUES('\(id)','\(record)',\(Int(date.timeIntervalSince1970 * 1000)))", nil, nil, nil), SQLITE_OK)
+        }
+        insert("old", date: now.addingTimeInterval(-90 * 86400 + 2))
+        insert("current", date: now)
+        insert("future", date: now.addingTimeInterval(10))
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now, lookbackDays: 90).messageCount, 2)
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now.addingTimeInterval(1), lookbackDays: 90).messageCount, 2)
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now.addingTimeInterval(3), lookbackDays: 90).messageCount, 1)
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now.addingTimeInterval(11), lookbackDays: 90).messageCount, 2)
+        insert("appended", date: now)
+        let updated = try OpenCodeHistory.read(path: file.path, now: now.addingTimeInterval(11), lookbackDays: 90)
+        XCTAssertEqual(updated.messageCount, 3)
+        XCTAssertEqual(updated.models.first?.cost ?? 0, 0.6, accuracy: 0.0001)
+        // Deletions in the WAL must invalidate metadata reuse too.
+        XCTAssertEqual(sqlite3_exec(db, "DELETE FROM message WHERE id != 'appended'", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now.addingTimeInterval(11), lookbackDays: 90).messageCount, 1)
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now, lookbackDays: 90).messageCount, 1)
+        sqlite3_close(db); db = nil
+        try FileManager.default.removeItem(at: file)
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE message(id TEXT,data TEXT,time_created INTEGER)", nil, nil, nil), SQLITE_OK)
+        insert("replacement", date: now)
+        XCTAssertEqual(try OpenCodeHistory.read(path: file.path, now: now, lookbackDays: 90).events.first?.id, stableID("replacement"))
+    }
+
+    func testOpenCodeImportPropagatesRowLimitWarning() throws {
+        let root = try directory(), file = root.appendingPathComponent("opencode.db")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let time = Int(now.timeIntervalSince1970 * 1000)
+        let record = #"{"role":"assistant","modelID":"custom","tokens":{"input":1}}"#
+        let sql = "CREATE TABLE message(id TEXT,data TEXT,time_created INTEGER); WITH RECURSIVE rows(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM rows WHERE n<100001) INSERT INTO message SELECT CAST(n AS TEXT),'\(record)',\(time) FROM rows;"
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        let (report, local) = try ActivityImport.read(roots: [], databasePath: file.path, hosts: [], directory: root.appendingPathComponent("archive"), now: now)
+        XCTAssertEqual(local?.messageCount, 100000)
+        XCTAssertEqual(report.days.reduce(0) { $0 + $1.responses }, 100000)
+        let warning = try XCTUnwrap(local?.importWarnings?.first)
+        XCTAssertTrue(report.warnings.contains(warning))
+        try FileManager.default.removeItem(at: file)
+        let retained = try ActivityImport.read(roots: [], databasePath: file.path, hosts: [], directory: root.appendingPathComponent("archive"), now: now).0
+        XCTAssertEqual(retained.days.reduce(0) { $0 + $1.responses }, 100000)
+        XCTAssertTrue(retained.warnings.contains(warning), "Retained partial imports must retain their fidelity warning")
+    }
+
     func testGeminiDeduplicatesUpdatesCheckpointsAndLegacyMigrationWithoutUndoingBilledUsage() throws {
         var parser = UsageLogParser(source: .gemini, fileID: "file")
         var incomplete = gemini; incomplete.removeValue(forKey: "tokens")
@@ -185,10 +253,15 @@ final class AdditionalActivityTests: XCTestCase {
         let remote = try collectRemote(root: root).compactMap { $0["event"] as? [String: Any] }
         XCTAssertEqual(remote.count, 2); XCTAssertTrue(remote.allSatisfy { $0["source"] as? String == "kilo" })
         XCTAssertTrue(remote.allSatisfy { JSONValue.number($0["reportedCost"]) == 0.2 })
+        var archiveMetadata = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: cache), format: nil) as? [String: Any])
+        archiveMetadata["notices"] = ["Synthetic import limit warning"]
+        try PropertyListSerialization.data(fromPropertyList: archiveMetadata, format: .binary, options: 0).write(to: cache, options: .atomic)
         let removed = try ActivityImport.read(roots: [], databasePath: root.appendingPathComponent("absent.db").path, hosts: [], directory: archive, now: now).0
         XCTAssertEqual(removed.days.first?.responses, 2, "Removing a local folder retains already imported usage")
+        XCTAssertTrue(removed.warnings.contains("Synthetic import limit warning"))
         let expired = try ActivityImport.read(roots: [], databasePath: root.appendingPathComponent("absent.db").path, hosts: [], directory: archive, now: now.addingTimeInterval(91 * 86400)).0
         XCTAssertTrue(expired.days.isEmpty)
+        XCTAssertFalse(expired.warnings.contains("Synthetic import limit warning"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: cache.path))
     }
 }

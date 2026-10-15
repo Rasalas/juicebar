@@ -23,6 +23,7 @@ import JuicebarCore
     static func verifyTrayLayout() throws {
         try verifyTrayScrolling()
         try verifyQuotaColor()
+        try verifyQuotaAccessibility()
         let store = AppStore(demo: true)
         let host = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) })
         let size = host.fittingSize
@@ -79,6 +80,41 @@ import JuicebarCore
             }
         }
     }
+    /// Check the actual SwiftUI accessibility element, including information hidden visually in the popover.
+    private static func verifyQuotaAccessibility() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3600)
+        let quota = QuotaWindow(id: "accessibility", title: "Woche", usedPercent: 50, resetsAt: reset, duration: 7200)
+        let host = NSHostingView(rootView: QuotaBar(window: quota, color: .blue, now: now).padding(16).frame(width: 380, height: 160))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 160), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        // Give accessibility adapters an ordered window without activating the app or taking focus.
+        let leftEdge = NSScreen.screens.map { $0.frame.minX }.min() ?? 0
+        window.setFrameOrigin(NSPoint(x: leftEdge - 5_000, y: 0))
+        window.orderFront(nil)
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        func elements(_ item: Any) -> [any NSAccessibilityProtocol] {
+            guard let accessible = item as? any NSAccessibilityProtocol else { return [] }
+            return [accessible] + (accessible.accessibilityChildren() ?? []).flatMap(elements)
+        }
+        let center = window.convertPoint(toScreen: NSPoint(x: 190, y: 80))
+        let hit = host.accessibilityHitTest(center)
+        let navigation = host.accessibilityChildrenInNavigationOrder() ?? []
+        let accessibleElements = elements(host) + navigation.flatMap(elements) + (hit.map(elements) ?? [])
+        let buttons = accessibleElements.filter { $0.accessibilityRole() == .button }
+        guard !buttons.isEmpty else {
+            print("Quota accessibility: SwiftUI did not expose offscreen descendants; live VoiceOver verification remains required")
+            return
+        }
+        guard buttons.contains(where: {
+            let value = $0.accessibilityValue() as? String ?? ""
+            return value.contains(pointInTime(reset)) && value.contains(tr("Soll jetzt"))
+        }) else { throw ProviderFailure.unavailable("Quota button accessibility must include exact reset and pace") }
+        print("Quota accessibility: button includes exact reset and pace")
+    }
     /// Reproduces the reported 10% remaining / 6% expected balance without live accounts.
     private static func verifyQuotaColor() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -110,6 +146,12 @@ import JuicebarCore
         let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".artifacts/previews")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let store = AppStore(demo: true)
+        if let activity = store.activity {
+            let since = Calendar.current.date(byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: store.now))!
+            try renderView(ActivityCalendar(days: activity.days.filter { $0.day >= since }, now: store.now, numberOfDays: 30).padding(24).frame(width: 700, height: 280).background(Color(nsColor: .windowBackgroundColor)),
+                           size: NSSize(width: 700, height: 280), appearance: NSAppearance(named: .aqua)!,
+                           to: directory.appendingPathComponent("calendar-30.png"))
+        }
         for (index, page) in Page.allCases.enumerated() {
             for dark in [false, true] {
                 let width: CGFloat = dark ? 840 : 1060

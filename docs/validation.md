@@ -1,5 +1,31 @@
 # Validation status · 25 September 2026
 
+## Review fixes and CPU profiling, 15 October
+
+All six review findings are addressed: unreadable preferences cannot be silently replaced by defaults; quota periods tolerate fractional reset jitter without repeating warnings; partial OpenCode imports retain their warnings; provider work is bounded and independent per account; quota details can be opened by click or keyboard and include reset/pace accessibility values; removed or edited accounts reject late results. The 30/90-day selection now controls the calendar and active-day counts consistently. Recovery preserves original preference blobs before resetting affected settings.
+
+The installed 0.1.9 process reproduced CPU spikes up to 125.1%. Over a 359.4-second observation it used 33.74 CPU-seconds. Its local cache contained 3,983 files, 79 MiB and 552,929 normalized events. A separate seven-minute stack sample identified repeated plist decoding, OpenCode SQLite scans, ISO date parsing during SSH import and activity aggregation. Provider control connections mostly waited in `poll`. These samples were taken while the Mac was also running other builds.
+
+Release benchmarks compare the original importer code at `ff74fbb` with these changes. CPU time comes from `getrusage`; wall time varied with host load. Identical synthetic inputs produced matching counts, dates and costs.
+
+- Aggregating 100,000 events: 0.49–0.52 CPU-seconds before, 0.046–0.065 after.
+- Aggregating 1,152,000 events: 5.16–5.45 CPU-seconds before, 1.41–1.56 after.
+- Repeating a 20,000-row OpenCode import: 0.78–1.07 CPU-seconds before, 0.287–0.365 after.
+- Parsing 100,000 distinct ISO timestamps in one process: 6.719 CPU-seconds with the legacy parser, 0.076 with the new parser. Every parsed date and the checksum matched.
+
+The larger fixture has 4,000 archives and 77,872,320 bytes, with about twice the installed cache's event count. Its peak resident memory stayed close to 689 million bytes before and after. Plist decoding remains expensive: the warm fixture used 8.63 CPU-seconds before and 10.66 afterward under different host load. That path was not changed, and there is no claim of reduced decoding cost or a measured whole-app CPU percentage after installation. OpenCode result reuse has an estimated 16 MiB cache budget; no large decoded-log cache was added. Import progress publishes at most once per second.
+
+All 106 regular Swift tests and nine Python collector tests passed. The four optional release benchmarks passed, as did an isolated 50-test release subset covering import, cost, calendar and parser behavior. Regressions cover corrupt-account startup/recovery, bounded concurrency, cancellation, queued manual refresh, reset jitter and legacy warning migration, WAL writes and database replacement, expiry and future rows, DST boundaries, and retained partial-import warnings. Tray sizing, scrolling with both scrollbar settings, colors, English layout and activity persistence passed. The source app bundle built and passed deep signature verification and bundled layout/persistence checks. The direct-download updater build also passed.
+
+Synthetic previews were reviewed for the tray, usage page and 30-day calendar. Offscreen SwiftUI did not expose accessibility descendants on this Mac, so the native check reports that limitation; live VoiceOver verification remains outstanding. The installed app was left unchanged. The tested source build is in `dist/Juicebar.app`.
+
+Reproduce the optional measurements with:
+
+```sh
+JUICEBAR_BENCHMARK=1 swift test -c release --filter ActivityPerformanceTests
+JUICEBAR_BENCHMARK=1 swift test -c release --filter LogDateParserTests/testDateParsingBenchmark
+```
+
 ## Claude installation discovery, 28 September
 
 A live `get_usage` probe reproduced the stalled five-hour window: Claude 2.1.241 at `/opt/homebrew/bin/claude` returned 58% used with an expired reset and 95% weekly usage. Changing only the executable to the native 2.1.283 installation returned 3% used with a future reset and 96% weekly usage. Claude discovery now prefers the native installation. Explicit paths still override discovery; package-manager fallbacks and Codex discovery retain their previous behavior.

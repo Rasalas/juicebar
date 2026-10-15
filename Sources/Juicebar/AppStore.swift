@@ -17,9 +17,9 @@ final class AppStore: ObservableObject {
     @Published var settings: MonitorSettings
     @Published var snapshots: [String: AccountSnapshot] = [:]
     @Published var failures: [String: String] = [:]
-    @Published var refreshingAccount: String?
-    @Published var isRefreshing = false
-    @Published var isPaused = false { didSet { if isPaused { refreshTask?.cancel(); cancelActivityImport() } else { refreshActivityIfNeeded() } } }
+    @Published var refreshingAccountIDs: Set<String> = []
+    var isRefreshing: Bool { !refreshingAccountIDs.isEmpty }
+    @Published var isPaused = false { didSet { if isPaused { scheduler.cancelAll(); cancelActivityImport() } else { refreshActivityIfNeeded() } } }
     @Published var lastChecked: Date?
     @Published var now = Date()
     @Published var history: [String: [AccountSnapshot]] = [:]
@@ -36,19 +36,20 @@ final class AppStore: ObservableObject {
     private let storageDirectory: URL
     private var activityTask: Task<Void, Never>?
     private var activityWorker: Task<(ActivityReport, LocalUsageReport?), Error>?
+    private var activityImportID: UUID?
+    private var lastActivityProgress: ContinuousClock.Instant?
     @Published var storageError: String?
+    @Published var hasRecoverableStorageError = false
     @Published var notificationStatus = tr("Nicht aktiviert")
     @Published var localDatabasePath = ""
     let isDemo: Bool
     private let database: HistoryDatabase
     private let registry = ProviderRegistry()
-    private var nextFetch: [String: Date] = [:]
-    private var rateLimitedUntil: [String: Date] = [:]
-    private var failureCounts: [String: Int] = [:]
-    private var lastUsageFetch: [String: Date] = [:]
-    private var refreshTask: Task<Void, Never>?
+    private var refreshPolicy = AccountRefreshPolicy()
+    private let scheduler = AccountRefreshScheduler()
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
+    private var pendingWarningIDs: Set<String> = []
 
     init(demo: Bool = false, directory: URL? = nil) {
         isDemo = demo
@@ -67,19 +68,33 @@ final class AppStore: ObservableObject {
             }
         }
         if !demo { ModelCatalog.shared.configure(directory: directory) }
-        accounts = demo ? DemoData.accounts : ((try? database.read([AccountConfiguration].self, key: "accounts")) ?? [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)])
-        settings = (try? database.read(MonitorSettings.self, key: "settings")) ?? MonitorSettings()
-        manualResets = (try? database.read([ManualReset].self, key: "manual-resets")) ?? []
-        localDatabasePath = (try? database.read(String.self, key: "opencode-path")) ?? ""
-        warnings = (try? database.warnings()) ?? []
-        sshHosts = (try? database.read([String].self, key: "ssh-hosts")) ?? []
-        activityRoots = (try? database.read([ActivityLogs.Root].self, key: "activity-roots")) ?? []
-        activity = try? database.read(ActivityReport.self, key: "activity-report-v2")
-        localUsage = try? database.read(LocalUsageReport.self, key: "local-usage-v2")
+        let persistedDatabase = database
+        func load<T: Decodable>(_ type: T.Type, key: String, missing: T, unreadable: T) -> T {
+            do { return try persistedDatabase.read(type, key: key) ?? missing }
+            catch {
+                startupError = [startupError, error.localizedDescription].compactMap { $0 }.joined(separator: "\n")
+                return unreadable
+            }
+        }
+        let defaultAccounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)]
+        accounts = demo ? DemoData.accounts : load([AccountConfiguration].self, key: "accounts", missing: defaultAccounts, unreadable: [])
+        settings = load(MonitorSettings.self, key: "settings", missing: MonitorSettings(), unreadable: MonitorSettings())
+        manualResets = load([ManualReset].self, key: "manual-resets", missing: [], unreadable: [])
+        localDatabasePath = load(String.self, key: "opencode-path", missing: "", unreadable: "")
+        sshHosts = load([String].self, key: "ssh-hosts", missing: [], unreadable: [])
+        activityRoots = load([ActivityLogs.Root].self, key: "activity-roots", missing: [], unreadable: [])
+        activity = load(ActivityReport?.self, key: "activity-report-v2", missing: nil, unreadable: nil)
+        localUsage = load(LocalUsageReport?.self, key: "local-usage-v2", missing: nil, unreadable: nil)
+        do { warnings = try database.warnings() } catch { startupError = error.localizedDescription }
         storageError = startupError
+        hasRecoverableStorageError = !database.unreadablePreferenceKeys.isEmpty
         for account in accounts {
             let values = (try? database.history(account: account.id, limit: 1200)) ?? []
             history[account.id] = values; snapshots[account.id] = values.last
+        }
+        scheduler.onChange = { [weak self] ids in
+            guard let self else { return }
+            if self.refreshingAccountIDs != ids { self.refreshingAccountIDs = ids }
         }
         if demo {
             for snapshot in DemoData.snapshots() {
@@ -105,7 +120,7 @@ final class AppStore: ObservableObject {
         }
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refreshTask?.cancel(); self?.cancelActivityImport() }
+            Task { @MainActor in self?.scheduler.cancelAll(); self?.cancelActivityImport() }
         })
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
@@ -118,58 +133,53 @@ final class AppStore: ObservableObject {
         Task { await updateNotificationStatus() }
     }
 
-    func stop() { timer?.invalidate(); timer = nil; refreshTask?.cancel(); cancelActivityImport() }
-    func shutDown() async { stop(); await refreshTask?.value; await activityTask?.value }
+    func stop() { timer?.invalidate(); timer = nil; scheduler.cancelAll(); cancelActivityImport() }
+    func shutDown() async { stop(); await scheduler.waitUntilIdle(); await activityTask?.value }
 
     func refresh(force: Bool = false, only accountID: String? = nil) {
-        guard !isRefreshing, !isDemo else { return }
+        guard !isDemo, !isPaused else { return }
         let selected = accounts.filter { $0.enabled && (accountID == nil || $0.id == accountID) }
-        guard !selected.isEmpty else { return }
-        isRefreshing = true
-        refreshTask = Task {
-            defer { isRefreshing = false; refreshingAccount = nil }
-            for account in selected {
-                guard !Task.isCancelled else { break }
+        let schedulingNow = Date()
+        for account in selected {
+            guard refreshPolicy.isDue(id: account.id, force: force, now: schedulingNow) else { continue }
+            scheduler.enqueue(id: account.id, replacingPending: force) { [self] generation in
+                guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(account) else { return }
                 let now = Date()
-                if let until = rateLimitedUntil[account.id], until > now { continue }
-                if !force, let next = nextFetch[account.id], next > now { continue }
-                refreshingAccount = account.id
-                let includeUsage = lastUsageFetch[account.id].map { now.timeIntervalSince($0) > 1800 } ?? true
+                guard refreshPolicy.isDue(id: account.id, force: force, now: now) else { return }
+                let includeUsage = refreshPolicy.includesHistory(id: account.id, now: now)
                 do {
                     var snapshot = try await registry.provider(for: account.provider).read(configuration: account, includeHistory: includeUsage)
-                    guard !Task.isCancelled, accounts.contains(where: { $0 == account }) else { continue }
+                    guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
+                    snapshot = QuotaPeriod.normalizing(snapshot, previous: snapshots[account.id])
                     if let previous = snapshots[account.id], previous.identity != snapshot.identity {
                         history[account.id] = []; try database.removeAccount(account.id)
                     }
                     if snapshot.dailyUsage.isEmpty, let previous = snapshots[account.id], previous.identity == snapshot.identity {
                         snapshot.dailyUsage = previous.dailyUsage
                     }
-                    if includeUsage { lastUsageFetch[account.id] = now }
-                    snapshots[account.id] = snapshot; failures[account.id] = nil; failureCounts[account.id] = 0
+                    snapshots[account.id] = snapshot; failures[account.id] = nil
                     try? database.write(failures, key: "last-errors")
                     var entries = history[account.id] ?? []; entries.append(snapshot)
                     history[account.id] = Array(entries.suffix(1200))
                     do { try database.save(snapshot) } catch { storageError = error.localizedDescription }
-                    let interval = account.provider == .anthropicAPI || account.provider == .openaiAPI ? max(settings.refreshSeconds, 300) : max(settings.refreshSeconds, 60)
-                    nextFetch[account.id] = now.addingTimeInterval(interval)
-                    await notify(account: account, snapshot: withManualResets(snapshot))
-                } catch is CancellationError { break }
+                    refreshPolicy.succeeded(account: account, refreshSeconds: settings.refreshSeconds, includedHistory: includeUsage, now: Date())
+                    await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
+                } catch is CancellationError { return }
                 catch {
+                    guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
                     failures[account.id] = error.localizedDescription
                     try? database.write(failures, key: "last-errors")
-                    let count = min((failureCounts[account.id] ?? 0) + 1, 5); failureCounts[account.id] = count
-                    var delay = max(60, settings.refreshSeconds) * pow(2, Double(count - 1))
-                    if case ProviderFailure.rateLimited(let retry) = error { delay = retry; rateLimitedUntil[account.id] = now.addingTimeInterval(retry) }
-                    nextFetch[account.id] = now.addingTimeInterval(min(delay, 86400))
-                    if case ProviderFailure.needsSetup = error { nextFetch[account.id] = .distantFuture }
+                    refreshPolicy.failed(id: account.id, error: error, refreshSeconds: settings.refreshSeconds, now: Date())
                 }
                 lastChecked = Date()
             }
-            // Manual expiration dates also work for disconnected accounts.
-            for account in accounts where account.enabled {
-                var snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: tr("Manuell"))
-                snapshot = withManualResets(snapshot)
-                await notify(account: account, snapshot: snapshot)
+        }
+        let manualChecks = selected.map { ($0, scheduler.generation(for: $0.id)) }
+        Task {
+            for (account, generation) in manualChecks {
+                guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { continue }
+                let snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: tr("Manuell"))
+                await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
             }
         }
     }
@@ -180,13 +190,16 @@ final class AppStore: ObservableObject {
         return value
     }
 
-    private func notify(account: AccountConfiguration, snapshot: AccountSnapshot) async {
+    private func notify(account: AccountConfiguration, snapshot: AccountSnapshot, generation: UUID) async {
         guard settings.notificationsEnabled, !settings.isQuiet(at: Date()), !isDemo else { return }
         var snapshot = snapshot
         snapshot.windows = QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)
         let events = WarningEngine.events(snapshot: snapshot, accountName: account.displayName, history: history[account.id] ?? [],
-                                          settings: settings, sent: Set(warnings.map(\.id)))
+                                          settings: settings, sent: Set(warnings.map(\.id)).union(pendingWarningIDs))
         guard !events.isEmpty else { return }
+        let eventIDs = Set(events.map(\.id))
+        pendingWarningIDs.formUnion(eventIDs)
+        defer { pendingWarningIDs.subtract(eventIDs) }
         let content = UNMutableNotificationContent()
         content.title = account.displayName
         content.body = events.map(\.message).joined(separator: "\n")
@@ -194,10 +207,15 @@ final class AppStore: ObservableObject {
         content.userInfo = ["account": account.id]
         do {
             let permission = await UNUserNotificationCenter.current().notificationSettings()
+            guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
             guard permission.authorizationStatus == .authorized || permission.authorizationStatus == .provisional else { return }
             try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: events[0].id, content: content, trigger: nil))
+            guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
             for event in events { try database.saveWarning(event); warnings.insert(event, at: 0) }
-        } catch { storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", error.localizedDescription) }
+        } catch {
+            guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
+            storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", error.localizedDescription)
+        }
     }
 
     func enableNotifications() async {
@@ -233,13 +251,42 @@ final class AppStore: ObservableObject {
     func openNotificationSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
     }
+    func recoverStoredConfiguration() {
+        do {
+            let keys = try database.recoverUnreadablePreferences()
+            if keys.contains("accounts") {
+                scheduler.cancelAll()
+                accounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)]
+                snapshots = [:]; history = [:]; failures = [:]
+                refreshPolicy = AccountRefreshPolicy()
+            }
+            if keys.contains("settings") { settings = MonitorSettings() }
+            if keys.contains("manual-resets") { manualResets = [] }
+            if keys.contains("opencode-path") { localDatabasePath = "" }
+            if keys.contains("ssh-hosts") { sshHosts = [] }
+            if keys.contains("activity-roots") { activityRoots = [] }
+            if keys.contains("activity-report-v2") { activity = nil }
+            if keys.contains("local-usage-v2") { localUsage = nil }
+            hasRecoverableStorageError = false
+            storageError = tr("Zurückgesetzt: {0}. Die Originaldaten bleiben gesichert.", keys.sorted().joined(separator: ", "))
+        } catch { storageError = error.localizedDescription }
+    }
+
     func persistSettings() {
         do { try database.write(settings, key: "settings") } catch { storageError = error.localizedDescription }
     }
+    private func invalidateAccount(_ id: String) {
+        scheduler.invalidate(id: id)
+        failures[id] = nil
+        do { try database.write(failures, key: "last-errors") } catch { storageError = error.localizedDescription }
+        refreshPolicy.remove(id: id)
+    }
     func saveAccount(_ account: AccountConfiguration, secret: String) throws {
+        try database.requireWritablePreference("accounts")
         if let old = accounts.first(where: { $0.id == account.id }), old.provider != account.provider {
             throw ProviderFailure.unavailable(tr("Für einen anderen Anbieter bitte ein neues Konto hinzufügen."))
         }
+        invalidateAccount(account.id)
         if !secret.isEmpty && !isDemo { try SecretStore.save(secret, account: account.id) }
         if let index = accounts.firstIndex(where: { $0.id == account.id }) {
             let old = accounts[index]
@@ -249,10 +296,14 @@ final class AppStore: ObservableObject {
             accounts[index] = account
         } else { accounts.append(account) }
         try database.write(accounts, key: "accounts")
-        nextFetch[account.id] = nil; rateLimitedUntil[account.id] = nil
         refresh(force: true, only: account.id)
     }
     func removeAccount(_ account: AccountConfiguration) {
+        do {
+            try database.requireWritablePreference("accounts")
+            try database.requireWritablePreference("manual-resets")
+        } catch { storageError = error.localizedDescription; return }
+        invalidateAccount(account.id)
         accounts.removeAll { $0.id == account.id }; snapshots[account.id] = nil; history[account.id] = nil
         manualResets.removeAll { $0.accountID == account.id }; if !isDemo { SecretStore.remove(account: account.id) }
         do { try database.write(accounts, key: "accounts"); try database.write(manualResets, key: "manual-resets"); try database.removeAccount(account.id) }
@@ -274,18 +325,28 @@ final class AppStore: ObservableObject {
         guard !localUsageLoading, !isDemo else { return }
         nextActivityImport = Date().addingTimeInterval(300)
         localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
+        let importID = UUID()
+        activityImportID = importID
+        lastActivityProgress = .now
         let path = localDatabasePath.isEmpty ? nil : localDatabasePath
         let roots = ActivityLogs.defaultRoots(accounts: accounts, additional: activityRoots)
         let owner = self, hosts = sshHosts, directory = storageDirectory
         let worker = Task.detached(priority: .utility) {
             if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
             return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory) { message in
-                Task { @MainActor in owner.activityProgress = message }
+                Task { @MainActor in
+                    guard owner.activityImportID == importID else { return }
+                    let instant = ContinuousClock.now
+                    // Thousands of files otherwise invalidate every store-observing view hundreds of times.
+                    if let last = owner.lastActivityProgress, last.duration(to: instant) < .seconds(1) { return }
+                    owner.lastActivityProgress = instant
+                    if owner.activityProgress != message { owner.activityProgress = message }
+                }
             }
         }
         activityWorker = worker
         activityTask = Task {
-            defer { localUsageLoading = false; activityWorker = nil; activityProgress = ""; nextActivityImport = Date().addingTimeInterval(300) }
+            defer { localUsageLoading = false; activityWorker = nil; activityImportID = nil; activityProgress = ""; nextActivityImport = Date().addingTimeInterval(300) }
             do {
                 let result = try await worker.value
                 guard !Task.isCancelled else { return }
@@ -312,7 +373,7 @@ final class AppStore: ObservableObject {
         let previous = activityTask
         Task { await previous?.value; loadLocalUsage() }
     }
-    func cancelActivityImport() { activityWorker?.cancel(); activityTask?.cancel() }
+    func cancelActivityImport() { activityImportID = nil; activityWorker?.cancel(); activityTask?.cancel() }
     func selectActivityDirectory(format: ActivitySource) {
         guard !isDemo, ActivitySource.logFormats.contains(format) else { return }
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false

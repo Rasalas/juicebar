@@ -3,6 +3,38 @@ import CSQLite
 @testable import JuicebarCore
 
 final class StorageAndProcessTests: XCTestCase {
+    func testUnreadablePreferenceCannotBeOverwrittenByFallback() throws {
+        let db = try HistoryDatabase(path: ":memory:")
+        try db.write("incompatible account data", key: "accounts")
+        XCTAssertThrowsError(try db.read([AccountConfiguration].self, key: "accounts"))
+        XCTAssertThrowsError(try db.write([AccountConfiguration](), key: "accounts"))
+        XCTAssertEqual(try db.read(String.self, key: "accounts"), "incompatible account data")
+        try db.write(MonitorSettings(), key: "settings")
+        XCTAssertNotNil(try db.read(MonitorSettings.self, key: "settings"))
+    }
+
+    func testExplicitRecoveryBacksUpOriginalBytesAndOnlyResetsUnreadableKeys() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-recovery-\(UUID()).sqlite")
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: file.path + suffix) } }
+        let db = try HistoryDatabase(path: file.path)
+        try db.write("incompatible", key: "accounts")
+        try db.write("healthy", key: "opencode-path")
+        XCTAssertThrowsError(try db.read([AccountConfiguration].self, key: "accounts"))
+        XCTAssertEqual(try db.recoverUnreadablePreferences(), ["accounts"])
+        XCTAssertNil(try db.read([AccountConfiguration].self, key: "accounts"))
+        XCTAssertEqual(try db.read(String.self, key: "opencode-path"), "healthy")
+        try db.write([AccountConfiguration](), key: "accounts")
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &connection), SQLITE_OK)
+        defer { sqlite3_close(connection) }
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(connection, "SELECT payload FROM preference_recovery WHERE preference='accounts'", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+        let payload = Data(bytes: sqlite3_column_blob(statement, 0)!, count: Int(sqlite3_column_bytes(statement, 0)))
+        XCTAssertEqual(payload, try JSONEncoder().encode("incompatible"))
+    }
+
     func testClaudePrefersNativeInstallationOverOlderPackageManagerCopy() throws {
         let home = URL(fileURLWithPath: "/Users/fixture")
         let native = home.appendingPathComponent(".local/bin/claude").path
