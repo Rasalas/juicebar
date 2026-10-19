@@ -5,7 +5,7 @@ public enum ActivityImport {
     /// SSH hosts are read less often than local logs; a manual refresh or an unfinished import reads them sooner.
     public static let remoteInterval: TimeInterval = 1800
     private struct Archive: Codable {
-        var events: [ActivityEvent]
+        var events: CompactEvents
         var observedAt: Date
         var fingerprint: String?
         var notices: [String]?
@@ -39,6 +39,22 @@ public enum ActivityImport {
             lock.withLock { values[url.path] = stamp.map { ($0, value) } }
         }
         func forget(_ url: URL) { lock.withLock { values[url.path] = nil } }
+        /// Only the kept value, without reading the file.
+        func memory<T>(_ type: T.Type, for url: URL) -> T? {
+            guard let stamp = stamp(url), let hit = lock.withLock({ values[url.path] }), hit.stamp == stamp else { return nil }
+            return hit.value as? T
+        }
+    }
+    /// An SSH host between reads: its parsers stay on disk until the host is due again.
+    private struct Remote {
+        var observedAt: Date?
+        var complete: Bool
+        var notices: [String]
+        var events: CompactEvents
+        init(_ state: SSHActivity.State, since: Date) {
+            observedAt = state.observedAt; complete = state.complete; notices = state.notices
+            events = CompactEvents(state.events(since: since, now: .distantFuture))
+        }
     }
     private static let decoded = Decoded()
 
@@ -73,10 +89,10 @@ public enum ActivityImport {
                     warnings += previous.notices ?? []
                     var summary = previous.summary
                     summary?.observedAt = now
-                    return (previous.events.filter { $0.date >= since && $0.date <= now }, summary)
+                    return (previous.events.events(since: since, through: now), summary)
                 }
                 let result = try read()
-                let retained = Dictionary((previous?.events ?? []).filter { $0.date >= since && $0.date <= now }.map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
+                let retained = Dictionary((previous?.events.events(since: since, through: now) ?? []).map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
                 var unique = retained
                 for event in result.events {
                     let key = "\(event.source.rawValue)|\(event.id)"
@@ -85,19 +101,20 @@ public enum ActivityImport {
                 try Task.checkCancellation()
                 var summary = result.summary
                 summary?.events = []
-                let archive = Archive(events: Array(unique.values), observedAt: now, fingerprint: stamp, notices: result.notices, retainedSource: retainedSource, summary: summary)
+                let events = Array(unique.values)
+                let archive = Archive(events: CompactEvents(events), observedAt: now, fingerprint: stamp, notices: result.notices, retainedSource: retainedSource, summary: summary)
                 // Re-reading an unchanged source must not rewrite a large archive.
                 if let previous, previous.notices ?? [] == result.notices, (previous.summary == nil) == (summary == nil), !changed(retained, unique) {
                     decoded.remember(archive, for: url)
                 } else { try decoded.save(archive, to: url) }
                 warnings += result.notices
-                return (archive.events, summary)
+                return (events, summary)
             } catch is CancellationError { throw CancellationError() }
             catch {
                 if let previous {
                     warnings += previous.notices ?? []
                     warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(date: .abbreviated, time: .shortened), error.localizedDescription))
-                    return (previous.events.filter { $0.date >= since && $0.date <= now }, nil)
+                    return (previous.events.events(since: since, through: now), nil)
                 }
                 warnings.append("\(label): \(error.localizedDescription)")
                 return ([], nil)
@@ -125,42 +142,57 @@ public enum ActivityImport {
             let url = archives.appendingPathComponent("ssh-" + stableID("ssh|\(host)") + ".plist")
             let legacy = archives.appendingPathComponent(stableID("ssh|\(host)") + ".plist")
             activeArchives.insert(url.lastPathComponent)
-            var state = decoded.load(SSHActivity.State.self, from: url) ?? SSHActivity.State()
-            // Earlier versions kept one merged archive per host. Keep its usage until it expires.
-            if state.observedAt == nil, state.carried.isEmpty, let archive = decoded.load(Archive.self, from: legacy) { state.carried = archive.events }
-            if state.isDue(now: now, force: refreshRemote) {
+            func load() -> SSHActivity.State {
+                var state = (try? Data(contentsOf: url)).flatMap { try? PropertyListDecoder().decode(SSHActivity.State.self, from: $0) } ?? SSHActivity.State()
+                // Earlier versions kept one merged archive per host. Keep its usage until it expires.
+                if state.observedAt == nil, state.carried.isEmpty, let archive = decoded.load(Archive.self, from: legacy) { state.carried = archive.events.events() }
+                return state
+            }
+            var loaded: SSHActivity.State?
+            var kept = decoded.memory(Remote.self, for: url) ?? {
+                let state = load()
+                loaded = state
+                return Remote(state, since: since)
+            }()
+            if SSHActivity.isDue(observedAt: kept.observedAt, complete: kept.complete, now: now, force: refreshRemote) {
+                var state = loaded ?? load()
                 progress(tr("SSH · {0} wird gelesen …", host))
                 let revision = state.revision, observed = state.observedAt
+                func store() throws {
+                    let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+                    state.prune(since: since)
+                    try encoder.encode(state).write(to: url, options: .atomic)
+                    try? fm.removeItem(at: legacy); decoded.forget(legacy)
+                }
                 do {
                     try SSHActivity.read(host: host, state: &state, now: now)
                 } catch is CancellationError {
-                    decoded.remember(state, for: url)
+                    if state.revision != revision { try? store() }
+                    decoded.forget(url)
                     throw CancellationError()
                 } catch {
                     if let observed {
                         warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", host, observed.formatted(date: .abbreviated, time: .shortened), error.localizedDescription))
                     } else { warnings.append(error.localizedDescription) }
                 }
-                if state.revision != revision || !fm.fileExists(atPath: url.path) {
-                    state.prune(since: since)
-                    try decoded.save(state, to: url)
-                    try? fm.removeItem(at: legacy); decoded.forget(legacy)
-                } else { decoded.remember(state, for: url) }
+                if state.revision != revision || !fm.fileExists(atPath: url.path) { try store() }
+                kept = Remote(state, since: since)
             }
-            warnings += state.notices
-            events += state.events(since: since, now: now)
+            decoded.remember(kept, for: url)
+            warnings += kept.notices
+            kept.events.append(to: &events, since: since, through: now)
         }
         // Removing a local folder stops reads, while already imported usage still expires after 90 days.
         for file in try fm.contentsOfDirectory(at: archives, includingPropertiesForKeys: nil)
             where file.lastPathComponent.hasPrefix("kilo-") && file.pathExtension == "plist" && !activeArchives.contains(file.lastPathComponent) {
             try Task.checkCancellation()
             guard var archive = decoded.load(Archive.self, from: file), archive.retainedSource == .kilo else { continue }
-            let retained = archive.events.filter { $0.date >= since && $0.date <= now }
+            let retained = archive.events.events(since: since, through: now)
             events += retained
             if !retained.isEmpty { warnings += archive.notices ?? [] }
             if retained.isEmpty { try? fm.removeItem(at: file); decoded.forget(file) }
             else if retained.count != archive.events.count {
-                archive.events = retained
+                archive.events = CompactEvents(retained)
                 try decoded.save(archive, to: file)
             }
         }

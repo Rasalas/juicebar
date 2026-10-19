@@ -53,6 +53,19 @@ final class IncrementalImportTests: XCTestCase {
         }
     }
 
+    func testCompactEventsRoundTripEveryField() throws {
+        let events = [
+            ActivityEvent(id: stableID("a"), source: .claude, date: now.addingTimeInterval(-0.123), model: "claude-test", tokens: 4_000_123,
+                          usage: TokenBreakdown(input: 3, output: 200, cacheRead: 4_000_000, cacheWrite: 900, cacheWriteHour: 20)),
+            ActivityEvent(id: "not-a-digest", source: .gemini, date: now, model: "gemini", provider: "google", tokens: 12.5,
+                          usage: TokenBreakdown(input: 0.5, output: 12)),
+            ActivityEvent(id: stableID("b").uppercased(), source: .codex, date: now, model: "gpt", tokens: 5_000_000_000),
+            ActivityEvent(id: stableID("c"), source: .pi, date: now, model: "pi", provider: "openai-codex", tokens: 65, responseCount: 0,
+                          reportedCost: 0.42, sessionStartedAt: now.addingTimeInterval(-100))]
+        XCTAssertEqual(try ordered(CompactEvents(events).events()), try ordered(events))
+        XCTAssertEqual(CompactEvents(events).events(since: now.addingTimeInterval(-0.01), through: now).count, 3)
+    }
+
     func testAppendedLogResumesWithParserStateAndMatchesFullParse() throws {
         let root = try directory(), logs = root.appendingPathComponent("logs"), cache = root.appendingPathComponent("cache")
         try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)

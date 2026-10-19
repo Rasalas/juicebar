@@ -20,20 +20,32 @@ public enum ActivityLogs {
         var resume: Resume?
         var parser: UsageLogParser?
         var usage: [ActivityEvent] { parser?.events ?? events }
+        func matches(size: Int, modified: Date, inode: UInt64?) -> Bool {
+            self.size == size && self.modified == modified && (self.inode == nil || self.inode == inode)
+        }
     }
     private struct Resume: Codable {
         var offset: UInt64
         var tail: String
         var discarding: Bool
     }
+    /// What an import keeps of a log: its identity and compact events. Parser state is read from disk only when the log grows.
     private struct Entry {
         var key: String
-        var file: CachedFile
+        var size: Int
+        var modified: Date
+        var inode: UInt64?
+        var skipped: Int
+        var events: CompactEvents
+        init(key: String, file: CachedFile) {
+            self.key = key; size = file.size; modified = file.modified; inode = file.inode; skipped = file.skipped
+            events = CompactEvents(file.usage)
+        }
     }
     /// Parsed results outlive one import, so unchanged logs never touch their cache files again.
     private struct Memory {
         var files: [String: Entry] = [:]
-        var orphans: [String: [ActivityEvent]] = [:]
+        var orphans: [String: CompactEvents] = [:]
     }
     private final class MemoryStore: @unchecked Sendable {
         private let lock = NSLock()
@@ -123,31 +135,33 @@ public enum ActivityLogs {
                     }
                     activeCache.insert(key)
                     let inode = resource.fileIdentifier
-                    func unchanged(_ file: CachedFile) -> Bool { file.size == size && file.modified == modified && (file.inode == nil || file.inode == inode) }
-                    let result: CachedFile
-                    if let known, unchanged(known.file) { result = known.file }
-                    else {
-                        result = try autoreleasepool {
-                            let base = known?.file ?? cached(cacheURL)
-                            if let base, unchanged(base) { return base }
+                    if let known, known.size == size, known.modified == modified, known.inode == nil || known.inode == inode {
+                        current.files[id] = known
+                        known.events.append(to: &events, since: since, through: now)
+                        skipped += known.skipped
+                    } else {
+                        let result: CachedFile = try autoreleasepool {
+                            let base = cached(cacheURL)
+                            if let base, base.matches(size: size, modified: modified, inode: inode) { return base }
                             let parsed = try parseFile(file, source: root.source, since: since, size: size, modified: modified, inode: inode, previous: base)
                             if let cacheURL { try encoder.encode(parsed).write(to: cacheURL, options: .atomic) }
                             return parsed
                         }
+                        if cacheDirectory != nil { current.files[id] = Entry(key: key, file: result) }
+                        events.append(contentsOf: result.usage.lazy.filter { $0.date >= since && $0.date <= now })
+                        skipped += result.skipped
                     }
-                    current.files[id] = Entry(key: key, file: result)
-                    events.append(contentsOf: result.usage.lazy.filter { $0.date >= since && $0.date <= now })
-                    skipped += result.skipped; filesRead += 1
+                    filesRead += 1
                     if filesRead % 10 == 0 { progress(tr("{0} Logdateien gelesen · {1}", filesRead, root.source.name)) }
                 } catch is CancellationError {
                     if let known { previous.files[id] = known }
                     throw CancellationError()
                 } catch {
                     readErrors += 1
-                    if let last = known?.file ?? cached(cacheURL) {
+                    if let last = known ?? cached(cacheURL).map({ Entry(key: key, file: $0) }) {
                         activeCache.insert(key)
-                        current.files[id] = Entry(key: key, file: last)
-                        events += last.usage.filter { $0.date >= since && $0.date <= now }
+                        current.files[id] = last
+                        last.events.append(to: &events, since: since, through: now)
                     }
                 }
             }
@@ -157,13 +171,14 @@ public enum ActivityLogs {
         if let cacheDirectory {
             // Vanished logs keep their usage until it leaves the 90-day window.
             var vanished = previous.orphans
-            for entry in previous.files.values { vanished[entry.key] = entry.file.usage }
+            for entry in previous.files.values { vanished[entry.key] = entry.events }
             for name in (try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? [] where name.hasSuffix(".plist") && !activeCache.contains(name) {
                 try Task.checkCancellation()
                 let url = cacheDirectory.appendingPathComponent(name)
-                if let usage = vanished[name] ?? cached(url)?.usage {
-                    let retained = usage.filter { $0.date >= since && $0.date <= now }
-                    if !retained.isEmpty { events += retained; current.orphans[name] = usage; continue }
+                if let usage = vanished[name] ?? cached(url).map({ CompactEvents($0.usage) }) {
+                    let count = events.count
+                    usage.append(to: &events, since: since, through: now)
+                    if events.count > count { current.orphans[name] = usage; continue }
                 }
                 try? fm.removeItem(at: url)
             }
@@ -328,6 +343,129 @@ struct UsageLogParser: Codable {
         responses.append(ActivityEvent(id: stableID("\(id)|\(record["requestId"] as? String ?? "")"), source: .claude, date: date, model: message["model"] as? String ?? tr("Unbekannt"), tokens: tokens, usage: TokenBreakdown.claude(usage)))
     }
     private func number(_ object: [String: Any], _ key: String) -> Double { max(0, JSONValue.number(object[key]) ?? 0) }
+}
+
+/// Usage events kept between imports in 80 bytes each instead of about 400. SHA-256 hex IDs are stored as their
+/// 32 bytes and re-encoded identically; model labels are interned. Values that do not fit go to a side table.
+struct CompactEvents {
+    private struct Item {
+        var id: (UInt64, UInt64, UInt64, UInt64)
+        var date: Double
+        var usage: (UInt32, UInt32, UInt32, UInt32, UInt32)
+        var tokens: UInt32
+        var label: UInt32
+        var extra: Int32
+        var source: UInt8
+        var flags: UInt8
+    }
+    private struct Extra {
+        var id: String?
+        var tokens: Double?
+        var usage: TokenBreakdown?
+        var responseCount: Int?
+        var reportedCost: Double?
+        var sessionStartedAt: Date?
+    }
+    private struct Label: Hashable { var model: String; var provider: String }
+    private final class Labels: @unchecked Sendable {
+        private let lock = NSLock()
+        private var index: [Label: UInt32] = [:]
+        private var values: [Label] = []
+        func id(_ label: Label) -> UInt32 {
+            lock.withLock {
+                if let id = index[label] { return id }
+                values.append(label); index[label] = UInt32(values.count - 1)
+                return UInt32(values.count - 1)
+            }
+        }
+        func label(_ id: UInt32) -> Label { lock.withLock { values[Int(id)] } }
+    }
+    private static let labels = Labels()
+    private static let hexID: UInt8 = 1, inlineUsage: UInt8 = 2, inlineTokens: UInt8 = 4
+    private var items: [Item] = []
+    private var extras: [Extra] = []
+    var isEmpty: Bool { items.isEmpty }
+    var count: Int { items.count }
+
+    init(_ events: [ActivityEvent]) {
+        items.reserveCapacity(events.count)
+        for event in events {
+            var item = Item(id: (0, 0, 0, 0), date: event.date.timeIntervalSinceReferenceDate, usage: (0, 0, 0, 0, 0), tokens: 0,
+                            label: Self.labels.id(Label(model: event.model, provider: event.provider)), extra: -1,
+                            source: UInt8(ActivitySource.allCases.firstIndex(of: event.source)!), flags: 0)
+            var extra = Extra(responseCount: event.responseCount, reportedCost: event.reportedCost, sessionStartedAt: event.sessionStartedAt)
+            if let digest = Self.digest(event.id) { item.id = digest; item.flags |= Self.hexID } else { extra.id = event.id }
+            if let tokens = UInt32(exactly: event.tokens) { item.tokens = tokens; item.flags |= Self.inlineTokens } else { extra.tokens = event.tokens }
+            if let usage = event.usage {
+                if let input = UInt32(exactly: usage.input), let output = UInt32(exactly: usage.output), let read = UInt32(exactly: usage.cacheRead),
+                   let write = UInt32(exactly: usage.cacheWrite), let hour = UInt32(exactly: usage.cacheWriteHour) {
+                    item.usage = (input, output, read, write, hour); item.flags |= Self.inlineUsage
+                } else { extra.usage = usage }
+            }
+            if extra.id != nil || extra.tokens != nil || extra.usage != nil || extra.responseCount != nil || extra.reportedCost != nil || extra.sessionStartedAt != nil {
+                item.extra = Int32(extras.count); extras.append(extra)
+            }
+            items.append(item)
+        }
+    }
+
+    func append(to events: inout [ActivityEvent], since: Date, through now: Date) {
+        let lower = since.timeIntervalSinceReferenceDate, upper = now.timeIntervalSinceReferenceDate
+        for item in items where item.date >= lower && item.date <= upper {
+            let extra = item.extra >= 0 ? extras[Int(item.extra)] : nil, label = Self.labels.label(item.label)
+            let usage = item.flags & Self.inlineUsage != 0
+                ? TokenBreakdown(input: Double(item.usage.0), output: Double(item.usage.1), cacheRead: Double(item.usage.2), cacheWrite: Double(item.usage.3), cacheWriteHour: Double(item.usage.4))
+                : extra?.usage
+            events.append(ActivityEvent(id: item.flags & Self.hexID != 0 ? Self.hex(item.id) : extra?.id ?? "", source: ActivitySource.allCases[Int(item.source)],
+                                        date: Date(timeIntervalSinceReferenceDate: item.date), model: label.model, provider: label.provider,
+                                        tokens: item.flags & Self.inlineTokens != 0 ? Double(item.tokens) : extra?.tokens ?? 0, usage: usage,
+                                        responseCount: extra?.responseCount, reportedCost: extra?.reportedCost, sessionStartedAt: extra?.sessionStartedAt))
+        }
+    }
+    func events(since: Date = .distantPast, through now: Date = .distantFuture) -> [ActivityEvent] {
+        var events: [ActivityEvent] = []
+        append(to: &events, since: since, through: now)
+        return events
+    }
+
+    private static func digest(_ id: String) -> (UInt64, UInt64, UInt64, UInt64)? {
+        var id = id
+        return id.withUTF8 { bytes -> (UInt64, UInt64, UInt64, UInt64)? in
+            guard bytes.count == 64 else { return nil }
+            func word(_ start: Int) -> UInt64? {
+                var value: UInt64 = 0
+                for byte in bytes[start..<(start + 16)] {
+                    switch byte {
+                    case 48...57: value = value << 4 | UInt64(byte - 48)
+                    case 97...102: value = value << 4 | UInt64(byte - 87)
+                    default: return nil
+                    }
+                }
+                return value
+            }
+            guard let a = word(0), let b = word(16), let c = word(32), let d = word(48) else { return nil }
+            return (a, b, c, d)
+        }
+    }
+    private static func hex(_ id: (UInt64, UInt64, UInt64, UInt64)) -> String {
+        String(unsafeUninitializedCapacity: 64) { buffer in
+            let digits: StaticString = "0123456789abcdef"
+            func write(_ value: UInt64, at start: Int) {
+                for nibble in 0..<16 { buffer[start + nibble] = digits.utf8Start[Int(value >> UInt64(60 - nibble * 4) & 15)] }
+            }
+            write(id.0, at: 0); write(id.1, at: 16); write(id.2, at: 32); write(id.3, at: 48)
+            return 64
+        }
+    }
+}
+
+/// Archives store plain event arrays; only the in-memory form is compact.
+extension CompactEvents: Codable {
+    init(from decoder: Decoder) throws { self.init(try decoder.singleValueContainer().decode([ActivityEvent].self)) }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(events())
+    }
 }
 
 final class LogDateParser {

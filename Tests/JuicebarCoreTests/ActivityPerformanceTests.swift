@@ -91,7 +91,7 @@ final class ActivityPerformanceTests: XCTestCase {
                 XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, 20000 + round * 10)
             }
         }
-        // Release: 1.7 s CPU before (full re-parse), 0.12 s after.
+        // Release: 1.7 s CPU before (full re-parse), 0.21 s after.
         XCTAssertLessThan(appended.cpu, 0.5, "Appending must not re-parse the whole log")
     }
 

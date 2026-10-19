@@ -24,9 +24,7 @@ public enum SSHActivity {
         var complete = false
         var revision = 0
 
-        func isDue(now: Date, force: Bool) -> Bool {
-            force || !complete || observedAt.map { now < $0 || now.timeIntervalSince($0) >= ActivityImport.remoteInterval } ?? true
-        }
+        func isDue(now: Date, force: Bool) -> Bool { SSHActivity.isDue(observedAt: observedAt, complete: complete, now: now, force: force) }
         func events(since: Date, now: Date) -> [ActivityEvent] {
             var result = carried.filter { $0.date >= since && $0.date <= now }
             for file in files.values { result += file.parser.events.lazy.filter { $0.date >= since && $0.date <= now } }
@@ -42,6 +40,10 @@ public enum SSHActivity {
             }
             for key in Array(databases.keys) { databases[key]?.events.removeAll { $0.date < since } }
         }
+    }
+
+    static func isDue(observedAt: Date?, complete: Bool, now: Date, force: Bool) -> Bool {
+        force || !complete || observedAt.map { now < $0 || now.timeIntervalSince($0) >= ActivityImport.remoteInterval } ?? true
     }
 
     public static func isValidHost(_ host: String) -> Bool {
