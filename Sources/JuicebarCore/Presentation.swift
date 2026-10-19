@@ -154,8 +154,18 @@ public struct ActivityDay: Codable, Identifiable, Sendable {
     public var archivedTokens: Double = 0
     public var id: String { "\(source.rawValue)-\(day.timeIntervalSince1970)" }
 }
+/// Local hours of a day with activity as a 24-bit mask.
+public struct ActivityHours: Codable, Equatable, Sendable {
+    public var day: Date
+    public var source: ActivitySource
+    public var hours: Int
+    public init(day: Date, source: ActivitySource, hours: Int) { self.day = day; self.source = source; self.hours = hours }
+}
 public struct ActivityReport: Codable, Sendable {
+    public static let hourHistoryDays = 28
     public var days: [ActivityDay]
+    /// Recent days only; nil in reports saved before hours were recorded.
+    public var activeHours: [ActivityHours]?
     public var notices: [String]
     public var warnings: [String]
     public var observedAt: Date
@@ -174,6 +184,8 @@ public struct ActivityReport: Codable, Sendable {
         let catalog = ModelCatalog.shared.snapshot
         var models: [ModelKey: ResolvedModel] = [:]
         var groups: [DayKey: ActivityDay] = [:]
+        var hourMasks: [DayKey: Int] = [:]
+        let hoursSince = now.addingTimeInterval(-Double(Self.hourHistoryDays) * 86400)
         // UTC buckets only index calendar-derived intervals. The intervals decide
         // membership, including local midnight, short/long DST days, and date skips.
         var dayIntervals: [Double: [DateInterval]] = [:]
@@ -208,8 +220,15 @@ public struct ActivityReport: Codable, Sendable {
                 value.apiCost += cost; value.pricedTokens += event.tokens
             } else { value.unpricedModels.insert(event.model) }
             groups[key] = value
+            if event.date >= hoursSince {
+                // Offset from the day start; on DST change days this shifts by one hour.
+                let hour = min(23, max(0, Int(event.date.timeIntervalSince(day) / 3600)))
+                hourMasks[key, default: 0] |= 1 << hour
+            }
         }
         days = groups.values.sorted { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
+        activeHours = hourMasks.map { ActivityHours(day: $0.key.day, source: $0.key.source, hours: $0.value) }
+            .sorted { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
         let resolved = Set(models.values.compactMap(\.alias)).sorted()
         self.notices = notices + (resolved.isEmpty ? [] : [tr("Veröffentlichte Modell-Aliase: ") + resolved.joined(separator: "; ") + tr(". Auch ältere Nutzung wird zum aktuellen API-Gegenwert bewertet; die damals kostenlose Preview bleibt in gemeldeten Kosten unverändert.")])
         self.warnings = warnings; observedAt = now

@@ -70,11 +70,15 @@ struct QuotaBar: View {
     let now: Date
     var compact = false
     var status: QuotaStatus = .unavailable
+    var reach: WeeklyReach?
     @State private var showingDetails = false
     @FocusState private var detailsFocused: Bool
     @Environment(\.quotaDisplay) private var mode
     private var displayed: Double { mode.value(used: window.usedPercent) }
     private var expired: Bool { window.resetsAt.map { $0 <= now } ?? false }
+    private var weeklyTarget: WeeklyReach? { reach.flatMap { !expired && $0.shortWindowID == window.id ? $0 : nil } }
+    private var weeklyReach: WeeklyReach? { reach.flatMap { !expired && $0.longWindowID == window.id ? $0 : nil } }
+    private var barY: CGFloat { compact ? 7 : 12 }
     var body: some View {
         Button { showingDetails.toggle() } label: {
             VStack(alignment: .leading, spacing: compact ? 4 : 10) {
@@ -98,6 +102,17 @@ struct QuotaBar: View {
                                 .frame(width: edges.max()! - edges.min()!, height: 6)
                                 .offset(x: edges.min()!, y: compact ? 7 : 12)
                         }
+                        if let weeklyReach, weeklyReach.expiring >= 0.5 {
+                            // What stays unused at the reset: the start of the fill when remaining, the end of the track when used.
+                            let edges = [mode.value(used: 100), mode.value(used: 100 - weeklyReach.expiring)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
+                            ExpiryPattern(range: edges.min()!...edges.max()!).frame(width: proxy.size.width, height: 6)
+                                .clipShape(Capsule()).offset(y: barY)
+                        }
+                        if let weeklyTarget {
+                            WeeklyTargetTick(height: 12)
+                                .offset(x: max(0, min(proxy.size.width - 5, proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 2.5)),
+                                        y: barY - 4)
+                        }
                         if !expired, let ideal = window.idealPercent(at: now) {
                             Image(systemName: "diamond.fill")
                                 .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
@@ -113,10 +128,12 @@ struct QuotaBar: View {
                         resetLabel.fixedSize()
                         Spacer(minLength: 0)
                         statusLabel.fixedSize()
+                        reachLabel.fixedSize()
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         resetLabel
                         statusLabel
+                        reachLabel
                     }
                 }.font(.subheadline)
             }
@@ -128,7 +145,8 @@ struct QuotaBar: View {
         .popover(isPresented: $showingDetails, arrowEdge: .bottom) { details.font(.subheadline).padding(12) }
         .help(detailText)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : ""))
+        .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : "")
+                            + (reachTitle.isEmpty ? "" : ". \(reachTitle)"))
         .accessibilityValue(([statusTitle] + detailRows.map { "\($0.0): \($0.1)" } + [detailExplanation]).filter { !$0.isEmpty }.joined(separator: ". "))
     }
     private var resetLabel: some View {
@@ -151,6 +169,34 @@ struct QuotaBar: View {
             .foregroundStyle(status == .exhausted ? Palette.critical : Palette.warning)
         }
     }
+    @ViewBuilder private var reachLabel: some View {
+        if !reachTitle.isEmpty {
+            let expiring = (weeklyReach?.expiring ?? 0) >= 0.5
+            HStack(spacing: 4) {
+                if weeklyTarget != nil { WeeklyTargetTick(height: 10) }
+                if expiring { ExpiryPattern.swatch }
+                Text(reachTitle)
+            }
+            .font(expiring ? .subheadline.weight(.medium) : .subheadline)
+            .foregroundStyle(expiring ? Palette.warning : .secondary)
+        }
+    }
+    private var targetValue: String {
+        guard let target = weeklyTarget else { return "" }
+        let left = Int(target.targetRemainingShort.rounded())
+        guard left >= 1 else { return tr("voll nutzen") }
+        return mode == .remaining ? tr("≈ {0} % übrig", left) : tr("≈ {0} % verbraucht", 100 - left)
+    }
+    private var reachTitle: String {
+        if weeklyTarget != nil { return tr("Wochenziel: {0}", targetValue) }
+        guard let reach = weeklyReach else { return "" }
+        let expiring = Int(reach.expiring.rounded())
+        if expiring >= 1 { return tr("≈ {0} % verfallen", expiring) }
+        return tr("Braucht {0} von {1} Fenstern", windowCount(reach.windowsNeeded), windowCount(reach.windowsAvailable))
+    }
+    private func windowCount(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(1)).locale(Localization.locale))
+    }
     private var detailRows: [(String, String)] {
         var rows: [(String, String)] = []
         if !expired, let ideal = window.idealPercent(at: now) {
@@ -161,6 +207,14 @@ struct QuotaBar: View {
                 rows.append((tr("Puffer zum Soll"), tr("{0} Prozentpunkte", Int((ideal - window.usedPercent).rounded()))))
             }
         }
+        if weeklyTarget != nil { rows.append((tr("Wochenziel"), targetValue)) }
+        if let reach = weeklyReach {
+            let share = (100 * reach.ratio).formatted(.number.precision(.fractionLength(0...1)).locale(Localization.locale))
+            rows.append((tr("Ein volles 5-Stunden-Fenster"), tr("≈ {0} % dieses Limits", share)))
+            rows.append((tr("Nutzbare Fenster bis Reset"), windowCount(reach.windowsAvailable)))
+            rows.append((tr("Benötigte Fenster"), windowCount(reach.windowsNeeded)))
+            if reach.expiring >= 0.5 { rows.append((tr("Verfällt trotz voller Nutzung"), tr("≈ {0} %", Int(reach.expiring.rounded())))) }
+        }
         switch status {
         case .projectedPaceCrossing(let date) where !expired: rows.append((tr("Soll erreicht voraussichtlich"), pointInTime(date)))
         case .projectedExhaustion(let date) where !expired: rows.append((tr("Limit erreicht voraussichtlich"), pointInTime(date)))
@@ -170,7 +224,8 @@ struct QuotaBar: View {
         return rows
     }
     private var detailExplanation: String {
-        [window.supportsPace ? "" : tr("Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn."), expired ? "" : statusHelp]
+        [window.supportsPace ? "" : tr("Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn."), expired ? "" : statusHelp,
+         weeklyTarget == nil && weeklyReach == nil ? "" : tr("Das Wochenziel verteilt den Rest der Woche gleichmäßig auf die verbleibenden nutzbaren 5-Stunden-Fenster. Geschätzt aus deinem Verlauf und deinen üblichen Nutzungszeiten; wie viel der Woche ein Fenster ausmacht, hängt vom Modellmix ab.")]
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
     private var detailText: String {
@@ -232,6 +287,33 @@ private struct Hatch: Shape {
             path.move(to: CGPoint(x: x, y: rect.maxY)); path.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
         }
         return path
+    }
+}
+
+/// Weekly target on the short bar: neutral, outlined so it reads on any provider colour and next to the diamond.
+struct WeeklyTargetTick: View {
+    var height: CGFloat
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1).fill(.primary).frame(width: 3, height: height - 2)
+            .padding(1).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 1.5))
+            .accessibilityHidden(true)
+    }
+}
+
+/// Segmented amber stripes for weekly quota that expires even with full use; diagonal hatching means ahead of pace.
+struct ExpiryPattern: View {
+    var range: ClosedRange<CGFloat>
+    static var swatch: some View {
+        ExpiryPattern(range: 0...14).frame(width: 14, height: 6).clipShape(Capsule()).accessibilityHidden(true)
+    }
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(x: range.lowerBound, y: 0, width: range.upperBound - range.lowerBound, height: size.height)
+            context.fill(Path(rect), with: .color(Color(nsColor: .textBackgroundColor)))
+            for x in stride(from: rect.minX + 0.5, to: rect.maxX, by: 3) {
+                context.fill(Path(CGRect(x: x, y: 0, width: min(1.5, rect.maxX - x), height: size.height)), with: .color(Palette.warning))
+            }
+        }
     }
 }
 
