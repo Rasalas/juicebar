@@ -4,7 +4,9 @@ import io
 import json
 import os
 import pathlib
+import sqlite3
 import tempfile
+import time
 import sys
 import subprocess
 sys.dont_write_bytecode = True
@@ -145,6 +147,94 @@ class SSHPrivacyTests(unittest.TestCase):
             rows = [json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual({row['source'] for row in rows if 'file' in row}, {'gemini', 'qwen'})
             self.assertEqual(sum('record' in row for row in rows), 2)
+
+class SSHIncrementalTests(unittest.TestCase):
+    def run_collector(self, root, known=None):
+        source = script.read_text()
+        if known is not None:
+            source = 'KNOWN = ' + repr(known) + '\n' + source
+        env = {'HOME': root, 'XDG_DATA_HOME': root + '/data', 'KILO_DB': ':memory:'}
+        result = subprocess.run([sys.executable, '-'], input=source, env=env, text=True, capture_output=True, check=True)
+        self.assertNotIn('PRIVATE_', result.stdout)
+        self.assertNotIn(root, result.stdout)
+        return [json.loads(line) for line in result.stdout.splitlines()]
+
+    def known(self, rows):
+        files, current = {}, None
+        for row in rows:
+            if 'key' in row:
+                current = row
+            elif row.get('endFile'):
+                files[current['key']] = [current['size'], current['mtime'], current['ino'], row.get('offset', -1), row.get('tail', '')]
+            elif 'fingerprint' in row:
+                files.setdefault('databases', {})[row['database']] = row['fingerprint']
+        databases = files.pop('databases', {})
+        return {'files': files, 'databases': databases}
+
+    def line(self, index, content='PRIVATE_CONTENT'):
+        return json.dumps({'type': 'assistant', 'timestamp': '2026-09-25T12:00:00Z', 'requestId': 'r%d' % index, 'cwd': 'PRIVATE_PATH',
+                           'message': {'id': 'm%d' % index, 'content': content, 'usage': {'input_tokens': 10, 'output_tokens': 2}}}) + '\n'
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = self.directory.name
+        self.logs = pathlib.Path(self.root) / '.claude/projects/project'
+        self.logs.mkdir(parents=True)
+        self.file = self.logs / 'session.jsonl'
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def records(self, rows):
+        return [row['record']['requestId'] for row in rows if 'record' in row]
+
+    def test_unchanged_files_are_skipped_and_grown_files_resume(self):
+        self.file.write_text(self.line(0) + self.line(1))
+        first = self.run_collector(self.root)
+        self.assertEqual(self.records(first), ['r0', 'r1'])
+        end = [row for row in first if row.get('endFile')][0]
+        self.assertEqual(end['offset'], self.file.stat().st_size)
+        self.assertEqual(self.run_collector(self.root, self.known(first)), [{'done': True}])
+        with self.file.open('a') as handle:
+            handle.write(self.line(2) + self.line(3)[:-10])
+        grown = self.run_collector(self.root, self.known(first))
+        self.assertTrue(grown[0]['resume'])
+        self.assertEqual(self.records(grown), ['r2'])
+        self.assertEqual([row for row in grown if row.get('endFile')][0]['offset'], len((self.line(0) + self.line(1) + self.line(2)).encode()))
+
+    def test_replaced_truncated_or_rewritten_files_are_read_from_the_start(self):
+        self.file.write_text(self.line(0) + self.line(1))
+        known = self.known(self.run_collector(self.root))
+        self.file.write_text(self.line(0, 'PRIVATE_OTHER') + self.line(1) + self.line(2))
+        rewritten = self.run_collector(self.root, known)
+        self.assertFalse(rewritten[0]['resume'])
+        self.assertEqual(self.records(rewritten), ['r0', 'r1', 'r2'])
+        self.file.write_text(self.line(0))
+        self.assertEqual(self.records(self.run_collector(self.root, known)), ['r0'])
+        replacement = self.logs / 'replacement'
+        replacement.write_text(self.line(0) + self.line(1) + self.line(4))
+        os.replace(replacement, self.file)
+        self.assertEqual(self.records(self.run_collector(self.root, known)), ['r0', 'r1', 'r4'])
+
+    def test_large_files_report_checkpoints(self):
+        self.file.write_text(''.join(self.line(index, '') for index in range(4500)))
+        rows = self.run_collector(self.root)
+        checkpoints = [row['checkpoint'] for row in rows if 'checkpoint' in row]
+        self.assertEqual(len(checkpoints), 2)
+        self.assertEqual(checkpoints[0], len(''.join(self.line(index, '') for index in range(2000)).encode()))
+
+    def test_unchanged_database_is_not_queried(self):
+        database = pathlib.Path(self.root) / 'data/opencode/opencode.db'
+        database.parent.mkdir(parents=True)
+        with contextlib.closing(sqlite3.connect(database)) as db:
+            db.execute('CREATE TABLE message (id TEXT, data TEXT, time_created INTEGER)')
+            db.execute('INSERT INTO message VALUES (?, ?, ?)', ('a', json.dumps({'role': 'assistant', 'tokens': {'input': 5}, 'content': 'PRIVATE_CONTENT'}), int(time.time() * 1000)))
+            db.commit()
+        first = self.run_collector(self.root)
+        self.assertEqual(sum('event' in row for row in first), 1)
+        again = self.run_collector(self.root, self.known(first))
+        self.assertEqual([row for row in again if 'database' in row][0]['unchanged'], True)
+        self.assertFalse(any('event' in row for row in again))
 
 if __name__ == '__main__':
     unittest.main()

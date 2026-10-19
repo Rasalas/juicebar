@@ -8,13 +8,40 @@ public enum ActivityLogs {
         public init(source: ActivitySource, url: URL) { self.source = source; self.url = url }
         public var id: String { "\(source.rawValue)|\(url.standardizedFileURL.resolvingSymlinksInPath().path)" }
     }
+    /// Version 3 stores the parser, which owns the events, so a grown log resumes after its last complete line.
+    /// Version 2 entries only carry `events`; they stay valid for unchanged and vanished logs.
     private struct CachedFile: Codable {
-        var version = 2
+        var version = 3
         var size: Int
         var modified: Date
-        var events: [ActivityEvent]
+        var events: [ActivityEvent] = []
         var skipped: Int
+        var inode: UInt64?
+        var resume: Resume?
+        var parser: UsageLogParser?
+        var usage: [ActivityEvent] { parser?.events ?? events }
     }
+    private struct Resume: Codable {
+        var offset: UInt64
+        var tail: String
+        var discarding: Bool
+    }
+    private struct Entry {
+        var key: String
+        var file: CachedFile
+    }
+    /// Parsed results outlive one import, so unchanged logs never touch their cache files again.
+    private struct Memory {
+        var files: [String: Entry] = [:]
+        var orphans: [String: [ActivityEvent]] = [:]
+    }
+    private final class MemoryStore: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [String: Memory] = [:]
+        func take(_ key: String) -> Memory { lock.withLock { values.removeValue(forKey: key) ?? Memory() } }
+        func put(_ key: String, _ value: Memory) { lock.withLock { values[key] = value } }
+    }
+    private static let memory = MemoryStore()
     public static func defaultRoots(accounts: [AccountConfiguration], additional: [Root] = [],
                                     home: URL = FileManager.default.homeDirectoryForCurrentUser,
                                     environment: [String: String] = ProcessInfo.processInfo.environment) -> [Root] {
@@ -60,38 +87,67 @@ public enum ActivityLogs {
         var events: [ActivityEvent] = [], notices: [String] = [], seen = Set<String>(), activeCache = Set<String>()
         let decoder = PropertyListDecoder(), encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
+        func cached(_ url: URL?) -> CachedFile? {
+            guard let url, let data = try? Data(contentsOf: url), let file = try? decoder.decode(CachedFile.self, from: data),
+                  file.version == 2 || file.version == 3 else { return nil }
+            return file
+        }
+        // Taken out of the store so updates do not copy it; put back even when cancelled.
+        var previous = cacheDirectory.map { memory.take($0.path) } ?? Memory(), current = Memory(), completed = false
+        defer {
+            if let cacheDirectory {
+                if !completed { current.files.merge(previous.files) { new, _ in new }; current.orphans.merge(previous.orphans) { new, _ in new } }
+                memory.put(cacheDirectory.path, current)
+            }
+        }
         var filesRead = 0, skipped = 0
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey, .fileIdentifierKey]
         for root in roots where root.source != .kilo {
             guard fm.fileExists(atPath: root.url.path) else { continue }
             var readErrors = 0
-            let enumerator = fm.enumerator(at: root.url, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles], errorHandler: { _, _ in readErrors += 1; return true })
+            let enumerator = fm.enumerator(at: root.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles], errorHandler: { _, _ in readErrors += 1; return true })
             while let file = enumerator?.nextObject() as? URL {
                 try Task.checkCancellation()
                 guard root.source.acceptsLog(file), seen.insert(file.standardizedFileURL.path).inserted else { continue }
+                let id = "\(root.source.rawValue)|\(file.path)"
+                let known = previous.files.removeValue(forKey: id)
+                // Keeps the v2 name so existing caches stay addressable.
+                let key = known?.key ?? stableID("v2|\(id)") + ".plist"
+                let cacheURL = cacheDirectory?.appendingPathComponent(key)
                 do {
-                    let resource = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey])
+                    let resource = try file.resourceValues(forKeys: keys)
                     guard resource.isRegularFile == true, resource.isSymbolicLink != true,
-                          let modified = resource.contentModificationDate, modified >= since, let size = resource.fileSize else { continue }
-                    let key = stableID("v2|\(root.source.rawValue)|\(file.path)") + ".plist"
-                    activeCache.insert(key)
-                    let cacheURL = cacheDirectory?.appendingPathComponent(key)
-                    let result: CachedFile = try autoreleasepool {
-                        if let cached = cacheURL.flatMap({ try? Data(contentsOf: $0) }).flatMap({ try? decoder.decode(CachedFile.self, from: $0) }),
-                           cached.version == 2, cached.size == size, cached.modified == modified { return cached }
-                        let parsed = try parseFile(file, source: root.source, since: since)
-                        let result = CachedFile(size: size, modified: modified, events: parsed.events, skipped: parsed.skipped)
-                        if let cacheURL { try encoder.encode(result).write(to: cacheURL, options: .atomic) }
-                        return result
+                          let modified = resource.contentModificationDate, modified >= since, let size = resource.fileSize else {
+                        if let known { previous.files[id] = known }
+                        continue
                     }
-                    events.append(contentsOf: result.events.filter { $0.date >= since && $0.date <= now })
+                    activeCache.insert(key)
+                    let inode = resource.fileIdentifier
+                    func unchanged(_ file: CachedFile) -> Bool { file.size == size && file.modified == modified && (file.inode == nil || file.inode == inode) }
+                    let result: CachedFile
+                    if let known, unchanged(known.file) { result = known.file }
+                    else {
+                        result = try autoreleasepool {
+                            let base = known?.file ?? cached(cacheURL)
+                            if let base, unchanged(base) { return base }
+                            let parsed = try parseFile(file, source: root.source, since: since, size: size, modified: modified, inode: inode, previous: base)
+                            if let cacheURL { try encoder.encode(parsed).write(to: cacheURL, options: .atomic) }
+                            return parsed
+                        }
+                    }
+                    current.files[id] = Entry(key: key, file: result)
+                    events.append(contentsOf: result.usage.lazy.filter { $0.date >= since && $0.date <= now })
                     skipped += result.skipped; filesRead += 1
                     if filesRead % 10 == 0 { progress(tr("{0} Logdateien gelesen · {1}", filesRead, root.source.name)) }
-                } catch is CancellationError { throw CancellationError() }
-                catch {
+                } catch is CancellationError {
+                    if let known { previous.files[id] = known }
+                    throw CancellationError()
+                } catch {
                     readErrors += 1
-                    if let cacheURL = cacheDirectory?.appendingPathComponent(stableID("v2|\(root.source.rawValue)|\(file.path)") + ".plist"),
-                       let data = try? Data(contentsOf: cacheURL), let cached = try? decoder.decode(CachedFile.self, from: data), cached.version == 2 {
-                        events += cached.events.filter { $0.date >= since && $0.date <= now }
+                    if let last = known?.file ?? cached(cacheURL) {
+                        activeCache.insert(key)
+                        current.files[id] = Entry(key: key, file: last)
+                        events += last.usage.filter { $0.date >= since && $0.date <= now }
                     }
                 }
             }
@@ -99,14 +155,20 @@ public enum ActivityLogs {
         }
         if skipped > 0 { notices.append(tr("{0} Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.", skipped)) }
         if let cacheDirectory {
-            for file in (try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "plist" && !activeCache.contains(file.lastPathComponent) {
-                if let data = try? Data(contentsOf: file), let cached = try? decoder.decode(CachedFile.self, from: data), cached.version == 2 {
-                    let retained = cached.events.filter { $0.date >= since && $0.date <= now }
-                    if !retained.isEmpty { events += retained; continue }
+            // Vanished logs keep their usage until it leaves the 90-day window.
+            var vanished = previous.orphans
+            for entry in previous.files.values { vanished[entry.key] = entry.file.usage }
+            for name in (try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? [] where name.hasSuffix(".plist") && !activeCache.contains(name) {
+                try Task.checkCancellation()
+                let url = cacheDirectory.appendingPathComponent(name)
+                if let usage = vanished[name] ?? cached(url)?.usage {
+                    let retained = usage.filter { $0.date >= since && $0.date <= now }
+                    if !retained.isEmpty { events += retained; current.orphans[name] = usage; continue }
                 }
-                try? fm.removeItem(at: file)
+                try? fm.removeItem(at: url)
             }
         }
+        completed = true
         return (events, notices)
     }
     private static func knownNonUsagePrefix(_ data: Data, source: ActivitySource) -> Bool {
@@ -116,7 +178,15 @@ public enum ActivityLogs {
         let pattern = #"^\s*\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?"type"\s*:\s*"("# + kinds + #")""#
         return text.range(of: pattern, options: .regularExpression) != nil
     }
-    private static func parseFile(_ file: URL, source: ActivitySource, since: Date) throws -> (events: [ActivityEvent], skipped: Int) {
+    /// Digest of the bytes before `end`; detects a log that was rewritten rather than appended.
+    static func tailDigest(_ handle: FileHandle, end: UInt64) throws -> String {
+        let start = end - min(end, 4096)
+        try handle.seek(toOffset: start)
+        let data = try handle.read(upToCount: Int(end - start)) ?? Data()
+        return data.withUnsafeBytes(hexDigest)
+    }
+    private static func parseFile(_ file: URL, source: ActivitySource, since: Date, size: Int, modified: Date, inode: UInt64?,
+                                  previous: CachedFile?) throws -> CachedFile {
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         var parser = UsageLogParser(source: source, fileID: source.fileIdentity(file))
@@ -126,10 +196,19 @@ public enum ActivityLogs {
             let data = try handle.read(upToCount: maximum + 1) ?? Data()
             guard data.count <= maximum else { throw ProviderFailure.invalidData(tr("Logdatei überschreitet 32 MiB.")) }
             try parser.consumeDocument(JSONSerialization.jsonObject(with: data))
-            return (parser.events.filter { $0.date >= since }, 0)
+            parser.prune(before: since)
+            return CachedFile(size: size, modified: modified, skipped: 0, inode: inode, parser: parser)
         }
-        var buffer = Data(), discardLine = false, skipped = 0, searchOffset = 0
-        let markers = source.logMarkers
+        var offset: UInt64 = 0, discardLine = false, skipped = 0
+        // Resume only a grown file with the same identity and unchanged bytes before the resume point.
+        if let previous, previous.version == 3, let resume = previous.resume, let state = previous.parser,
+           inode != nil, previous.inode == inode, size > previous.size, UInt64(size) >= resume.offset,
+           try tailDigest(handle, end: resume.offset) == resume.tail {
+            parser = state; offset = resume.offset; discardLine = resume.discarding; skipped = previous.skipped
+        }
+        try handle.seek(toOffset: offset)
+        var buffer = Data(), searchOffset = 0
+        let markers = source.logMarkers, required = source.requiredLogMarker
         while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty {
             try Task.checkCancellation()
             buffer.append(chunk)
@@ -137,7 +216,7 @@ public enum ActivityLogs {
             while let newline = buffer[max(start, searchOffset)...].firstIndex(of: 10) {
                 if !discardLine {
                     let line = buffer[start..<newline]
-                    if markers.contains(where: { line.range(of: $0) != nil }) {
+                    if markers.contains(where: { line.range(of: $0) != nil }), required.map({ line.range(of: $0) != nil }) ?? true {
                         autoreleasepool {
                             if let record = try? JSONSerialization.jsonObject(with: line) as? [String: Any] { parser.consume(record) }
                             else { skipped += 1 }
@@ -146,20 +225,28 @@ public enum ActivityLogs {
                 }
                 discardLine = false; start = newline + 1
             }
+            offset += UInt64(start - buffer.startIndex)
             if start > buffer.startIndex { buffer = Data(buffer[start...]) }
             searchOffset = buffer.count
             if buffer.count > 32 * 1024 * 1024 {
                 if !discardLine && !knownNonUsagePrefix(buffer, source: source) { skipped += 1 }
+                offset += UInt64(buffer.count)
                 buffer.removeAll(keepingCapacity: false); discardLine = true; searchOffset = 0
             }
         }
-        // An unfinished trailing line belongs to an active writer; retry it on the next scan.
-        return (parser.events.filter { $0.date >= since }, skipped)
+        // An unfinished trailing line belongs to an active writer; the next scan resumes before it.
+        parser.prune(before: since)
+        let resume = Resume(offset: offset, tail: try tailDigest(handle, end: offset), discarding: discardLine)
+        return CachedFile(size: size, modified: modified, skipped: skipped, inode: inode, resume: resume, parser: parser)
     }
 }
 
 /// Stateful per-file normalizer. Modern Codex response records replace their repeated legacy counters.
-struct UsageLogParser {
+/// Its state is cached so a grown log continues where the last import stopped; it holds usage metadata only.
+struct UsageLogParser: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case source, fileID, model, session, sawMeta, forkAnchor, cumulative, lastSignature, modernSince, legacy, responses, pi
+    }
     let source: ActivitySource
     let fileID: String
     private var model = tr("Unbekannt")
@@ -174,7 +261,14 @@ struct UsageLogParser {
     private let dates = LogDateParser()
     private var pi: PiUsageParser
     init(source: ActivitySource, fileID: String) { self.source = source; self.fileID = fileID; pi = PiUsageParser(fileID: fileID) }
-    var events: [ActivityEvent] { source == .pi ? pi.events : responses + legacy.filter { event in modernSince.map { event.date < $0 } ?? true } }
+    var events: [ActivityEvent] {
+        if source == .pi { return pi.events }
+        return legacy.isEmpty ? responses : responses + legacy.filter { event in modernSince.map { event.date < $0 } ?? true }
+    }
+    /// Drops events outside the import window; counters and identity stay for later lines.
+    mutating func prune(before date: Date) {
+        legacy.removeAll { $0.date < date }; responses.removeAll { $0.date < date }; pi.prune(before: date)
+    }
     mutating func consume(_ record: [String: Any]) {
         switch source {
         case .pi: pi.consume(record); return

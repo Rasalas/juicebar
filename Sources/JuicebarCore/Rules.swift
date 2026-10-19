@@ -2,7 +2,22 @@ import Foundation
 import CryptoKit
 
 public func stableID(_ value: String) -> String {
-    SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    var value = value
+    return value.withUTF8 { hexDigest(UnsafeRawBufferPointer($0)) }
+}
+
+/// Lowercase SHA-256 hex. Persisted IDs depend on this exact output.
+func hexDigest(_ bytes: UnsafeRawBufferPointer) -> String {
+    let digest = SHA256.hash(data: bytes)
+    return String(unsafeUninitializedCapacity: 64) { buffer in
+        let digits: StaticString = "0123456789abcdef"
+        var index = 0
+        for byte in digest {
+            buffer[index] = digits.utf8Start[Int(byte >> 4)]; buffer[index + 1] = digits.utf8Start[Int(byte & 15)]
+            index += 2
+        }
+        return 64
+    }
 }
 
 public struct UsageProjection: Equatable, Sendable {

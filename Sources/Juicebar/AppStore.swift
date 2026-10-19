@@ -319,9 +319,9 @@ final class AppStore: ObservableObject {
     func snooze() { settings.snoozedUntil = Date().addingTimeInterval(3600); persistSettings() }
     func refreshActivityIfNeeded() {
         guard !isPaused, Date() >= nextActivityImport else { return }
-        loadLocalUsage()
+        loadLocalUsage(refreshRemote: false)
     }
-    func loadLocalUsage() {
+    func loadLocalUsage(refreshRemote: Bool = true) {
         guard !localUsageLoading, !isDemo else { return }
         nextActivityImport = Date().addingTimeInterval(300)
         localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
@@ -333,7 +333,7 @@ final class AppStore: ObservableObject {
         let owner = self, hosts = sshHosts, directory = storageDirectory
         let worker = Task.detached(priority: .utility) {
             if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
-            return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory) { message in
+            return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory, refreshRemote: refreshRemote) { message in
                 Task { @MainActor in
                     guard owner.activityImportID == importID else { return }
                     let instant = ContinuousClock.now
