@@ -4,11 +4,23 @@ import Foundation
 public enum Localization {
     public static let language: String = {
         if let flag = CommandLine.arguments.first(where: { $0.hasPrefix("--language=") }) { return String(flag.dropFirst(11)) == "de" ? "de" : "en" }
-        let selected = UserDefaults.standard.string(forKey: "appLanguage") ?? "system"
+        return resolve(selectionAtLaunch)
+    }()
+    /// The stored choice this process started with; a later change needs a relaunch.
+    public static let selectionAtLaunch = UserDefaults.standard.string(forKey: "appLanguage") ?? "system"
+    /// The language a stored `appLanguage` choice ("system", "de" or "en") selects.
+    public static func resolve(_ selected: String) -> String {
         if selected == "de" || selected == "en" { return selected }
         return Locale.preferredLanguages.first?.hasPrefix("de") == true ? "de" : "en"
+    }
+    /// UI language with the user's region and format preferences, e.g. English text with German numbers and a 24-hour clock.
+    public static let locale: Locale = {
+        var components = Locale.Components(identifier: language)
+        components.region = Locale.current.region
+        components.hourCycle = Locale.current.hourCycle
+        components.firstDayOfWeek = Locale.current.firstDayOfWeek
+        return Locale(components: components)
     }()
-    public static var locale: Locale { Locale(identifier: language) }
     static let english: [String: String] = {
         guard let url = Bundle.module.url(forResource: "en", withExtension: "json"), let data = try? Data(contentsOf: url),
               let strings = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
