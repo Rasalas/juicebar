@@ -3,7 +3,7 @@ import Charts
 import JuicebarCore
 
 struct UsageView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @State private var source: ActivitySource?
     @State private var days = 90
     @State private var metric: ActivityMetric = .cost
@@ -225,22 +225,28 @@ struct ActivityCalendar: View {
     let now: Date
     let numberOfDays: Int
     private let groupedDays: [Date: [ActivityDay]]
+    private let calendar: Calendar
+    private let firstDay: Date
+    private let cells: [Date]
+    // Built once per input change; selecting a day only redraws.
+    private let labels: [Date: String]
+    private static let dayStyle = Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)
     init(days: [ActivityDay], now: Date, numberOfDays: Int = 90) {
         self.days = days
         self.now = now
         self.numberOfDays = numberOfDays
-        groupedDays = Dictionary(grouping: days) { Calendar.current.startOfDay(for: $0.day) }
+        var calendar = Calendar.current; calendar.firstWeekday = 2
+        self.calendar = calendar
+        let grouped = Dictionary(grouping: days) { calendar.startOfDay(for: $0.day) }
+        groupedDays = grouped
+        firstDay = calendar.date(byAdding: .day, value: -(numberOfDays - 1), to: calendar.startOfDay(for: now))!
+        let start = calendar.dateInterval(of: .weekOfYear, for: firstDay)!.start
+        let count = calendar.dateComponents([.day], from: start, to: now).day! + 1
+        let cells = (0..<(Int(ceil(Double(count) / 7)) * 7)).map { calendar.date(byAdding: .day, value: $0, to: start)! }
+        self.cells = cells
+        labels = Dictionary(uniqueKeysWithValues: cells.map { ($0, Self.detail($0, values: grouped[calendar.startOfDay(for: $0)] ?? [])) })
     }
     @State private var selected: Date?
-    private var calendar: Calendar { var value = Calendar.current; value.firstWeekday = 2; return value }
-    private var start: Date {
-        let first = calendar.date(byAdding: .day, value: -(numberOfDays - 1), to: calendar.startOfDay(for: now))!
-        return calendar.dateInterval(of: .weekOfYear, for: first)!.start
-    }
-    private var cells: [Date] {
-        let count = calendar.dateComponents([.day], from: start, to: now).day! + 1
-        return (0..<(Int(ceil(Double(count) / 7)) * 7)).map { calendar.date(byAdding: .day, value: $0, to: start)! }
-    }
     private var totals: [Date: Int] { groupedDays.mapValues { $0.reduce(0) { $0 + $1.responses + $1.archivedMessages } } }
     var body: some View {
         let dates = cells, counts = totals, maximum = max(1, counts.values.max() ?? 1)
@@ -256,21 +262,21 @@ struct ActivityCalendar: View {
                         Text(week == 0 || calendar.component(.day, from: first) <= 7 ? first.formatted(.dateTime.month(.abbreviated).locale(Localization.locale)) : " ")
                             .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 16)
                         ForEach(0..<7) { row in
-                            let date = dates[week * 7 + row], count = counts[date] ?? 0
-                            let valid = date <= now && date >= calendar.date(byAdding: .day, value: -(numberOfDays - 1), to: calendar.startOfDay(for: now))!
+                            let date = dates[week * 7 + row], count = counts[date] ?? 0, label = labels[date] ?? ""
+                            let valid = date <= now && date >= firstDay
                             Button { selected = date } label: {
                                 RoundedRectangle(cornerRadius: 4)
                                     .fill(valid ? color(count, maximum: maximum) : Color.clear)
                                     .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected == date ? Palette.accent : Color.primary.opacity(valid ? 0.06 : 0), lineWidth: selected == date ? 2 : 1))
                                     .frame(height: 21)
                             }.buttonStyle(.plain).disabled(!valid)
-                                .help(detail(date)).accessibilityLabel(detail(date))
+                                .help(label).accessibilityLabel(label)
                         }
                     }.frame(maxWidth: .infinity)
                 }
             }
             HStack(spacing: 4) {
-                Text(selected.map(detail) ?? tr("Ein Tag, alle Werkzeuge. Klicke für die Aufschlüsselung."))
+                Text(selected.flatMap { labels[$0] } ?? tr("Ein Tag, alle Werkzeuge. Klicke für die Aufschlüsselung."))
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Text(tr("Wenig")).font(.system(size: 9)).foregroundStyle(.secondary)
@@ -284,26 +290,22 @@ struct ActivityCalendar: View {
         let level = max(1, ceil(4 * log1p(Double(count)) / log1p(Double(maximum))))
         return Palette.green.opacity(level / 4)
     }
-    private func detail(_ date: Date) -> String {
-        let values = groupedDays[calendar.startOfDay(for: date)] ?? []
+    private static func detail(_ date: Date, values: [ActivityDay]) -> String {
         let total = values.reduce(0) { $0 + $1.responses }
         let archived = values.reduce(0) { $0 + $1.archivedMessages }
         let breakdown = values.map { "\($0.source.name) \($0.responses)" }.joined(separator: " · ")
-        if archived > 0 { return tr("{0}: {1} archivierte Claude-Nachrichten", date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)), archived) + (total > 0 ? tr(" · {0} Modellantworten anderer Werkzeuge", total) : "") + tr(" · Claude-Kosten nicht rekonstruierbar") }
-        return tr("{0}: {1} Antworten{2}", date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)), total, breakdown.isEmpty ? tr(" · keine protokollierte Aktivität") : " · \(breakdown)")
+        if archived > 0 { return tr("{0}: {1} archivierte Claude-Nachrichten", date.formatted(dayStyle), archived) + (total > 0 ? tr(" · {0} Modellantworten anderer Werkzeuge", total) : "") + tr(" · Claude-Kosten nicht rekonstruierbar") }
+        return tr("{0}: {1} Antworten{2}", date.formatted(dayStyle), total, breakdown.isEmpty ? tr(" · keine protokollierte Aktivität") : " · \(breakdown)")
     }
 }
 
 struct QuotaHistoryChart: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     private var points: [QuotaPoint] {
-        store.accounts.filter(\.enabled).flatMap { account in
-            var previous: AccountSnapshot?
+        let since = store.now.addingTimeInterval(-86400)
+        return store.accounts.filter(\.enabled).flatMap { account in
             var values: [QuotaPoint] = []
-            for raw in (store.history[account.id] ?? []).sorted(by: { $0.observedAt < $1.observedAt }) {
-                let snapshot = QuotaPeriod.normalizing(raw, previous: previous)
-                previous = snapshot
-                guard snapshot.observedAt > store.now.addingTimeInterval(-86400) else { continue }
+            for snapshot in store.quotaHistory(for: account.id).reversed().prefix(while: { $0.observedAt > since }).reversed() {
                 values += QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).map { window in
                     QuotaPoint(date: snapshot.observedAt, value: store.settings.displayMode.value(used: window.usedPercent),
                                label: "\(account.displayName) · \(window.title)",

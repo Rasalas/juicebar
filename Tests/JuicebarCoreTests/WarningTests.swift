@@ -24,7 +24,7 @@ final class WarningTests: XCTestCase {
         XCTAssertFalse(events(snapshot(resetOffset: 18000), sent: Set(first.map(\.id))).isEmpty)
     }
     func testOldOrExpiredMeasurementsNeverWarn() {
-        XCTAssertTrue(events(snapshot(age: 400)).isEmpty)
+        XCTAssertTrue(events(snapshot(age: 1100)).isEmpty)
         XCTAssertTrue(events(snapshot(resetOffset: -1)).isEmpty)
     }
     func testProjectionRequiresRecentMonotonicHistory() throws {
@@ -139,7 +139,7 @@ final class WarningTests: XCTestCase {
         XCTAssertEqual(resumed.percentPerHour, 120, accuracy: 0.01)
     }
     func testExpiryMostUrgentStageAndManualOffline() {
-        var s = snapshot(age: 1000); s.windows = []
+        var s = snapshot(age: 2000); s.windows = []
         s.benefits = [.init(id: "r", title: "Reset", scope: "week", expiresAt: now.addingTimeInterval(7200), isManual: true)]
         let warning = events(s)
         XCTAssertEqual(warning.map(\.kind), [.expiry])

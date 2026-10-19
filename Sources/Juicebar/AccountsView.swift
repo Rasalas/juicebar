@@ -2,7 +2,7 @@ import SwiftUI
 import JuicebarCore
 
 struct AccountsView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @State private var editing: AccountConfiguration?
     @State private var removing: AccountConfiguration?
     var body: some View {
@@ -44,7 +44,7 @@ struct AccountsView: View {
 }
 
 struct AccountEditor: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State var configuration: AccountConfiguration
     @State private var secret = ""

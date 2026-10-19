@@ -88,7 +88,7 @@ enum JuicebarEntry {
 
 struct JuicebarApplication: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) var delegate
-    @StateObject private var store = AppStore.shared
+    private let store = AppStore.shared
     var body: some Scene {
         MenuBarExtra {
             TrayView(store: store)
@@ -102,7 +102,7 @@ struct JuicebarApplication: App {
 
 struct TrayLabel: View {
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject var store: AppStore
+    let store: AppStore
     private var detail: String {
         let values = store.trayMeters.map { meter in
             guard let window = meter.window else { return tr("{0}: kein aktuelles Limit verfügbar", meter.account.displayName) }
@@ -122,16 +122,24 @@ struct TrayLabel: View {
     private var window: NSWindow?
     func show(store: AppStore) {
         NSApp.setActivationPolicy(.regular)
-        if window == nil {
+        let window = self.window ?? {
             let value = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             value.title = "Juicebars"; value.titleVisibility = .hidden; value.titlebarAppearsTransparent = true
             value.isReleasedWhenClosed = false; value.minSize = NSSize(width: 840, height: 620)
             value.delegate = self
-            value.contentView = NSHostingView(rootView: DashboardView(store: store))
-            value.center(); window = value
-        }
-        window?.makeKeyAndOrderFront(nil)
+            value.center(); self.window = value
+            return value
+        }()
+        if !(window.contentView is NSHostingView<DashboardView>) { window.contentView = NSHostingView(rootView: DashboardView(store: store)) }
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
-    func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        // A hidden dashboard would keep observing the store; rebuild it on the next show.
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window, !window.isVisible else { return }
+            window.contentView = NSView()
+        }
+    }
 }

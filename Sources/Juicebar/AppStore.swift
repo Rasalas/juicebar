@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Observation
 import UserNotifications
 import ServiceManagement
 import JuicebarCore
@@ -10,46 +11,47 @@ struct ManualReset: Codable, Identifiable {
     var benefit: ResetBenefit
 }
 
-@MainActor
-final class AppStore: ObservableObject {
+@MainActor @Observable
+final class AppStore {
     static let shared = AppStore(demo: CommandLine.arguments.contains("--demo"))
-    @Published var accounts: [AccountConfiguration]
-    @Published var settings: MonitorSettings
-    @Published var snapshots: [String: AccountSnapshot] = [:]
-    @Published var failures: [String: String] = [:]
-    @Published var refreshingAccountIDs: Set<String> = []
+    var accounts: [AccountConfiguration]
+    var settings: MonitorSettings
+    var snapshots: [String: AccountSnapshot] = [:]
+    var failures: [String: String] = [:]
+    var refreshingAccountIDs: Set<String> = []
     var isRefreshing: Bool { !refreshingAccountIDs.isEmpty }
-    @Published var isPaused = false { didSet { if isPaused { scheduler.cancelAll(); cancelActivityImport() } else { refreshActivityIfNeeded() } } }
-    @Published var lastChecked: Date?
-    @Published var now = Date()
-    @Published var history: [String: [AccountSnapshot]] = [:]
-    @Published var warnings: [WarningEvent] = []
-    @Published var manualResets: [ManualReset] = []
-    @Published var localUsage: LocalUsageReport?
-    @Published var localUsageError: String?
-    @Published var localUsageLoading = false
-    @Published var activity: ActivityReport?
-    @Published var sshHosts: [String] = []
-    @Published var activityRoots: [ActivityLogs.Root] = []
-    @Published var activityProgress = ""
-    private var nextActivityImport = Date.distantPast
+    var isPaused = false { didSet { if isPaused { scheduler.cancelAll(); cancelActivityImport() } else { refreshActivityIfNeeded() } } }
+    var lastChecked: Date?
+    var now = Date()
+    var history: [String: [AccountSnapshot]] = [:] { didSet { quotaHistoryCache = [:] } }
+    var warnings: [WarningEvent] = []
+    var manualResets: [ManualReset] = []
+    var localUsage: LocalUsageReport?
+    var localUsageError: String?
+    var localUsageLoading = false
+    var activity: ActivityReport?
+    var sshHosts: [String] = []
+    var activityRoots: [ActivityLogs.Root] = []
+    var activityProgress = ""
+    @ObservationIgnored private var nextActivityImport = Date.distantPast
     private let storageDirectory: URL
-    private var activityTask: Task<Void, Never>?
-    private var activityWorker: Task<(ActivityReport, LocalUsageReport?), Error>?
-    private var activityImportID: UUID?
-    private var lastActivityProgress: ContinuousClock.Instant?
-    @Published var storageError: String?
-    @Published var hasRecoverableStorageError = false
-    @Published var notificationStatus = tr("Nicht aktiviert")
-    @Published var localDatabasePath = ""
+    @ObservationIgnored private var activityTask: Task<Void, Never>?
+    @ObservationIgnored private var activityWorker: Task<(ActivityReport, LocalUsageReport?), Error>?
+    @ObservationIgnored private var activityImportID: UUID?
+    @ObservationIgnored private var lastActivityProgress: ContinuousClock.Instant?
+    var storageError: String?
+    var hasRecoverableStorageError = false
+    var notificationStatus = tr("Nicht aktiviert")
+    var localDatabasePath = ""
     let isDemo: Bool
     private let database: HistoryDatabase
     private let registry = ProviderRegistry()
-    private var refreshPolicy = AccountRefreshPolicy()
+    @ObservationIgnored private var refreshPolicy = AccountRefreshPolicy()
     private let scheduler = AccountRefreshScheduler()
-    private var timer: Timer?
-    private var observers: [NSObjectProtocol] = []
-    private var pendingWarningIDs: Set<String> = []
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var pendingWarningIDs: Set<String> = []
+    @ObservationIgnored private var quotaHistoryCache: [String: [AccountSnapshot]] = [:]
 
     init(demo: Bool = false, directory: URL? = nil) {
         isDemo = demo
@@ -88,6 +90,7 @@ final class AppStore: ObservableObject {
         do { warnings = try database.warnings() } catch { startupError = error.localizedDescription }
         storageError = startupError
         hasRecoverableStorageError = !database.unreadablePreferenceKeys.isEmpty
+        settings.migrateLegacyRefreshDefault()
         for account in accounts {
             let values = (try? database.history(account: account.id, limit: 1200)) ?? []
             history[account.id] = values; snapshots[account.id] = values.last
@@ -114,10 +117,11 @@ final class AppStore: ObservableObject {
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }; self.now = Date()
+                guard let self else { return }; self.tick()
                 if !self.isPaused { self.refresh(); self.refreshActivityIfNeeded() }
             }
         }
+        timer?.tolerance = 10
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.scheduler.cancelAll(); self?.cancelActivityImport() }
@@ -133,6 +137,11 @@ final class AppStore: ObservableObject {
         Task { await updateNotificationStatus() }
     }
 
+    /// Views show minutes at most, so a new `now` within the same minute would only redraw them.
+    func tick(at date: Date = Date()) {
+        if Int(date.timeIntervalSinceReferenceDate / 60) != Int(now.timeIntervalSinceReferenceDate / 60) { now = date }
+    }
+
     func stop() { timer?.invalidate(); timer = nil; scheduler.cancelAll(); cancelActivityImport() }
     func shutDown() async { stop(); await scheduler.waitUntilIdle(); await activityTask?.value }
 
@@ -140,6 +149,8 @@ final class AppStore: ObservableObject {
         guard !isDemo, !isPaused else { return }
         let selected = accounts.filter { $0.enabled && (accountID == nil || $0.id == accountID) }
         let schedulingNow = Date()
+        refreshPolicy.clamp(now: schedulingNow)
+        refreshPolicy.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         for account in selected {
             guard refreshPolicy.isDue(id: account.id, force: force, now: schedulingNow) else { continue }
             scheduler.enqueue(id: account.id, replacingPending: force) { [self] generation in
@@ -162,7 +173,8 @@ final class AppStore: ObservableObject {
                     var entries = history[account.id] ?? []; entries.append(snapshot)
                     history[account.id] = Array(entries.suffix(1200))
                     do { try database.save(snapshot) } catch { storageError = error.localizedDescription }
-                    refreshPolicy.succeeded(account: account, refreshSeconds: settings.refreshSeconds, includedHistory: includeUsage, now: Date())
+                    refreshPolicy.succeeded(account: account, refreshSeconds: settings.refreshSeconds, includedHistory: includeUsage,
+                                            unchanged: !force && AccountRefreshPolicy.quotaUnchanged(from: entries.dropLast().last, to: snapshot), now: Date())
                     await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
                 } catch is CancellationError { return }
                 catch {
@@ -318,6 +330,7 @@ final class AppStore: ObservableObject {
     func openAccount(_ account: AccountConfiguration) { NSWorkspace.shared.open(account.provider.accountURL) }
     func snooze() { settings.snoozedUntil = Date().addingTimeInterval(3600); persistSettings() }
     func refreshActivityIfNeeded() {
+        nextActivityImport = min(nextActivityImport, Date().addingTimeInterval(300))
         guard !isPaused, Date() >= nextActivityImport else { return }
         loadLocalUsage()
     }
@@ -398,6 +411,19 @@ final class AppStore: ObservableObject {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.message = tr("OpenCode-Datenbank nur lesend öffnen")
         if panel.runModal() == .OK, let url = panel.url { localDatabasePath = url.path; reloadActivitySources() }
+    }
+    /// Period-normalized history, rebuilt only after `history` changes.
+    func quotaHistory(for id: String) -> [AccountSnapshot] {
+        let raw = history[id] ?? []
+        if let cached = quotaHistoryCache[id] { return cached }
+        var previous: AccountSnapshot?
+        let value = raw.sorted { $0.observedAt < $1.observedAt }.map { raw in
+            let snapshot = QuotaPeriod.normalizing(raw, previous: previous)
+            previous = snapshot
+            return snapshot
+        }
+        quotaHistoryCache[id] = value
+        return value
     }
     var trayMeters: [TrayMeter] {
         TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: Set(failures.keys), settings: settings, now: now)

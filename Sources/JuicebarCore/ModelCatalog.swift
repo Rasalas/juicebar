@@ -107,6 +107,7 @@ public final class ModelCatalog: @unchecked Sendable {
     /// At most once a day, no cookies, credentials, telemetry or executable content.
     public func refreshIfNeeded(now: Date = Date()) async -> Bool {
         let shouldRun = lock.withLock {
+            nextCheck = min(nextCheck, now.addingTimeInterval(86400))  // clock set backwards
             guard !refreshing, now >= nextCheck else { return false }
             refreshing = true; nextCheck = now.addingTimeInterval(86400); return true
         }

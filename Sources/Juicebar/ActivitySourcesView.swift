@@ -2,7 +2,7 @@ import SwiftUI
 import JuicebarCore
 
 struct ActivitySourcesView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @State private var format: ActivitySource = .pi
 
     var body: some View {

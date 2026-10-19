@@ -202,14 +202,15 @@ public struct AccountSnapshot: Codable, Equatable, Sendable {
         self.source = source; self.windows = windows; self.benefits = benefits; self.benefitCount = benefitCount
         self.benefitsChecked = benefitsChecked; self.money = money; self.dailyUsage = dailyUsage; self.notice = notice
     }
-    public func isFresh(at now: Date, maximumAge: TimeInterval = 360) -> Bool {
+    // Unchanged quotas are polled less often; the longest interval still counts as current.
+    public func isFresh(at now: Date, maximumAge: TimeInterval = AccountRefreshPolicy.maximumInterval + 120) -> Bool {
         let age = now.timeIntervalSince(observedAt)
         return age >= -60 && age <= maximumAge
     }
 }
 
 public struct MonitorSettings: Codable, Equatable, Sendable {
-    public var refreshSeconds: Double = 90
+    public var refreshSeconds: Double = 300
     public var threshold: Double = 50
     public var thresholdEnabled = true
     public var paceEnabled = true
@@ -255,6 +256,10 @@ public struct MonitorSettings: Codable, Equatable, Sendable {
     public var displayMode: QuotaDisplay { quotaDisplay ?? .remaining }
     public var menuStyle: TrayStyle { trayStyle ?? .lines }
     public init() {}
+    /// 90 s was the old default, so a stored 90 most likely was never chosen.
+    public mutating func migrateLegacyRefreshDefault() {
+        if refreshSeconds == 90 { refreshSeconds = MonitorSettings().refreshSeconds }
+    }
     public func isQuiet(at now: Date, calendar: Calendar = .current) -> Bool {
         if let snoozedUntil, now < snoozedUntil { return true }
         guard quietEnabled, quietStart != quietEnd else { return false }
