@@ -69,13 +69,24 @@ struct JuiceSegments<Selection: Hashable>: View {
     let title: String
     @Binding var selection: Selection
     let options: [(String, Selection)]
+    /// Shows the title as a row label, like `JuiceMenuPicker`, where context alone does not explain the switch.
+    var showsTitle = false
     @Environment(\.isEnabled) private var enabled
     var body: some View {
+        if showsTitle {
+            HStack(spacing: 12) {
+                Text(title).font(.body)
+                Spacer(minLength: 8)
+                segments.frame(maxWidth: 245)
+            }
+        } else { segments }
+    }
+    private var segments: some View {
         HStack(spacing: 3) {
             ForEach(options.indices, id: \.self) { index in
                 let option = options[index], selected = option.1 == selection
                 Button { selection = option.1 } label: {
-                    Text(option.0).font(.system(size: 11, weight: selected ? .semibold : .medium))
+                    Text(option.0).font(.subheadline.weight(selected ? .semibold : .medium))
                         .foregroundStyle(selected ? Palette.accent : Color.secondary)
                         .frame(maxWidth: .infinity).padding(.horizontal, 9).padding(.vertical, 7)
                         .background(selected ? Palette.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
@@ -95,7 +106,7 @@ struct JuiceMenuPicker<Selection: Hashable>: View {
     @Environment(\.isEnabled) private var enabled
     var body: some View {
         HStack(spacing: 12) {
-            Text(title).font(.system(size: 13))
+            Text(title).font(.body)
             Spacer(minLength: 8)
             Menu {
                 ForEach(options.indices, id: \.self) { index in
@@ -109,7 +120,7 @@ struct JuiceMenuPicker<Selection: Hashable>: View {
                     Text(options.first { $0.1 == selection }?.0 ?? tr("Auswählen")).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 11).padding(.vertical, 8)
+                }.font(.callout.weight(.medium)).padding(.horizontal, 11).padding(.vertical, 8)
                     .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 9))
                     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.primary.opacity(0.1)))
             }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).frame(maxWidth: 245)

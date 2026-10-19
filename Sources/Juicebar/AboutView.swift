@@ -30,7 +30,7 @@ struct AboutView: View {
                 }
                 Toggle(tr("Modellnamen und API-Preise automatisch aktualisieren"), isOn: $catalogUpdates)
                 Text(tr("Signierter Datenkatalog · Stand {0}. Keine Gesprächsdaten werden übertragen.", APICost.priceDate)).font(.caption).foregroundStyle(.secondary)
-                if let error = updates.error { Text(error).font(.caption).foregroundStyle(.orange) }
+                if let error = updates.error { Text(error).font(.caption).foregroundStyle(Palette.warning) }
                 DisclosureGroup(tr("Entwicklung unterstützen")) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(tr("Freiwillige Beiträge helfen bei der Pflege der Anbieter-Anbindungen. Funktionen und Updates sind davon unabhängig."))

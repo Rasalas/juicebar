@@ -23,7 +23,7 @@ struct SSHSourcesView: View {
                     TextField(tr("SSH-Alias oder user@host"), text: $host).textFieldStyle(.roundedBorder).onSubmit(add)
                     Button(tr("Hinzufügen"), action: add).disabled(host.isEmpty || store.localUsageLoading || store.isDemo)
                 }
-                if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+                if let error { Text(error).font(.caption).foregroundStyle(Palette.warning) }
                 Text(tr("Übertragen werden nur Nutzungsdaten. Keine Gesprächsinhalte, keine Installation auf dem Zielrechner. Unbekannte Host-Schlüssel und Passwortabfragen werden abgewiesen. Neue Quellen werden automatisch eingelesen.")).font(.caption).foregroundStyle(.secondary)
             }
         }

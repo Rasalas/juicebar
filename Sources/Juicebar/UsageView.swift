@@ -30,7 +30,7 @@ struct UsageView: View {
                 }
             }
             if store.localUsageLoading { Text(store.activityProgress).font(.caption).foregroundStyle(.secondary) }
-            if let error = store.localUsageError { Text(error).font(.callout).foregroundStyle(.orange) }
+            if let error = store.localUsageError { Text(error).font(.callout).foregroundStyle(Palette.warning) }
             if let report = store.activity {
                 HStack {
                     Text(store.isPaused ? tr("Automatische Aktualisierung pausiert") : tr("Automatisch alle 5 Minuten · {0}", updatedText(report.observedAt, now: store.now)))
@@ -78,6 +78,7 @@ struct UsageView: View {
                                 }
                             }
                             .frame(height: 220)
+                            .accessibilityChartDescriptor(DailyChartDescriptor(days: filtered, metric: metric))
                         }
                         Text(metric == .cost ? tr("API-Gegenwert in USD. Protokollierte Kostenschätzungen haben Vorrang, sonst gelten heutige Standardpreise. Unbepreiste Nutzung fehlt in diesen Balken.") : tr("Tokens einschließlich Cache. Wiederholte Modellantworten zählen einmal. Archivierte Nachrichten werden separat ausgewiesen."))
                             .font(.caption).foregroundStyle(.secondary)
@@ -114,7 +115,7 @@ struct UsageView: View {
                             Text(tr("Veröffentlichte Alpha-Modelle werden auch rückwirkend zum API-Gegenwert bewertet. Die kostenlose Testphase wird dadurch nicht nachträglich zur Rechnung."))
                             let missing = Set(filtered.flatMap { $0.unpricedModels }).sorted()
                             if !missing.isEmpty { Text(tr("Noch ohne Kostenbewertung: ") + missing.joined(separator: ", ")) }
-                            ForEach(report.warnings, id: \.self) { Text($0).foregroundStyle(Palette.accent) }
+                            ForEach(report.warnings, id: \.self) { Text($0).foregroundStyle(Palette.warning) }
                             ForEach(report.notices, id: \.self) { Text($0) }
                             Button(tr("Andere OpenCode-Datenbank …")) { store.selectLocalDatabase() }.disabled(store.isDemo || store.localUsageLoading)
                         }.font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
@@ -139,7 +140,7 @@ struct UsageView: View {
                                     }
                                     Spacer()
                                     Text(compactNumber(model.tokens)).monospacedDigit()
-                                    Text(model.cost.formatted(.currency(code: "USD"))).monospacedDigit().foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
+                                    Text(model.cost.formatted(.currency(code: "USD").locale(Localization.locale))).monospacedDigit().foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
                                 }.font(.callout)
                                 Divider()
                             }
@@ -161,7 +162,7 @@ struct UsageView: View {
                         Text(tr("{0} · gemeldete Kosten in USD", account.displayName)).font(.headline)
                         Chart(store.snapshots[account.id]?.dailyUsage ?? []) { day in
                             BarMark(x: .value(tr("Tag"), day.day, unit: .day), y: .value("USD", day.cost ?? 0)).foregroundStyle(Palette.provider(account.provider))
-                        }.frame(height: 150)
+                        }.frame(height: 150).accessibilityLabel(tr("{0} · gemeldete Kosten in USD", account.displayName))
                     }
                 }
             }
@@ -169,7 +170,7 @@ struct UsageView: View {
     }
     private func costLabel(_ values: [ActivityDay]) -> String {
         guard values.contains(where: { $0.pricedTokens > 0 }) else { return "—" }
-        return values.reduce(0) { $0 + $1.apiCost }.formatted(.currency(code: "USD"))
+        return values.reduce(0) { $0 + $1.apiCost }.formatted(.currency(code: "USD").locale(Localization.locale))
     }
     private func summary(_ filtered: [ActivityDay]) -> some View {
         let tokens = filtered.reduce(0) { $0 + $1.tokens }
@@ -179,7 +180,9 @@ struct UsageView: View {
             HStack(alignment: .firstTextBaseline, spacing: 28) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(tr("THEORETISCHE API-KOSTEN · {0} TAGE", days)).font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Palette.accent)
-                    Text(costLabel(filtered)).font(.system(size: 40, weight: .medium, design: .rounded)).tracking(-1.5).monospacedDigit()
+                    Text(costLabel(filtered)).font(.system(size: 34, weight: .medium, design: .rounded)).tracking(-1.2).monospacedDigit()
+                    Label(tr("Keine Rechnung: so viel hätte diese Nutzung zu API-Preisen gekostet."), systemImage: "info.circle")
+                        .font(.callout.weight(.medium))
                 }
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 5) {
@@ -188,10 +191,12 @@ struct UsageView: View {
                 }
             }
             HStack(alignment: .top) {
-                Text(priced < tokens ? tr("Teilbetrag · {0} % der Tokens bepreist", Int(tokens > 0 ? 100 * priced / tokens : 0)) : tr("API-Gegenwert · keine Abo-Rechnung"))
-                    .foregroundStyle(.secondary)
+                if priced < tokens {
+                    Text(tr("Teilbetrag · {0} % der Tokens bepreist", Int(tokens > 0 ? 100 * priced / tokens : 0))).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text(tr("{0} Modellantworten", filtered.reduce(0) { $0 + $1.responses }.formatted()) + (archived > 0 ? tr(" · {0} archivierte Nachrichten", archived.formatted()) : ""))
+                Text(tr("{0} Modellantworten", filtered.reduce(0) { $0 + $1.responses }.formatted(.number.locale(Localization.locale)))
+                     + (archived > 0 ? tr(" · {0} archivierte Nachrichten", archived.formatted(.number.locale(Localization.locale))) : ""))
                     .foregroundStyle(.secondary).multilineTextAlignment(.trailing)
             }.font(.caption)
         }.padding(22).background(Palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
@@ -218,7 +223,22 @@ func activityColor(_ source: ActivitySource) -> Color {
     case .qwen: Color(red: 0.75, green: 0.38, blue: 0.62)
     }
 }
-func compactNumber(_ number: Double) -> String { number.formatted(.number.notation(.compactName).precision(.fractionLength(0...1))) }
+func compactNumber(_ number: Double) -> String { number.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Localization.locale)) }
+
+private struct DailyChartDescriptor: AXChartDescriptorRepresentable {
+    let days: [ActivityDay]
+    let metric: ActivityMetric
+    func makeChartDescriptor() -> AXChartDescriptor {
+        let style = Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)
+        let totals = Dictionary(grouping: days, by: \.day).mapValues { $0.reduce(0) { $0 + metric.value($1) } }.sorted { $0.key < $1.key }
+        let names = totals.map { $0.key.formatted(style) }
+        let x = AXCategoricalDataAxisDescriptor(title: tr("Tag"), categoryOrder: names)
+        let y = AXNumericDataAxisDescriptor(title: tr(metric.rawValue), range: 0...max(1, totals.map(\.value).max() ?? 0), gridlinePositions: []) { compactNumber($0) }
+        let series = AXDataSeriesDescriptor(name: tr(metric.rawValue), isContinuous: false,
+                                            dataPoints: zip(names, totals).map { AXDataPoint(x: $0, y: $1.value) })
+        return AXChartDescriptor(title: tr("Im Tagesverlauf"), summary: nil, xAxis: x, yAxis: y, additionalAxes: [], series: [series])
+    }
+}
 
 struct ActivityCalendar: View {
     let days: [ActivityDay]
@@ -247,43 +267,65 @@ struct ActivityCalendar: View {
         labels = Dictionary(uniqueKeysWithValues: cells.map { ($0, Self.detail($0, values: grouped[calendar.startOfDay(for: $0)] ?? [])) })
     }
     @State private var selected: Date?
+    @FocusState private var focused: Bool
     private var totals: [Date: Int] { groupedDays.mapValues { $0.reduce(0) { $0 + $1.responses + $1.archivedMessages } } }
     var body: some View {
         let dates = cells, counts = totals, maximum = max(1, counts.values.max() ?? 1)
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 5) {
-                VStack(spacing: 5) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(" ").frame(height: 16)
-                    ForEach(0..<7) { row in Text(row == 0 ? tr("Mo") : row == 2 ? tr("Mi") : row == 4 ? tr("Fr") : " ").font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 21) }
-                }.frame(width: 18)
+                    ForEach(0..<7) { row in Text(row == 0 ? tr("Mo") : row == 2 ? tr("Mi") : row == 4 ? tr("Fr") : " ").font(.caption2).foregroundStyle(.secondary).frame(height: 21) }
+                }.fixedSize()
                 ForEach(0..<(dates.count / 7), id: \.self) { week in
                     let first = dates[week * 7]
                     VStack(spacing: 5) {
                         Text(week == 0 || calendar.component(.day, from: first) <= 7 ? first.formatted(.dateTime.month(.abbreviated).locale(Localization.locale)) : " ")
-                            .font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 16)
+                            .font(.caption2).foregroundStyle(.secondary).frame(height: 16)
                         ForEach(0..<7) { row in
-                            let date = dates[week * 7 + row], count = counts[date] ?? 0, label = labels[date] ?? ""
+                            let date = dates[week * 7 + row], count = counts[date] ?? 0
                             let valid = date <= now && date >= firstDay
-                            Button { selected = date } label: {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(valid ? color(count, maximum: maximum) : Color.clear)
-                                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected == date ? Palette.accent : Color.primary.opacity(valid ? 0.06 : 0), lineWidth: selected == date ? 2 : 1))
-                                    .frame(height: 21)
-                            }.buttonStyle(.plain).disabled(!valid)
-                                .help(label).accessibilityLabel(label)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(valid ? color(count, maximum: maximum) : Color.clear)
+                                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected == date ? Palette.accent : Color.primary.opacity(valid ? 0.06 : 0), lineWidth: selected == date ? 2 : 1))
+                                .frame(height: 21).contentShape(Rectangle())
+                                .onTapGesture { if valid { selected = date } }
+                                .help(labels[date] ?? "")
                         }
                     }.frame(maxWidth: .infinity)
                 }
             }
+            // One focus stop and one accessibility element instead of a button per day.
+            .focusable().focused($focused).focusEffectDisabled()
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Palette.accent : .clear, lineWidth: 2).padding(-4))
+            .onMoveCommand { direction in
+                switch direction {
+                case .left: move(by: -7)
+                case .right: move(by: 7)
+                case .up: move(by: -1)
+                case .down: move(by: 1)
+                @unknown default: break
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(tr("Aktivitätskalender"))
+            .accessibilityValue(selected.flatMap { labels[$0] } ?? tr("{0} aktive Tage", counts.filter { $0.key >= firstDay && $0.value > 0 }.count))
+            .accessibilityHint(tr("Mit den Pfeiltasten einen Tag wählen."))
+            .accessibilityAdjustableAction { direction in move(by: direction == .increment ? 1 : -1) }
             HStack(spacing: 4) {
                 Text(selected.flatMap { labels[$0] } ?? tr("Ein Tag, alle Werkzeuge. Klicke für die Aufschlüsselung."))
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                Text(tr("Wenig")).font(.system(size: 9)).foregroundStyle(.secondary)
+                Text(tr("Wenig")).font(.caption2).foregroundStyle(.secondary)
                 ForEach(0..<5) { index in RoundedRectangle(cornerRadius: 2).fill(index == 0 ? Color.primary.opacity(0.05) : Palette.green.opacity(Double(index) / 4)).frame(width: 9, height: 9) }
-                Text(tr("Viel")).font(.system(size: 9)).foregroundStyle(.secondary)
-            }
+                Text(tr("Viel")).font(.caption2).foregroundStyle(.secondary)
+            }.accessibilityHidden(true)
         }.onChange(of: numberOfDays) { _, _ in selected = nil }
+    }
+    private func move(by days: Int) {
+        guard let next = calendar.date(byAdding: .day, value: days, to: selected ?? calendar.startOfDay(for: now)),
+              next >= firstDay, next <= now else { return }
+        selected = next
     }
     private func color(_ count: Int, maximum: Int) -> Color {
         guard count > 0 else { return Color.primary.opacity(0.05) }
@@ -325,6 +367,10 @@ struct QuotaHistoryChart: View {
                     LineMark(x: .value(tr("Zeit"), point.date), y: .value(store.settings.displayMode.label, point.value), series: .value(tr("Fenster"), point.series))
                         .interpolationMethod(.stepEnd).foregroundStyle(by: .value(tr("Kontingent"), point.label))
                 }.chartYScale(domain: 0...100).chartYAxisLabel(tr("{0} in %", store.settings.displayMode.label)).frame(height: 210)
+                    .accessibilityLabel(tr("Kontingent-Messungen · letzte 24 Stunden"))
+                    .accessibilityValue(Dictionary(grouping: values, by: \.label).compactMap { label, points in
+                        points.max { $0.date < $1.date }.map { "\(label): \(Int($0.value.rounded())) % \(store.settings.displayMode.label.lowercased())" }
+                    }.sorted().joined(separator: ". "))
             }
         }
     }

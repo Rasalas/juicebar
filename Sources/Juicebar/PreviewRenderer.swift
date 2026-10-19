@@ -182,6 +182,8 @@ import JuicebarCore
                        size: NSSize(width: 536, height: 350), appearance: NSAppearance(named: .aqua)!, to: directory.appendingPathComponent("reset-editor.png"))
         try renderView(DashboardView(store: store, page: .alerts).frame(width: 1060, height: 1600),
                        size: NSSize(width: 1060, height: 1600), appearance: NSAppearance(named: .aqua)!, to: directory.appendingPathComponent("warnings-full.png"))
+        try renderView(DashboardView(store: store, page: .settings).frame(width: 1060, height: 1900),
+                       size: NSSize(width: 1060, height: 1900), appearance: NSAppearance(named: .aqua)!, to: directory.appendingPathComponent("settings-full.png"))
         try renderView(DashboardView(store: store, page: .usage).frame(width: 1060, height: 1800),
                        size: NSSize(width: 1060, height: 1800), appearance: NSAppearance(named: .aqua)!, to: directory.appendingPathComponent("usage-full.png"))
         try renderView(TrayLabel(store: store).padding(12).background(Color.white),
@@ -191,7 +193,13 @@ import JuicebarCore
                        size: NSSize(width: 360, height: 45), appearance: NSAppearance(named: .darkAqua)!, to: directory.appendingPathComponent("menubar-dark.png"))
         // Website artwork uses the exact menu image shown by the shipping app.
         let menuImage = MenuLimitImage.make(meters: store.trayMeters, mode: store.settings.displayMode,
-                                           dark: true, expiring: store.expiringCount > 0)
+                                           appearance: NSAppearance(named: .darkAqua), expiring: store.expiringCount > 0)
+        try writeMenuImage(menuImage, to: directory.appendingPathComponent("menu-limits.png"))
+        try renderMenuPopover(store: store, to: directory.appendingPathComponent("menu-popover-\(Localization.language).png"))
+        try renderQuotaStates(to: directory)
+        print("Rendered previews: \(directory.path)")
+    }
+    private static func writeMenuImage(_ menuImage: NSImage, to url: URL) throws {
         let pixels = NSSize(width: menuImage.size.width * 2, height: menuImage.size.height * 2)
         guard let menuBitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(pixels.width), pixelsHigh: Int(pixels.height),
                                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -206,10 +214,7 @@ import JuicebarCore
         guard let menuPNG = menuBitmap.representation(using: .png, properties: [:]) else {
             throw ProviderFailure.unavailable("Menu artwork encoding failed")
         }
-        try menuPNG.write(to: directory.appendingPathComponent("menu-limits.png"))
-        try renderMenuPopover(store: store, to: directory.appendingPathComponent("menu-popover-\(Localization.language).png"))
-        try renderQuotaStates(to: directory)
-        print("Rendered previews: \(directory.path)")
+        try menuPNG.write(to: url)
     }
     private static func renderQuotaStates(to directory: URL) throws {
         let store = AppStore(demo: true)
@@ -235,6 +240,7 @@ import JuicebarCore
             sample.windows[1].usedPercent -= 24 * age / 3600
             return sample
         }
+        store.failures["demo-go"] = ProviderFailure.authentication.localizedDescription
         for mode in QuotaDisplay.allCases {
             store.settings.quotaDisplay = mode
             let view = TrayView(store: store, maximumHeight: 1000)
@@ -242,6 +248,30 @@ import JuicebarCore
             try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: NSAppearance(named: .darkAqua)!,
                            to: directory.appendingPathComponent("quota-states-\(mode.rawValue)-\(Localization.language).png"))
         }
+        // Alert states in the menu bar, in both appearances and both menu styles.
+        for style in TrayStyle.allCases {
+            store.settings.trayStyle = style
+            store.settings.selectedTrayAccount = style == .focused ? "demo-claude" : nil
+            store.settings.selectedTrayWindow = style == .focused ? "seven_day" : nil
+            let meters = store.trayMeters
+            let statuses = meters.map { meter in
+                meter.window.flatMap { window in store.snapshots[meter.account.id].map { QuotaStatus.assess(window: window, snapshot: $0, history: store.history[meter.account.id] ?? [], now: now) } } ?? .unavailable
+            }
+            for dark in [false, true] {
+                try writeMenuImage(MenuLimitImage.make(meters: meters, statuses: statuses, mode: .remaining, appearance: NSAppearance(named: dark ? .darkAqua : .aqua),
+                                                       expiring: true, showsValue: style == .focused),
+                                   to: directory.appendingPathComponent("menu-alert-\(style.rawValue)-\(dark ? "dark" : "light").png"))
+            }
+        }
+        store.settings = MonitorSettings()
+        let light = TrayView(store: store, maximumHeight: 1000).environment(\.colorScheme, .light).background(Color(nsColor: .windowBackgroundColor))
+        NSApp.appearance = NSAppearance(named: .aqua)
+        try renderView(light, size: NSHostingView(rootView: light).fittingSize, appearance: NSAppearance(named: .aqua)!,
+                       to: directory.appendingPathComponent("quota-states-light-\(Localization.language).png"))
+        store.accounts = []
+        let empty = TrayView(store: store, maximumHeight: 1000).background(Color(nsColor: .windowBackgroundColor))
+        try renderView(empty, size: NSHostingView(rootView: empty).fittingSize, appearance: NSAppearance(named: .aqua)!,
+                       to: directory.appendingPathComponent("tray-empty-\(Localization.language).png"))
     }
     /// The shipping views with fixture data, staged without unrelated desktop apps.
     private static func renderMenuPopover(store: AppStore, to url: URL) throws {

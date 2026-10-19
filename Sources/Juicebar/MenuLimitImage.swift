@@ -4,28 +4,51 @@ import JuicebarCore
 
 /// Fixed-width limit slots preserve their positions as values change or a reset passes.
 enum MenuLimitImage {
-    static func make(meters: [TrayMeter], mode: QuotaDisplay, dark: Bool, expiring: Bool) -> NSImage {
+    /// Without an explicit appearance, colours resolve against the status button that draws the image.
+    static func make(meters: [TrayMeter], statuses: [QuotaStatus] = [], mode: QuotaDisplay, appearance: NSAppearance? = nil,
+                     expiring: Bool, showsValue: Bool = false) -> NSImage {
         var positions: [CGFloat] = []
         var x: CGFloat = 3
         for index in meters.indices {
             if index > 0 { x += meters[index - 1].account.id == meters[index].account.id ? 3 : 9 }
             positions.append(x); x += 4
         }
+        let alerts = meters.indices.map { statuses.indices.contains($0) && statuses[$0].isAlert ? statuses[$0] : nil }
+        // Exhausted outranks a forecast; the badge colour never depends on a provider colour.
+        let badge = alerts.contains(.exhausted) ? Palette.criticalColor : alerts.contains { $0 != nil } ? Palette.warningColor : nil
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        let value: String? = showsValue && meters.count == 1 ? meters[0].window.flatMap { window in
+            meters[0].expired ? nil : (mode.value(used: window.usedPercent) / 100).formatted(.percent.precision(.fractionLength(0)).locale(Localization.locale))
+        } : nil
+        let valueX = x + 4
+        if let value { x = valueX + ceil((value as NSString).size(withAttributes: [.font: font]).width) }
+        let badgeX = x + 3
+        if badge != nil { x = badgeX + 11 }
         let width = max(16, x + 3 + (expiring ? 6 : 0))
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         let image = NSImage(size: NSSize(width: width, height: 22), flipped: false) { _ in
-            appearance.performAsCurrentDrawingAppearance {
-                if meters.isEmpty { drawLine(x: 6, value: nil, color: .secondaryLabelColor, stale: false) }
+            let draw = {
+                if meters.isEmpty { drawLine(x: 6, value: nil, color: .secondaryLabelColor, stale: false, alert: nil) }
                 for (index, meter) in meters.enumerated() {
                     let value = meter.expired ? nil : meter.window.map { mode.value(used: $0.usedPercent) / 100 }
-                    drawLine(x: positions[index], value: value,
-                             color: NSColor(Palette.provider(meter.account.provider)), stale: !meter.fresh)
+                    let alert = alerts[index].map { $0 == .exhausted ? Palette.criticalColor : Palette.warningColor }
+                    drawLine(x: positions[index], value: value, color: Palette.providerColor(meter.account.provider),
+                             stale: !meter.fresh, alert: alert)
+                }
+                if let value {
+                    let color = meters[0].fresh ? NSColor.labelColor : NSColor.secondaryLabelColor
+                    (value as NSString).draw(at: NSPoint(x: valueX, y: 3.5), withAttributes: [.font: font, .foregroundColor: color])
+                }
+                if let badge, let symbol = NSImage(systemSymbolName: "exclamationmark.circle.fill", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .bold)
+                        .applying(NSImage.SymbolConfiguration(paletteColors: [.white, badge]))) {
+                    symbol.draw(in: NSRect(x: badgeX, y: 5.5, width: 11, height: 11))
                 }
                 if expiring {
                     NSColor.labelColor.setFill()
                     NSBezierPath(ovalIn: NSRect(x: width - 4, y: 17, width: 3, height: 3)).fill()
                 }
             }
+            if let appearance { appearance.performAsCurrentDrawingAppearance(draw) } else { draw() }
             return true
         }
         image.isTemplate = false
@@ -33,9 +56,16 @@ enum MenuLimitImage {
         return image
     }
 
-    private static func drawLine(x: CGFloat, value: Double?, color: NSColor, stale: Bool) {
+    private static func drawLine(x: CGFloat, value: Double?, color: NSColor, stale: Bool, alert: NSColor?) {
         let rect = NSRect(x: x, y: 2, width: 4, height: 18)
         let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+        defer {
+            // An alert outline keeps an empty bar visible and stands apart from every provider colour.
+            if let alert {
+                let outline = NSBezierPath(roundedRect: rect.insetBy(dx: -0.75, dy: -0.75), xRadius: 2.75, yRadius: 2.75)
+                alert.setStroke(); outline.lineWidth = 1.5; outline.stroke()
+            }
+        }
         guard let value, value.isFinite else {
             color.withAlphaComponent(0.85).setStroke()
             path.lineWidth = 1
