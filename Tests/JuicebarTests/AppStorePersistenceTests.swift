@@ -1,5 +1,6 @@
 import XCTest
 import JuicebarCore
+import CSQLite
 @testable import Juicebar
 
 @MainActor
@@ -31,5 +32,35 @@ final class AppStorePersistenceTests: XCTestCase {
         XCTAssertEqual(store.accounts.map(\.id), ["default-codex", "default-claude"])
         XCTAssertFalse(store.hasRecoverableStorageError)
         XCTAssertNil(store.storageError)
+    }
+
+    func testOutdatedCachesAreDiscardedWithoutErrorAndKeepOpenCodePath() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-cache-store-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
+        try database.write("old format", key: "activity-report-v2")
+        try database.write("old format", key: "local-usage-v2")
+        try database.write("/fixture/opencode.db", key: "opencode-path")
+        let store = AppStore(directory: directory)
+        XCTAssertNil(store.activity)
+        XCTAssertNil(store.localUsage)
+        XCTAssertNil(store.storageError)
+        XCTAssertFalse(store.hasRecoverableStorageError)
+        XCTAssertEqual(store.localDatabasePath, "/fixture/opencode.db")
+    }
+
+    func testDeliveredWarningCountsAsSentWhenSavingFails() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-warning-store-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = AppStore(directory: directory)
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("usage.sqlite").path, &connection), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(connection, "DROP TABLE warnings", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(connection)
+        let event = WarningEvent(id: "fixture-warning", accountID: "a", kind: .threshold, title: "A", message: "50 %", createdAt: Date())
+        store.recordDelivered([event])
+        XCTAssertEqual(store.warnings.map(\.id), ["fixture-warning"])
+        XCTAssertNotNil(store.storageError)
     }
 }
