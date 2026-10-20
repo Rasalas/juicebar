@@ -133,4 +133,70 @@ final class AccountRefreshPolicyTests: XCTestCase {
         XCTAssertFalse(policy.isDue(id: "a", force: false, now: now.addingTimeInterval(86400)))
         XCTAssertTrue(policy.isDue(id: "a", force: true, now: now))
     }
+    func testUnchangedQuotaBacksOffAndChangeResetsInterval() {
+        var policy = AccountRefreshPolicy()
+        let account = AccountConfiguration(id: "a", provider: .claude)
+        var now = Date(timeIntervalSince1970: 1000)
+        var delays: [TimeInterval] = []
+        for unchanged in [false, true, true, true, true, true, false] {
+            policy.succeeded(account: account, refreshSeconds: 300, includedHistory: false, unchanged: unchanged, now: now)
+            let delay = stride(from: 0.0, through: 3600, by: 30).first { policy.isDue(id: "a", force: false, now: now.addingTimeInterval($0)) }!
+            delays.append(delay); now = now.addingTimeInterval(delay)
+        }
+        XCTAssertEqual(delays, [300, 450, 600, 750, 900, 900, 300])
+        policy.succeeded(account: account, refreshSeconds: 60, includedHistory: false, unchanged: true, now: now)
+        XCTAssertTrue(policy.isDue(id: "a", force: false, now: now.addingTimeInterval(90)))
+    }
+    func testLowPowerModeStretchesIntervalUpToMaximum() {
+        var policy = AccountRefreshPolicy()
+        policy.lowPowerMode = true
+        let account = AccountConfiguration(id: "a", provider: .codex)
+        let now = Date(timeIntervalSince1970: 1000)
+        policy.succeeded(account: account, refreshSeconds: 300, includedHistory: false, now: now)
+        XCTAssertFalse(policy.isDue(id: "a", force: false, now: now.addingTimeInterval(599)))
+        XCTAssertTrue(policy.isDue(id: "a", force: false, now: now.addingTimeInterval(600)))
+        policy.succeeded(account: account, refreshSeconds: 300, includedHistory: false, unchanged: true, now: now)
+        XCTAssertFalse(policy.isDue(id: "a", force: false, now: now.addingTimeInterval(899)))
+        XCTAssertTrue(policy.isDue(id: "a", force: false, now: now.addingTimeInterval(900)))
+    }
+    func testClockMovedBackwardsDoesNotPostponeBeyondOneInterval() {
+        var policy = AccountRefreshPolicy()
+        let account = AccountConfiguration(id: "a", provider: .codex)
+        let now = Date(timeIntervalSince1970: 100_000)
+        policy.succeeded(account: account, refreshSeconds: 300, includedHistory: true, now: now)
+        policy.failed(id: "b", error: ProviderFailure.rateLimited(120), refreshSeconds: 300, now: now)
+        policy.failed(id: "c", error: ProviderFailure.needsSetup("fixture"), refreshSeconds: 300, now: now)
+        let earlier = now.addingTimeInterval(-7200)
+        policy.clamp(now: earlier)
+        XCTAssertFalse(policy.isDue(id: "a", force: false, now: earlier.addingTimeInterval(299)))
+        XCTAssertTrue(policy.isDue(id: "a", force: false, now: earlier.addingTimeInterval(300)))
+        XCTAssertFalse(policy.isDue(id: "b", force: true, now: earlier.addingTimeInterval(119)))
+        XCTAssertTrue(policy.isDue(id: "b", force: true, now: earlier.addingTimeInterval(120)))
+        XCTAssertFalse(policy.isDue(id: "c", force: false, now: earlier.addingTimeInterval(86400)))
+        XCTAssertFalse(policy.includesHistory(id: "a", now: earlier.addingTimeInterval(1800)))
+        XCTAssertTrue(policy.includesHistory(id: "a", now: earlier.addingTimeInterval(1801)))
+        policy.clamp(now: now)
+        XCTAssertTrue(policy.isDue(id: "a", force: false, now: now))
+    }
+    func testQuotaComparisonIgnoresResetDrift() {
+        let reset = Date(timeIntervalSince1970: 50_000)
+        let old = AccountSnapshot(configurationID: "a", identity: "fixture", source: "test",
+                                  windows: [QuotaWindow(id: "five_hour", title: "5h", usedPercent: 20, resetsAt: reset)])
+        var drifted = old; drifted.windows[0].resetsAt = reset.addingTimeInterval(1); drifted.observedAt = old.observedAt.addingTimeInterval(300)
+        XCTAssertTrue(AccountRefreshPolicy.quotaUnchanged(from: old, to: drifted))
+        var used = drifted; used.windows[0].usedPercent = 21
+        XCTAssertFalse(AccountRefreshPolicy.quotaUnchanged(from: old, to: used))
+        var other = drifted; other.identity = "other"
+        XCTAssertFalse(AccountRefreshPolicy.quotaUnchanged(from: old, to: other))
+        XCTAssertFalse(AccountRefreshPolicy.quotaUnchanged(from: nil, to: old))
+    }
+    func testLegacyDefaultIntervalMigratesAndExplicitChoiceStays() throws {
+        var legacy = MonitorSettings(); legacy.refreshSeconds = 90
+        var decoded = try JSONDecoder().decode(MonitorSettings.self, from: JSONEncoder().encode(legacy))
+        decoded.migrateLegacyRefreshDefault()
+        XCTAssertEqual(decoded.refreshSeconds, 300)
+        var chosen = MonitorSettings(); chosen.refreshSeconds = 60
+        chosen.migrateLegacyRefreshDefault()
+        XCTAssertEqual(chosen.refreshSeconds, 60)
+    }
 }

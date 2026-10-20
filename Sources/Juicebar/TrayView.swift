@@ -2,11 +2,24 @@ import SwiftUI
 import JuicebarCore
 
 struct TrayView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     var maximumHeight: CGFloat = (NSScreen.main?.visibleFrame.height ?? 800) - 16
     @State private var height: CGFloat = 0
-    private var accounts: [AccountConfiguration] { QuotaOrder.accounts(store.accounts.filter(\.enabled)) }
+    // The sections render three times for layout; quota projections run once here.
+    private var rows: [TrayAccountRow] {
+        QuotaOrder.accounts(store.accounts.filter(\.enabled)).map { account in
+            let snapshot = store.snapshots[account.id], failure = store.failures[account.id]
+            let windows = snapshot.map { snapshot in
+                QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).map { window in
+                    TrayWindowRow(window: window, status: QuotaStatus.assess(window: window, snapshot: snapshot, history: store.history[account.id] ?? [],
+                                                                             now: store.now, hasFailure: failure != nil))
+                }
+            } ?? []
+            return TrayAccountRow(account: account, snapshot: snapshot, failure: failure, windows: windows)
+        }
+    }
     var body: some View {
+        let rows = self.rows, expiring = store.expiringCount
         TrayLayout(maximumHeight: maximumHeight - 32) {
             HStack(spacing: 8) {
                 Button { DashboardWindow.shared.show(store: store) } label: {
@@ -28,16 +41,16 @@ struct TrayView: View {
                     .menuStyle(.button).menuIndicator(.hidden).buttonStyle(JuiceButtonStyle()).fixedSize()
                     .help(tr("Weitere Aktionen"))
             }
-            accountSections.hidden().accessibilityHidden(true)
+            accountSections(rows).hidden().accessibilityHidden(true)
             ViewThatFits(in: .vertical) {
-                accountSections
-                ScrollView { accountSections }
+                accountSections(rows)
+                ScrollView { accountSections(rows) }
                     .scrollIndicators(.never)
                     .scrollBounceBehavior(.basedOnSize)
             }
             VStack(alignment: .leading, spacing: 10) {
-                if store.expiringCount > 0 {
-                    Label(tr("{0} {1} in den nächsten 3 Tagen", store.expiringCount, store.expiringCount == 1 ? tr("Reset-Frist") : tr("Reset-Fristen")), systemImage: "hourglass")
+                if expiring > 0 {
+                    Label(tr("{0} {1} in den nächsten 3 Tagen", expiring, expiring == 1 ? tr("Reset-Frist") : tr("Reset-Fristen")), systemImage: "hourglass")
                         .font(.caption).foregroundStyle(Palette.accent)
                 }
                 HStack {
@@ -53,14 +66,14 @@ struct TrayView: View {
         .tint(Palette.accent).buttonStyle(JuiceButtonStyle())
         .environment(\.quotaDisplay, store.settings.displayMode).onAppear { store.start() }
     }
-    private var accountSections: some View {
+    private func accountSections(_ rows: [TrayAccountRow]) -> some View {
         VStack(alignment: .leading, spacing: 26) {
-            if accounts.isEmpty {
+            if rows.isEmpty {
                 Text(tr("Noch keine aktiven Konten. Verbinde einen Anbieter in der Übersicht."))
                     .font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
             }
-            ForEach(accounts) { account in
-                TrayAccountView(store: store, account: account)
+            ForEach(rows) { row in
+                TrayAccountView(row: row, now: store.now)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -109,14 +122,26 @@ private struct TrayLayout: Layout {
     }
 }
 
-private struct TrayAccountView: View {
-    @ObservedObject var store: AppStore
+private struct TrayWindowRow: Identifiable {
+    let window: QuotaWindow
+    let status: QuotaStatus
+    var id: String { window.id }
+}
+
+private struct TrayAccountRow: Identifiable {
     let account: AccountConfiguration
-    private var snapshot: AccountSnapshot? { store.snapshots[account.id] }
-    private var visibleWindows: [QuotaWindow] {
-        QuotaOrder.visibleWindows(snapshot?.windows ?? [], provider: account.provider)
-    }
-    private var stale: Bool { snapshot?.isFresh(at: store.now) != true || store.failures[account.id] != nil }
+    let snapshot: AccountSnapshot?
+    let failure: String?
+    let windows: [TrayWindowRow]
+    var id: String { account.id }
+}
+
+private struct TrayAccountView: View {
+    let row: TrayAccountRow
+    let now: Date
+    private var account: AccountConfiguration { row.account }
+    private var snapshot: AccountSnapshot? { row.snapshot }
+    private var stale: Bool { snapshot?.isFresh(at: now) != true || row.failure != nil }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -132,11 +157,8 @@ private struct TrayAccountView: View {
             }
             if let snapshot {
                 VStack(spacing: 14) {
-                    ForEach(visibleWindows) { window in
-                        QuotaBar(window: window, color: Palette.provider(account.provider), now: store.now, compact: true,
-                                 status: QuotaStatus.assess(window: window, snapshot: snapshot,
-                                                          history: store.history[account.id] ?? [], now: store.now,
-                                                          hasFailure: store.failures[account.id] != nil))
+                    ForEach(row.windows) { item in
+                        QuotaBar(window: item.window, color: Palette.provider(account.provider), now: now, compact: true, status: item.status)
                     }
                 }
                 ForEach(snapshot.money) { metric in
@@ -147,13 +169,13 @@ private struct TrayAccountView: View {
                     }.font(.system(size: 11)).monospacedDigit()
                 }
                 if let count = snapshot.benefitCount, count > 0 {
-                    ResetAvailability(snapshot: snapshot, now: store.now)
+                    ResetAvailability(snapshot: snapshot, now: now)
                 }
-                if visibleWindows.isEmpty && snapshot.money.isEmpty {
+                if row.windows.isEmpty && snapshot.money.isEmpty {
                     Text(snapshot.notice ?? tr("Keine Kontingente verfügbar")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let failure = store.failures[account.id] {
+            if let failure = row.failure {
                 Label(failure, systemImage: "exclamationmark.circle")
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else if snapshot == nil {

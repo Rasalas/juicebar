@@ -34,6 +34,26 @@ final class AppStorePersistenceTests: XCTestCase {
         XCTAssertNil(store.storageError)
     }
 
+    func testClockTickOnlyPublishesNewMinutes() {
+        let store = AppStore(demo: true)
+        let minute = (store.now.timeIntervalSinceReferenceDate / 60).rounded(.down) * 60
+        store.now = Date(timeIntervalSinceReferenceDate: minute)
+        store.tick(at: Date(timeIntervalSinceReferenceDate: minute + 59))
+        XCTAssertEqual(store.now, Date(timeIntervalSinceReferenceDate: minute))
+        store.tick(at: Date(timeIntervalSinceReferenceDate: minute + 60))
+        XCTAssertEqual(store.now, Date(timeIntervalSinceReferenceDate: minute + 60))
+    }
+
+    func testQuotaHistoryCacheFollowsHistoryChanges() throws {
+        let store = AppStore(demo: true)
+        let id = try XCTUnwrap(store.history.keys.sorted().first)
+        let count = store.quotaHistory(for: id).count
+        XCTAssertEqual(count, store.history[id]?.count)
+        var next = try XCTUnwrap(store.history[id]?.last); next.observedAt = next.observedAt.addingTimeInterval(60)
+        store.history[id]?.append(next)
+        XCTAssertEqual(store.quotaHistory(for: id).count, count + 1)
+    }
+
     func testOutdatedCachesAreDiscardedWithoutErrorAndKeepOpenCodePath() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-cache-store-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

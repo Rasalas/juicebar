@@ -35,17 +35,20 @@ public enum SecretStore {
 }
 
 public enum HTTPTransport {
+    static let maximumBytes = 2_000_000
+    // Shared so connections and TLS sessions are reused between polls.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 12; config.timeoutIntervalForResource = 15
+        config.httpCookieStorage = nil; config.urlCache = nil; config.urlCredentialStorage = nil
+        return URLSession(configuration: config)
+    }()
     public static func get(_ url: URL, headers: [String: String]) async throws -> [String: Any] {
         var request = URLRequest(url: url); request.timeoutInterval = 12
         request.setValue("Juicebar/0.1.0", forHTTPHeaderField: "User-Agent")
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 12; config.timeoutIntervalForResource = 15
-        config.httpCookieStorage = nil; config.urlCache = nil
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw ProviderFailure.network }
             switch response.statusCode {
             case 200..<300: break
@@ -60,17 +63,16 @@ public enum HTTPTransport {
             case 404: throw ProviderFailure.unsupported(tr("Diese Datenquelle ist für das Konto nicht verfügbar."))
             default: throw ProviderFailure.network
             }
-            guard response.expectedContentLength <= 2_000_000 else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
-            var data = Data()
-            for try await byte in bytes {
-                data.append(byte)
-                guard data.count <= 2_000_000 else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
-            }
-            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure.invalidData(tr("Unbekanntes Antwortformat. Adapter aktualisieren.")) }
-            return object
+            return try decode(data)
         } catch let error as ProviderFailure { throw error }
         catch is CancellationError { throw CancellationError() }
+        catch let error as URLError where error.code == .cancelled && Task.isCancelled { throw CancellationError() }
         catch { throw ProviderFailure.network }
+    }
+    static func decode(_ data: Data) throws -> [String: Any] {
+        guard data.count <= maximumBytes else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure.invalidData(tr("Unbekanntes Antwortformat. Adapter aktualisieren.")) }
+        return object
     }
 }
 

@@ -17,7 +17,7 @@ enum Page: String, CaseIterable, Identifiable {
 }
 
 struct DashboardView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @State private var page: Page = .overview
     @FocusState private var focusedPage: Page?
     init(store: AppStore, page: Page = .overview) {
@@ -163,7 +163,7 @@ struct DashboardView: View {
 }
 
 struct AccountCard: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     let account: AccountConfiguration
     let manage: () -> Void
     var body: some View {

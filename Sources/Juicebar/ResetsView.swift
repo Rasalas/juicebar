@@ -2,7 +2,7 @@ import SwiftUI
 import JuicebarCore
 
 struct ResetsView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @State private var adding = false
     private var entries: [(AccountConfiguration, ResetBenefit)] {
         store.accounts.flatMap { account in
@@ -60,7 +60,7 @@ struct ResetsView: View {
 }
 
 struct AddResetView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var accountID = ""
     @State private var title = tr("Reset-Angebot")

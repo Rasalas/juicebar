@@ -27,7 +27,7 @@ final class QuotaStatusTests: XCTestCase {
     }
     func testStaleFailedAndExpiredDataCannotDescribeCurrentHealth() {
         for used: Double in [90, 100] {
-            XCTAssertEqual(status(snapshot(used: used, age: 400)), .unavailable)
+            XCTAssertEqual(status(snapshot(used: used, age: 1100)), .unavailable)
             XCTAssertEqual(status(snapshot(used: used, reset: 0)), .unavailable)
             XCTAssertEqual(status(snapshot(used: used), hasFailure: true), .unavailable)
         }
@@ -43,7 +43,7 @@ final class QuotaStatusTests: XCTestCase {
         var otherLogin = history
         for index in otherLogin.indices { otherLogin[index].identity = "other" }
         XCTAssertEqual(status(current, history: otherLogin), .unavailable)
-        XCTAssertEqual(status(snapshot(used: 90, age: 400), history: history), .unavailable)
+        XCTAssertEqual(status(snapshot(used: 90, age: 1100), history: history), .unavailable)
     }
     func testSlowConsumptionDoesNotExtrapolateDaysFromRecentActivity() {
         let current = snapshot(used: 90, reset: 302400)

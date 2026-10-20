@@ -3,7 +3,7 @@ import ServiceManagement
 import JuicebarCore
 
 struct PreferencesView: View {
-    @ObservedObject var store: AppStore
+    @Bindable var store: AppStore
     @AppStorage("appLanguage") private var appLanguage = "system"
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -55,8 +55,8 @@ struct PreferencesView: View {
             Panel {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(tr("Hintergrund")).font(.headline)
-                    JuiceMenuPicker(title: tr("Aktualisieren"), selection: $store.settings.refreshSeconds, options: [(tr("Jede Minute"), 60.0), (tr("Alle 90 Sekunden"), 90.0), (tr("Alle 3 Minuten"), 180.0), (tr("Alle 5 Minuten"), 300.0)])
-                    Text(tr("API-Kosten höchstens alle 5 Minuten. Bei Fehlern wartet Juicebars länger; beim Ruhezustand stoppt die laufende Abfrage.")).font(.caption).foregroundStyle(.secondary)
+                    JuiceMenuPicker(title: tr("Aktualisieren"), selection: $store.settings.refreshSeconds, options: [(tr("Jede Minute"), 60.0), (tr("Alle 3 Minuten"), 180.0), (tr("Alle 5 Minuten"), 300.0)])
+                    Text(tr("Bleibt der Stand unverändert oder ist der Stromsparmodus an, fragt Juicebars bis zu dreimal seltener ab. API-Kosten höchstens alle 5 Minuten. Bei Fehlern wartet Juicebars länger; beim Ruhezustand stoppt die laufende Abfrage.")).font(.caption).foregroundStyle(.secondary)
                     Toggle(tr("Beim Anmelden starten"), isOn: $loginEnabled).disabled(store.isDemo).onChange(of: loginEnabled) { _, enabled in
                         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; loginError = nil }
                         catch { loginError = error.localizedDescription }

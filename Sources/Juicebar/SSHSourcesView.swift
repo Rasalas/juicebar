@@ -2,7 +2,7 @@ import SwiftUI
 import JuicebarCore
 
 struct SSHSourcesView: View {
-    @ObservedObject var store: AppStore
+    let store: AppStore
     @State private var host = ""
     @State private var error: String?
     var body: some View {

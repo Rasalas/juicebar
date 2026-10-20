@@ -77,6 +77,13 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(QuotaOrder.visibleWindows(cached, provider: .codex).count, cached.count)
         XCTAssertThrowsError(try ProviderParsing.claude(["rate_limits": ["iguana_necktie": ["utilization": 0, "resets_at": NSNull()]]], configuration: .init(provider: .claude)))
     }
+    func testHTTPResponseLimitAndShape() throws {
+        XCTAssertEqual(try HTTPTransport.decode(Data(#"{"used": 1}"#.utf8))["used"] as? Int, 1)
+        XCTAssertThrowsError(try HTTPTransport.decode(Data(#"[1]"#.utf8))) { XCTAssertEqual($0 as? ProviderFailure, .invalidData(tr("Unbekanntes Antwortformat. Adapter aktualisieren."))) }
+        let oversized = Data(#"{"pad": ""#.utf8) + Data(repeating: 0x61, count: HTTPTransport.maximumBytes) + Data(#""}"#.utf8)
+        XCTAssertThrowsError(try HTTPTransport.decode(oversized)) { XCTAssertEqual($0 as? ProviderFailure, .invalidData(tr("Die Anbieterantwort ist zu groß."))) }
+    }
+
     func testUnreadableLoginKeepsKnownIdentityAndHistory() throws {
         let codex = AccountConfiguration(id: "cx", provider: .codex)
         let limits: [String: Any] = ["rateLimits": ["primary": ["usedPercent": 10]]]

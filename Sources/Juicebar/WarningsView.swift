@@ -2,7 +2,7 @@ import SwiftUI
 import JuicebarCore
 
 struct WarningsView: View {
-    @ObservedObject var store: AppStore
+    @Bindable var store: AppStore
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             PageHeading(title: tr("Früh genug Bescheid wissen."), subtitle: tr("Einmal pro Regel und Zeitfenster. Ohne wiederkehrende Pop-ups bei jedem Abruf."))
