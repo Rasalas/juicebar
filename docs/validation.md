@@ -1,10 +1,16 @@
 # Validation status · 25 September 2026
 
-## Juicebars 0.1.13 UI validation, 20 October
+## Juicebars 0.1.13 release, 20 October
 
 The weekly target uses the same neutral diamond symbol as the even-usage marker, clipped to one half with rounded cut corners. Both markers share their vertical center; the lower corner of the half diamond anchors its horizontal target. The extra target line under the five-hour bar is removed. The legend now says “Gleichmäßiger Verbrauch”, and quota details show the estimated usable weekly balance and explain how full windows are estimated from provider measurements, without asserting a model-mix conversion.
 
 Local validation passed 159 Swift tests, with seven opt-in benchmarks skipped, and 13 Python collector tests. Tray checks passed in both languages, at the constrained height and with always-visible system scrollbars; activity persistence and source packaging passed. English and German native screenshots were refreshed. Marker fixtures cover both sides of the even-usage marker, both quota display modes, both appearances and exhausted quota at the track edge. A pixel comparison confirms the cut-corner rounding affects both marker directions. The website loaded all images without horizontal overflow at 1280 and 390 CSS pixels. Offscreen SwiftUI still does not expose accessibility descendants on this Mac; live VoiceOver remains unverified.
+
+PR #15 merged as `680617b` after both macOS checks passed; main CI also passed. Version 0.1.13, build 15, was packaged from the clean tagged source. The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. Both checksums passed, and all four assets downloaded from the GitHub draft matched their local originals. The Sparkle ZIP signature verified against the bundled key; a modified byte was rejected. Repeated signing completed unattended in 0.18 and 0.13 seconds. Layout and persistence checks also passed in the signed bundle.
+
+Before publication, installed 0.1.12 used a temporary loopback feed to test this exact signed archive. A missing ZIP produced a download error and retained 0.1.12. “Remind Me Later” dismissed the valid offer; a subsequent manual check offered it again. Sparkle downloaded, installed and relaunched 0.1.13, build 15. The installed app passed signature, notarization and Gatekeeper checks. All four stored account/settings/SSH/path preference groups remained byte-identical, all 3,533 meaningful observations in the baseline survived, and both usage caches retained their 206 and 22 day entries. The feed override was removed and the app restarted against the normal feed.
+
+The published stable feed serves build 15, and the public DMG matches the tested local release. Download links now target the public 0.1.13 assets.
 
 ## Juicebars 0.1.12 release, 20 October
 
