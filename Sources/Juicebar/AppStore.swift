@@ -90,9 +90,12 @@ final class AppStore {
         storageError = startupError
         hasRecoverableStorageError = !database.unreadablePreferenceKeys.isEmpty
         settings.migrateLegacyRefreshDefault()
+        let loadedSince = Date().addingTimeInterval(-HistoryRetention.loadedSpan)
         for account in accounts {
-            let values = (try? database.history(account: account.id, limit: 1200)) ?? []
-            history[account.id] = values; snapshots[account.id] = values.last
+            var values = (try? database.history(account: account.id, since: loadedSince, limit: HistoryRetention.maximumRows)) ?? []
+            // An account unused for weeks still shows its last value.
+            if values.isEmpty { values = (try? database.history(account: account.id, limit: 1)) ?? [] }
+            history[account.id] = HistoryRetention.thinned(values, now: Date()); snapshots[account.id] = values.last
         }
         scheduler.onChange = { [weak self] ids in
             guard let self else { return }
@@ -166,11 +169,11 @@ final class AppStore {
                         snapshot.dailyUsage = previous.dailyUsage
                     }
                     snapshots[account.id] = snapshot; failures[account.id] = nil
-                    var entries = history[account.id] ?? []; entries.append(snapshot)
-                    history[account.id] = Array(entries.suffix(1200))
+                    let previous = history[account.id]?.last
+                    history[account.id] = HistoryRetention.appending(snapshot, to: history[account.id] ?? [])
                     do { try database.save(snapshot) } catch { storageError = error.localizedDescription }
                     refreshPolicy.succeeded(account: account, refreshSeconds: settings.refreshSeconds, includedHistory: includeUsage,
-                                            unchanged: !force && AccountRefreshPolicy.quotaUnchanged(from: entries.dropLast().last, to: snapshot), now: Date())
+                                            unchanged: !force && AccountRefreshPolicy.quotaUnchanged(from: previous, to: snapshot), now: Date())
                     await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
                 } catch is CancellationError { return }
                 catch {

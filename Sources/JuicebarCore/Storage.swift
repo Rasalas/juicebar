@@ -1,15 +1,61 @@
 import Foundation
 import CSQLite
 
+/// How long quota history is kept and which observations add nothing to it.
+public enum HistoryRetention {
+    /// A full previous weekly cycle with margin.
+    public static let storedSpan: TimeInterval = 30 * 86400
+    /// The app holds only the span it evaluates.
+    public static let loadedSpan = WeeklyReach.historySpan
+    /// Projections and the 24-hour chart read every poll of the last day.
+    public static let completeSpan: TimeInterval = 86400
+    public static let maximumRows = 10_000
+
+    /// Equal values and periods: a row between two such neighbours changes no delta, period match or chart step.
+    static func sameQuota(_ a: AccountSnapshot, _ b: AccountSnapshot) -> Bool {
+        a.configurationID == b.configurationID && a.identity == b.identity && a.windows.count == b.windows.count
+            && zip(a.windows, b.windows).allSatisfy {
+                $0.id == $1.id && $0.duration == $1.duration && $0.usedPercent == $1.usedPercent
+                    && ($0.periodAnchor ?? $0.resetsAt) == ($1.periodAnchor ?? $1.resetsAt)
+            }
+    }
+    /// Rows observed in `start..<cutoff` inside a run of unchanged quota; both ends of the run stay. Expects chronological order.
+    static func redundant(_ history: [AccountSnapshot], from start: Date = .distantPast, before cutoff: Date) -> [Int] {
+        let lower = max(1, firstIndex(in: history, notBefore: start)), upper = min(history.count - 1, firstIndex(in: history, notBefore: cutoff))
+        guard lower < upper else { return [] }
+        return (lower..<upper).filter { sameQuota(history[$0 - 1], history[$0]) && sameQuota(history[$0], history[$0 + 1]) }
+    }
+    private static func firstIndex(in history: [AccountSnapshot], notBefore date: Date) -> Int {
+        var low = 0, high = history.count
+        while low < high { let mid = (low + high) / 2; if history[mid].observedAt < date { low = mid + 1 } else { high = mid } }
+        return low
+    }
+    /// Thins history loaded from the database, which may hold polls that crossed the one-day line while the app was closed.
+    public static func thinned(_ history: [AccountSnapshot], now: Date) -> [AccountSnapshot] {
+        let drop = Set(redundant(history, before: now.addingTimeInterval(-completeSpan)))
+        return history.indices.filter { !drop.contains($0) }.map { history[$0] }
+    }
+    /// Applies the database limits to in-memory history; only polls that crossed the one-day line since the last append are examined.
+    public static func appending(_ snapshot: AccountSnapshot, to history: [AccountSnapshot]) -> [AccountSnapshot] {
+        var result = history; result.append(snapshot)
+        let now = snapshot.observedAt
+        if let first = result.firstIndex(where: { now.timeIntervalSince($0.observedAt) <= loadedSpan }) { result.removeFirst(first) }
+        let since = (history.last?.observedAt ?? .distantPast).addingTimeInterval(-completeSpan)
+        for index in redundant(result, from: since, before: now.addingTimeInterval(-completeSpan)).reversed() { result.remove(at: index) }
+        if result.count > maximumRows { result.removeFirst(result.count - maximumRows) }
+        return result
+    }
+}
+
 /// All access is serialized by the owning store. Contains metadata only, never credentials or transcripts.
 public final class HistoryDatabase {
     private var database: OpaquePointer?
     private var unreadablePreferences: Set<String> = []
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    /// The app loads this many observations per account; older rows are never shown.
-    public static let observationsPerAccount = 1200
     private var insertsSincePrune: [String: Int] = [:]
+    /// Thinning resumes at the second-to-last kept row, so a run continuing past the cutoff still collapses.
+    private var thinnedFrom: [String: Double] = [:]
     public init(path: String) throws {
         if sqlite3_open(path, &database) != SQLITE_OK { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht geöffnet werden.")) }
         sqlite3_busy_timeout(database, 100)
@@ -51,20 +97,36 @@ public final class HistoryDatabase {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Verlauf konnte nicht gespeichert werden.")) }
         // Pruning per account walks the (account,time) index; batching keeps inserts cheap. A failed prune retries next time.
         let inserts = insertsSincePrune[snapshot.configurationID, default: 0]
-        if inserts % 100 == 0 { do { try prune(account: snapshot.configurationID) } catch { return } }
+        if inserts % 100 == 0 { do { try prune(account: snapshot.configurationID, now: snapshot.observedAt) } catch { return } }
         insertsSincePrune[snapshot.configurationID] = inserts + 1
     }
-    private func prune(account: String) throws {
-        let stmt = try statement("DELETE FROM observations WHERE account=?1 AND time < (SELECT time FROM observations WHERE account=?1 ORDER BY time DESC LIMIT 1 OFFSET ?2)")
+    private func prune(account: String, now: Date) throws {
+        try thin(account: account, before: now.addingTimeInterval(-HistoryRetention.completeSpan))
+        let stmt = try statement("DELETE FROM observations WHERE account=?1 AND (time < ?2 OR time < (SELECT time FROM observations WHERE account=?1 ORDER BY time DESC LIMIT 1 OFFSET ?3))")
         defer { sqlite3_finalize(stmt) }
-        bind(account, to: stmt, at: 1); sqlite3_bind_int(stmt, 2, Int32(Self.observationsPerAccount - 1))
+        bind(account, to: stmt, at: 1); sqlite3_bind_double(stmt, 2, now.timeIntervalSince1970 - HistoryRetention.storedSpan)
+        sqlite3_bind_int(stmt, 3, Int32(HistoryRetention.maximumRows - 1))
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Verlauf konnte nicht gespeichert werden.")) }
+    }
+    private func thin(account: String, before cutoff: Date) throws {
+        let stmt = try statement("SELECT id,time,payload FROM observations WHERE account=? AND time>=? AND time<? ORDER BY time,id")
+        bind(account, to: stmt, at: 1); sqlite3_bind_double(stmt, 2, thinnedFrom[account] ?? -.infinity)
+        sqlite3_bind_double(stmt, 3, cutoff.timeIntervalSince1970)
+        var rows: [(id: Int64, time: Double, snapshot: AccountSnapshot)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let v = try? decoder.decode(AccountSnapshot.self, from: data(stmt, 2)) { rows.append((sqlite3_column_int64(stmt, 0), sqlite3_column_double(stmt, 1), v)) }
+        }
+        sqlite3_finalize(stmt)
+        let redundant = HistoryRetention.redundant(rows.map(\.snapshot), before: cutoff)
+        if !redundant.isEmpty { try execute("DELETE FROM observations WHERE id IN (\(redundant.map { String(rows[$0].id) }.joined(separator: ",")))") }
+        let dropped = Set(redundant), kept = rows.indices.filter { !dropped.contains($0) }
+        if kept.count >= 2 { thinnedFrom[account] = rows[kept[kept.count - 2]].time }
     }
     public func history(account: String, since: Date = .distantPast, limit: Int = 2000) throws -> [AccountSnapshot] {
         let stmt = try statement("SELECT payload FROM observations WHERE account=? AND time>=? ORDER BY time DESC LIMIT ?")
         defer { sqlite3_finalize(stmt) }
         bind(account, to: stmt, at: 1); sqlite3_bind_double(stmt, 2, since.timeIntervalSince1970)
-        sqlite3_bind_int(stmt, 3, Int32(max(1, min(limit, 12000))))
+        sqlite3_bind_int(stmt, 3, Int32(max(1, min(limit, HistoryRetention.maximumRows))))
         var result: [AccountSnapshot] = []
         while sqlite3_step(stmt) == SQLITE_ROW { if let v = try? decoder.decode(AccountSnapshot.self, from: data(stmt, 0)) { result.append(v) } }
         return result.reversed()
@@ -148,6 +210,7 @@ public final class HistoryDatabase {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Einstellung konnte nicht gespeichert werden.")) }
     }
     public func removeAccount(_ id: String) throws {
+        thinnedFrom[id] = nil
         let stmt = try statement("DELETE FROM observations WHERE account=?")
         defer { sqlite3_finalize(stmt) }; bind(id, to: stmt, at: 1)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Verlauf konnte nicht entfernt werden.")) }
