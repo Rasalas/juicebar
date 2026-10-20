@@ -135,10 +135,16 @@ final class ReportBuilderTests: XCTestCase {
             try records.reduce(into: Data()) { $0.append(try JSONSerialization.data(withJSONObject: $1)); $0.append(10) }.write(to: file)
         }
         try write((0..<40).map { claudeLine($0, output: 5, model: "claude-opus-5", age: Double($0) * 7200) }, to: claude.appendingPathComponent("a/one.jsonl"))
-        try write((30..<60).map { claudeLine($0, output: $0 < 40 ? 9 : 5, model: $0 % 2 == 0 ? "claude-sonnet-4-5" : "local", age: Double($0) * 3600) },
-                  to: claude.appendingPathComponent("b/two.jsonl"))
-        try write((0..<20).map { ["type": "gemini", "id": "g\($0 % 15)", "timestamp": now.timeIntervalSince1970 - Double($0) * 86400, "model": "gemini-3.1-pro-preview",
-                                   "tokens": ["input": 100, "output": 20 + $0, "cached": 60, "total": 120 + $0]] }, to: gemini.appendingPathComponent("session.jsonl"))
+        let resumed: [[String: Any]] = (30..<60).map { id in
+            let model = id % 2 == 0 ? "claude-sonnet-4-5" : "local"
+            return claudeLine(id, output: id < 40 ? 9 : 5, model: model, age: Double(id) * 3600)
+        }
+        try write(resumed, to: claude.appendingPathComponent("b/two.jsonl"))
+        func geminiLine(_ index: Int) -> [String: Any] {
+            let tokens: [String: Any] = ["input": 100, "output": 20 + index, "cached": 60, "total": 120 + index]
+            return ["type": "gemini", "id": "g\(index % 15)", "timestamp": now.timeIntervalSince1970 - Double(index) * 86400, "model": "gemini-3.1-pro-preview", "tokens": tokens]
+        }
+        try write((0..<20).map(geminiLine), to: gemini.appendingPathComponent("session.jsonl"))
         let roots = [ActivityLogs.Root(source: .claude, url: claude), ActivityLogs.Root(source: .gemini, url: gemini)]
         let state = root.appendingPathComponent("state"), absent = root.appendingPathComponent("absent.db").path
         let expected = legacyReport(events: try ActivityLogs.read(roots: roots, cacheDirectory: nil, now: now).events, now: now)
