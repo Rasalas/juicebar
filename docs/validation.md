@@ -1,5 +1,13 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.11 release, 20 October
+
+Version 0.1.11, build 13, contains PRs [#5](https://github.com/Rasalas/juicebar/pull/5) to [#9](https://github.com/Rasalas/juicebar/pull/9): reliability fixes, lower idle cost, incremental activity imports, the UI/UX review fixes and the weekly target. Each merge into a branch with conflicts was resolved and tested locally before merging; the final merged tree ran 151 Swift tests (6 benchmarks skipped) and passed tray layout in both languages. Main CI passed for every merge.
+
+The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. Both checksum entries passed, all four downloaded draft assets matched the local originals, and the public ZIP matched after publishing. The Sparkle archive verified against the public key, while changing one byte caused rejection. Tray layout and activity persistence checks passed in the signed bundle. The stable feed serves build 13.
+
+No old-to-new Sparkle update or failed-download test was run before publishing; the installed 0.1.10 is updated through the public feed instead. English and German screenshots were refreshed with a pinned region per language. Live VoiceOver and installation on a second Mac remain unverified.
+
 ## Juicebars 0.1.10 release, 15 October
 
 Version 0.1.10, build 12, includes the review fixes and CPU improvements documented below. [PR #4](https://github.com/Rasalas/juicebar/pull/4) was merged after both macOS checks passed. Main and tag CI also passed: 106 regular Swift tests, nine Python collector tests, tray layout in both scrollbar modes, persistence, source packaging and direct-updater compilation. The new recovery test initially failed on the English CI host because it expected a German word; its assertion now uses the active translation.

@@ -56,7 +56,9 @@ def main():
         for language in ("en", "de"):
             working = Path(temporary) / language
             working.mkdir()
-            subprocess.run([str(binary), "--render-previews", f"--language={language}"],
+            # Formats follow the host region; pin one so screenshots don't depend on this Mac.
+            region = {"en": "en_US", "de": "de_DE"}[language]
+            subprocess.run([str(binary), "--render-previews", f"--language={language}", "-AppleLocale", region],
                            cwd=working, env=env, check=True)
             previews = working / ".artifacts/previews"
             for page in ("overview", "usage"):
