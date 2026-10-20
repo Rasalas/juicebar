@@ -83,4 +83,29 @@ final class ParsingTests: XCTestCase {
         let oversized = Data(#"{"pad": ""#.utf8) + Data(repeating: 0x61, count: HTTPTransport.maximumBytes) + Data(#""}"#.utf8)
         XCTAssertThrowsError(try HTTPTransport.decode(oversized)) { XCTAssertEqual($0 as? ProviderFailure, .invalidData(tr("Die Anbieterantwort ist zu groß."))) }
     }
+
+    func testUnreadableLoginKeepsKnownIdentityAndHistory() throws {
+        let codex = AccountConfiguration(id: "cx", provider: .codex)
+        let limits: [String: Any] = ["rateLimits": ["primary": ["usedPercent": 10]]]
+        let known = try ProviderParsing.codex(limits, configuration: codex, account: ["account": ["email": "first@example.invalid"]])
+        let unnamed = try ProviderParsing.codex(limits, configuration: codex)
+        let other = try ProviderParsing.codex(limits, configuration: codex, account: ["account": ["email": "second@example.invalid"]])
+        XCTAssertEqual(unnamed.identity, AccountIdentity.fallback(for: codex))
+        XCTAssertNotEqual(known.identity, unnamed.identity)
+
+        let kept = AccountIdentity.reconcile(unnamed, previous: known, configuration: codex)
+        XCTAssertEqual(kept.snapshot.identity, known.identity)
+        XCTAssertFalse(kept.switchedLogin)
+        let named = AccountIdentity.reconcile(known, previous: unnamed, configuration: codex)
+        XCTAssertEqual(named.snapshot.identity, known.identity)
+        XCTAssertFalse(named.switchedLogin)
+        XCTAssertTrue(AccountIdentity.reconcile(other, previous: known, configuration: codex).switchedLogin)
+        XCTAssertFalse(AccountIdentity.reconcile(unnamed, previous: nil, configuration: codex).switchedLogin)
+
+        let claude = AccountConfiguration(id: "cl", provider: .claude)
+        let fallback = try ProviderParsing.claude(["rate_limits": ["five_hour": ["utilization": 1, "resets_at": NSNull()]]], configuration: claude)
+        var login = fallback; login.identity = "claude-login"
+        XCTAssertEqual(fallback.identity, AccountIdentity.fallback(for: claude))
+        XCTAssertEqual(AccountIdentity.reconcile(fallback, previous: login, configuration: claude).snapshot.identity, "claude-login")
+    }
 }

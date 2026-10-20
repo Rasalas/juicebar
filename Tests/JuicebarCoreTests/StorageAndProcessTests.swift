@@ -106,6 +106,68 @@ final class StorageAndProcessTests: XCTestCase {
         let response = try client.receive { ($0["id"] as? Int) == 2 }
         XCTAssertEqual(response["ok"] as? Bool, true)
     }
+    func testWriteToExitedChildThrowsInsteadOfRaisingSIGPIPE() throws {
+        let client = try ProcessClient(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
+        defer { client.close() }
+        XCTAssertThrowsError(try client.receive { _ in true })
+        XCTAssertThrowsError(try client.sendInput(Data(repeating: 65, count: 128 * 1024)))
+        XCTAssertThrowsError(try client.send(["type": "control_request"]))
+    }
+    func testCustomExecutableFindsInterpreterInItsOwnDirectory() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-bin-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let interpreter = directory.appendingPathComponent("fixture-node"), tool = directory.appendingPathComponent("fixture-cli")
+        try "#!/bin/sh\necho '{\"interpreter\":true}'\n".write(to: interpreter, atomically: true, encoding: .utf8)
+        try "#!/usr/bin/env fixture-node\n".write(to: tool, atomically: true, encoding: .utf8)
+        for file in [interpreter, tool] { try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path) }
+        let client = try ProcessClient(executable: tool, arguments: [])
+        defer { client.close() }
+        XCTAssertEqual(try client.receive { $0["interpreter"] != nil }["interpreter"] as? Bool, true)
+    }
+    func testCloseStopsGrandchildThatIgnoresTermination() throws {
+        // The helper reports its pid only after it ignores SIGTERM, like a stubborn MCP server.
+        let client = try ProcessClient(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "(trap '' TERM; exec sh -c 'echo \"{\\\"pid\\\":$$}\"; exec sleep 30') & wait"])
+        let pid = try XCTUnwrap(client.receive { $0["pid"] != nil }["pid"] as? Int)
+        client.close()
+        let end = Date().addingTimeInterval(2)
+        while kill(pid_t(pid), 0) == 0 && Date() < end { Thread.sleep(forTimeInterval: 0.02) }
+        let survived = kill(pid_t(pid), 0) == 0
+        if survived { kill(pid_t(pid), SIGKILL) }
+        XCTAssertFalse(survived)
+    }
+    func testFailedReadDoesNotLockPreference() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-read-error-\(UUID()).sqlite")
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: file.path + suffix) } }
+        let db = try HistoryDatabase(path: file.path)
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &connection), SQLITE_OK)
+        // Stepping this view fails like BUSY or IOERR would: the row is never decoded.
+        XCTAssertEqual(sqlite3_exec(connection, "DROP TABLE preferences; CREATE VIEW preferences AS SELECT 'opencode-path' AS id, abs(-9223372036854775807 - 1) AS payload;", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(connection)
+        XCTAssertThrowsError(try db.read(String.self, key: "opencode-path"))
+        XCTAssertTrue(db.unreadablePreferenceKeys.isEmpty)
+        XCTAssertNoThrow(try db.requireWritablePreference("opencode-path"))
+    }
+    func testOutdatedCacheIsDiscardedWithoutLockingWrites() throws {
+        let db = try HistoryDatabase(path: ":memory:")
+        try db.write("old format", key: "local-usage-v2")
+        XCTAssertNil(try db.readCache(LocalUsageReport.self, key: "local-usage-v2"))
+        XCTAssertTrue(db.unreadablePreferenceKeys.isEmpty)
+        try db.write(MonitorSettings(), key: "local-usage-v2")
+        XCTAssertEqual(try db.readCache(MonitorSettings.self, key: "local-usage-v2"), MonitorSettings())
+    }
+    func testHistoryIsCappedPerAccount() throws {
+        let db = try HistoryDatabase(path: ":memory:")
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        for index in 0..<3 { try db.save(AccountSnapshot(configurationID: "quiet", identity: "q", observedAt: start.addingTimeInterval(Double(index)), source: "fixture")) }
+        for index in 0..<1500 { try db.save(AccountSnapshot(configurationID: "busy", identity: "b", observedAt: start.addingTimeInterval(Double(1000 + index)), source: "fixture")) }
+        let busy = try db.history(account: "busy", limit: 12000)
+        XCTAssertGreaterThanOrEqual(busy.count, HistoryDatabase.observationsPerAccount)
+        XCTAssertLessThan(busy.count, HistoryDatabase.observationsPerAccount + 100)
+        XCTAssertEqual(busy.last?.observedAt, start.addingTimeInterval(2499))
+        XCTAssertEqual(try db.history(account: "quiet").count, 3)
+    }
     func testOpenCodeMigrationDeduplicatesAndNeverWritesDatabase() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-test-\(UUID()).db")
         defer { try? FileManager.default.removeItem(at: file) }

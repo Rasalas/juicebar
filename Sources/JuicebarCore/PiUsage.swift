@@ -1,7 +1,8 @@
 import Foundation
 
 /// Pi entries keep their ID and message time when copied into a fork.
-struct PiUsageParser {
+struct PiUsageParser: Codable {
+    private enum CodingKeys: String, CodingKey { case fileID, sessionStartedAt, model, provider, entryNumber, events }
     let fileID: String
     private var sessionStartedAt: Date?
     private var model = tr("Unbekannt")
@@ -11,6 +12,7 @@ struct PiUsageParser {
     private(set) var events: [ActivityEvent] = []
 
     init(fileID: String) { self.fileID = fileID }
+    mutating func prune(before date: Date) { events.removeAll { $0.date < date } }
 
     mutating func consume(_ record: [String: Any]) {
         let kind = record["type"] as? String
