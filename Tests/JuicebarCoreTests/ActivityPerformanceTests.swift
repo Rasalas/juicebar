@@ -3,6 +3,9 @@ import CSQLite
 import Darwin
 @testable import JuicebarCore
 
+/// Exported by libsystem_kernel but missing from the SDK headers; restarts `ri_interval_max_phys_footprint`.
+@_silgen_name("proc_reset_footprint_interval") private func resetFootprintInterval(_ pid: pid_t) -> Int32
+
 /// Opt-in measurements use synthetic data only. Thresholds are generous and catch only order-of-magnitude regressions.
 final class ActivityPerformanceTests: XCTestCase {
     private func resources() -> (cpu: Double, rss: Int) {
@@ -151,6 +154,52 @@ final class ActivityPerformanceTests: XCTestCase {
             let aggregateStart = Date(), aggregateBefore = resources(), report = ActivityReport(events: result.events, now: now)
             XCTAssertEqual(report.days.reduce(0) { $0 + $1.responses }, fileCount * 288)
             print("BENCHMARK metadata aggregation pass \(pass): wall=\(Date().timeIntervalSince(aggregateStart))s cpu=\(resources().cpu - aggregateBefore.cpu)s peakRSS=\(resources().rss)")
+        }
+    }
+
+    /// Peak and retained footprint of whole imports. Run alone so earlier tests do not leave freed pages behind.
+    func testImportPeakMemory() throws {
+        guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else { throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure imports") }
+        let fileCount = ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK_FILES"].flatMap(Int.init) ?? 1400, rows = 400
+        let fm = FileManager.default, root = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        let logs = root.appendingPathComponent("claude/projects")
+        try fm.createDirectory(at: logs, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let now = Date(), formatter = ISO8601DateFormatter(), models = ["claude-opus-5", "claude-sonnet-4-5", "local-unpriced"]
+        let stamps = (0..<90).map { formatter.string(from: now.addingTimeInterval(-Double($0) * 86400 - 3600)) }
+        for file in 0..<fileCount {
+            try autoreleasepool {
+                var text = ""
+                for row in 0..<rows {
+                    // Every tenth file resumes the previous session, so its first rows repeat message IDs.
+                    let id = file % 10 == 1 && row < 40 ? "\(file - 1)-\(row)" : "\(file)-\(row)"
+                    text += #"{"type":"assistant","timestamp":"\#(stamps[(file + row) % 90])","requestId":"r-\#(id)","message":{"id":"m-\#(id)","model":"\#(models[row % 3])","usage":{"input_tokens":10,"output_tokens":\#(20 + row % 7),"cache_read_input_tokens":300,"cache_creation_input_tokens":40}}}"#
+                    text += "\n"
+                }
+                let project = logs.appendingPathComponent("project-\(file % 20)")
+                try fm.createDirectory(at: project, withIntermediateDirectories: true)
+                try Data(text.utf8).write(to: project.appendingPathComponent("session-\(file).jsonl"))
+            }
+        }
+        func footprint() -> (current: Double, peak: Double) {
+            var info = rusage_info_v4()
+            _ = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) } }
+            return (Double(info.ri_phys_footprint) / 1_048_576, Double(info.ri_interval_max_phys_footprint) / 1_048_576)
+        }
+        let roots = [ActivityLogs.Root(source: .claude, url: logs)], directory = root.appendingPathComponent("state"), absent = root.appendingPathComponent("absent.db").path
+        malloc_zone_pressure_relief(nil, 0)
+        let baseline = footprint().current
+        for label in ["cold", "unchanged", "unchanged again"] {
+            malloc_zone_pressure_relief(nil, 0)
+            let before = footprint().current
+            XCTAssertEqual(resetFootprintInterval(getpid()), 0)
+            let start = Date(), cpu = resources().cpu
+            let report = try ActivityImport.read(roots: roots, databasePath: absent, hosts: [], directory: directory, now: now).0
+            let elapsed = (wall: Date().timeIntervalSince(start), cpu: resources().cpu - cpu), peak = footprint().peak
+            XCTAssertEqual(report.days.reduce(0) { $0 + $1.responses }, fileCount * rows - (fileCount + 8) / 10 * 40)
+            malloc_zone_pressure_relief(nil, 0)
+            print(String(format: "BENCHMARK %@ import of %d events: wall=%.2fs cpu=%.2fs footprint before=%.1f MB peak=+%.1f MB after=+%.1f MB (vs baseline +%.1f MB)",
+                         label, fileCount * rows, elapsed.wall, elapsed.cpu, before, peak - before, footprint().current - before, footprint().current - baseline))
         }
     }
 

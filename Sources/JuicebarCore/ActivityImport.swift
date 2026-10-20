@@ -75,8 +75,10 @@ public enum ActivityImport {
         var warnings: [String] = [], notices: [String] = []
         var activeArchives = Set<String>()
         let since = now.addingTimeInterval(-90 * 86400)
+        // Events go straight into the report as each source is read.
+        var builder = ActivityReport.Builder(now: now)
         func collect(_ key: String, label: String, fingerprint: (() throws -> String)? = nil, retainedSource: ActivitySource? = nil,
-                     read: () throws -> (events: [ActivityEvent], notices: [String], summary: LocalUsageReport?)) throws -> (events: [ActivityEvent], summary: LocalUsageReport?) {
+                     read: () throws -> (events: [ActivityEvent], notices: [String], summary: LocalUsageReport?)) throws -> LocalUsageReport? {
             let prefix = retainedSource == .kilo ? "kilo-" : ""
             let url = archives.appendingPathComponent(prefix + stableID(key) + ".plist")
             activeArchives.insert(url.lastPathComponent)
@@ -89,7 +91,8 @@ public enum ActivityImport {
                     warnings += previous.notices ?? []
                     var summary = previous.summary
                     summary?.observedAt = now
-                    return (previous.events.events(since: since, through: now), summary)
+                    previous.events.forEach(since: since, through: now) { builder.add($0) }
+                    return summary
                 }
                 let result = try read()
                 let retained = Dictionary((previous?.events.events(since: since, through: now) ?? []).map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
@@ -108,35 +111,33 @@ public enum ActivityImport {
                     decoded.remember(archive, for: url)
                 } else { try decoded.save(archive, to: url) }
                 warnings += result.notices
-                return (events, summary)
+                for event in events { builder.add(event) }
+                return summary
             } catch is CancellationError { throw CancellationError() }
             catch {
                 if let previous {
                     warnings += previous.notices ?? []
                     warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)), error.localizedDescription))
-                    return (previous.events.events(since: since, through: now), nil)
+                    previous.events.forEach(since: since, through: now) { builder.add($0) }
+                    return nil
                 }
                 warnings.append("\(label): \(error.localizedDescription)")
-                return ([], nil)
+                return nil
             }
         }
-        let logs = try ActivityLogs.read(roots: roots, cacheDirectory: directory.appendingPathComponent("activity-cache"), now: now, progress: progress)
-        warnings += logs.notices
-        var events = logs.events
+        warnings += try ActivityLogs.read(roots: roots, cacheDirectory: directory.appendingPathComponent("activity-cache"), now: now, progress: progress) { builder.add($0) }
         for root in roots where root.source == .kilo {
-            events += try collect("kilo|\(root.url.path)", label: "Kilo",
-                                  fingerprint: { try KiloHistory.fingerprint(root: root.url) }, retainedSource: .kilo) {
+            _ = try collect("kilo|\(root.url.path)", label: "Kilo",
+                            fingerprint: { try KiloHistory.fingerprint(root: root.url) }, retainedSource: .kilo) {
                 let result = try KiloHistory.read(root: root.url, now: now)
                 return (result.events, result.notices, nil)
-            }.events
+            }
         }
-        let opencode = try collect("opencode|\(databasePath ?? "default")", label: tr("OpenCode lokal"),
-                                   fingerprint: { try OpenCodeHistory.fingerprint(path: databasePath) }) {
+        var local = try collect("opencode|\(databasePath ?? "default")", label: tr("OpenCode lokal"),
+                                fingerprint: { try OpenCodeHistory.fingerprint(path: databasePath) }) {
             let report = try OpenCodeHistory.read(path: databasePath, now: now, lookbackDays: 90)
             return (report.events, report.importWarnings ?? [], report)
         }
-        events += opencode.events
-        var local = opencode.summary
         for host in hosts {
             try Task.checkCancellation()
             let url = archives.appendingPathComponent("ssh-" + stableID("ssh|\(host)") + ".plist")
@@ -180,7 +181,7 @@ public enum ActivityImport {
             }
             decoded.remember(kept, for: url)
             warnings += kept.notices
-            kept.events.append(to: &events, since: since, through: now)
+            kept.events.forEach(since: since, through: now) { builder.add($0) }
         }
         // Removing a local folder stops reads, while already imported usage still expires after 90 days.
         for file in try fm.contentsOfDirectory(at: archives, includingPropertiesForKeys: nil)
@@ -188,7 +189,7 @@ public enum ActivityImport {
             try Task.checkCancellation()
             guard var archive = decoded.load(Archive.self, from: file), archive.retainedSource == .kilo else { continue }
             let retained = archive.events.events(since: since, through: now)
-            events += retained
+            for event in retained { builder.add(event) }
             if !retained.isEmpty { warnings += archive.notices ?? [] }
             if retained.isEmpty { try? fm.removeItem(at: file); decoded.forget(file) }
             else if retained.count != archive.events.count {
@@ -197,7 +198,7 @@ public enum ActivityImport {
             }
         }
         if !hosts.isEmpty { notices.append(tr("SSH-Quellen: {0}. Bei Verbindungsfehlern bleiben bereits eingelesene Werte erhalten.", hosts.joined(separator: ", "))) }
-        var report = ActivityReport(events: events, notices: notices, warnings: warnings, now: now)
+        var report = builder.report(notices: notices, warnings: warnings)
         ClaudeHistory.supplement(&report, roots: roots.filter { $0.source == .claude }.map { $0.url.deletingLastPathComponent() }, now: now)
         // UI only needs local model/day summaries; events stay on the background worker.
         local?.events = []
