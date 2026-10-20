@@ -30,7 +30,7 @@ Download the [latest macOS preview](https://github.com/Rasalas/juicebar/releases
 
 The first release was verified on the development Mac, including an installed old-to-new update. Broader hardware and macOS-version testing is still needed. CI artifacts are development builds, not official downloads.
 
-To build from source, install Xcode with Swift 6 on macOS 14 or newer:
+To build from source, install Xcode with the Swift 6 toolchain on macOS 14 or newer. The package still compiles in Swift 5 language mode:
 
 ```sh
 git clone https://github.com/Rasalas/juicebar.git
@@ -55,7 +55,7 @@ Enable notifications explicitly in **Warnings → Enable**, or **Warnungen → A
 
 ## Refresh screenshots
 
-On macOS with Swift 6 and Python 3.9 or later:
+On macOS with the Swift 6 toolchain and Python 3.9 or later:
 
 ```sh
 python3 scripts/update-screenshots.py

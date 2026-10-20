@@ -13,7 +13,7 @@ Keys entered into Juicebars are stored in the macOS Keychain. OpenCode can use a
 
 ## What is stored
 
-Settings, configured account labels, additional log folder paths and SSH hosts, quota snapshots, warning history and usage metadata are stored under `~/Library/Application Support/Juicebar`. Usage caches retain up to 90 days of metadata; quota storage is capped at 12,000 snapshots and warning history at 180 days. These files can include model names, source paths and opaque message identifiers. They should not be attached to public issues.
+Settings, configured account labels, additional log folder paths and SSH hosts, quota snapshots, warning history and usage metadata are stored under `~/Library/Application Support/Juicebar`. Usage caches retain up to 90 days of metadata; quota storage keeps about 1,200 snapshots per account and warning history 180 days. These files can include model names, source paths and opaque message identifiers. They should not be attached to public issues.
 
 Original CLI logs are never modified. Removing Juicebars does not remove these application-support files or Keychain items automatically.
 

@@ -1,5 +1,23 @@
 import Foundation
 
+/// CLIs name the login only when their account data is readable. The fallback must never count as an account switch.
+public enum AccountIdentity {
+    public static func fallback(for configuration: AccountConfiguration) -> String {
+        configuration.provider == .claude ? stableID("claude|\(configuration.profileDirectory)|\(configuration.id)") : stableID("\(configuration.provider.rawValue)|\(configuration.id)")
+    }
+
+    /// Keeps the known login when only the fallback was readable. History belongs to another login only if both identities are real.
+    public static func reconcile(_ snapshot: AccountSnapshot, previous: AccountSnapshot?, configuration: AccountConfiguration) -> (snapshot: AccountSnapshot, switchedLogin: Bool) {
+        guard let previous, previous.identity != snapshot.identity else { return (snapshot, false) }
+        let fallback = fallback(for: configuration)
+        guard snapshot.identity != fallback else {
+            var kept = snapshot; kept.identity = previous.identity
+            return (kept, false)
+        }
+        return (snapshot, previous.identity != fallback)
+    }
+}
+
 public enum ProviderParsing {
     public static func costBucket(_ bucket: [String: Any], provider: ProviderKind) throws -> Double {
         guard let rows = bucket["results"] as? [[String: Any]] else { throw ProviderFailure.invalidData(tr("Kostenbericht enthält keine lesbaren Ergebnisse.")) }
@@ -14,7 +32,7 @@ public enum ProviderParsing {
     }
     public static func codex(_ payload: [String: Any], configuration: AccountConfiguration, account: [String: Any] = [:], now: Date = Date()) throws -> AccountSnapshot {
         let rawAccount = account["account"] as? [String: Any] ?? [:]
-        let identityValue = payload["accountId"] as? String ?? rawAccount["email"] as? String ?? configuration.id
+        let identityValue = payload["accountId"] as? String ?? rawAccount["email"] as? String
         var windows: [QuotaWindow] = []
         var buckets = payload["rateLimitsByLimitId"] as? [String: [String: Any]] ?? [:]
         if buckets.isEmpty, let limits = payload["rateLimits"] as? [String: Any] { buckets[limits["limitId"] as? String ?? "codex"] = limits }
@@ -45,7 +63,7 @@ public enum ProviderParsing {
         guard !windows.isEmpty || inventory != nil || !money.isEmpty else {
             throw ProviderFailure.unsupported(tr("Für diese Anmeldung sind keine Abo-Limits verfügbar. Für API-Kosten ein API-Konto hinzufügen."))
         }
-        return AccountSnapshot(configurationID: configuration.id, identity: stableID("codex|\(identityValue)"),
+        return AccountSnapshot(configurationID: configuration.id, identity: identityValue.map { stableID("codex|\($0)") } ?? AccountIdentity.fallback(for: configuration),
                                plan: PlanLabels.codex(rawAccount["planType"] as? String ?? (payload["rateLimits"] as? [String: Any])?["planType"] as? String), observedAt: now, source: "Codex App Server",
                                windows: windows, benefits: benefits, benefitCount: count,
                                benefitsChecked: inventory?["credits"] is [[String: Any]], money: money)
@@ -79,7 +97,7 @@ public enum ProviderParsing {
         }
         guard !windows.isEmpty else { throw ProviderFailure.invalidData(tr("Claude hat keine lesbaren Limitwerte geliefert.")) }
         return AccountSnapshot(configurationID: configuration.id,
-                               identity: stableID("claude|\(configuration.profileDirectory)|\(configuration.id)"),
+                               identity: AccountIdentity.fallback(for: configuration),
                                plan: PlanLabels.claude(payload["subscription_type"] as? String, tier: payload["rate_limit_tier"] as? String), observedAt: now,
                                source: "Claude Code · get_usage", windows: windows,
                                notice: tr("Reset-Angebote sind noch nicht verfügbar. Ein Ablaufdatum kann manuell ergänzt werden."))

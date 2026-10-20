@@ -40,9 +40,18 @@ public enum OpenCodeHistory {
         return cache
     }()
 
-    public static func read(path: String? = nil, now: Date = Date(), lookbackDays: Int = 30, source: ActivitySource = .opencode) throws -> LocalUsageReport {
+    private static func databaseFile(_ path: String?) -> String {
         let root = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share").path
-        let file = path ?? URL(fileURLWithPath: root).appendingPathComponent("opencode/opencode.db").path
+        return path ?? URL(fileURLWithPath: root).appendingPathComponent("opencode/opencode.db").path
+    }
+
+    /// Database, WAL and journal metadata; equal values mean the import would read the same rows.
+    static func fingerprint(path: String?) throws -> String {
+        try KiloHistory.fingerprint(root: URL(fileURLWithPath: databaseFile(path)).standardizedFileURL.resolvingSymlinksInPath())
+    }
+
+    public static func read(path: String? = nil, now: Date = Date(), lookbackDays: Int = 30, source: ActivitySource = .opencode) throws -> LocalUsageReport {
+        let file = databaseFile(path)
         guard FileManager.default.fileExists(atPath: file) else { throw ProviderFailure.unavailable(tr("Keine lokale OpenCode-Datenbank gefunden. OpenCode einmal verwenden oder den Datenbankpfad auswählen.")) }
         try Task.checkCancellation()
         let fileURL = URL(fileURLWithPath: file).standardizedFileURL.resolvingSymlinksInPath()

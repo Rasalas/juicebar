@@ -4,9 +4,23 @@ import datetime, hashlib, json, os, pathlib, sqlite3, time, re, math
 now = time.time()
 since = now - 90 * 86400
 skipped = 0
+limit = 32 * 1024 * 1024
 
-def emit(value):
-    print(json.dumps(value, separators=(',', ':')), flush=True)
+# The app prepends KNOWN: per path digest [size, mtime_ns, inode, resume offset, tail digest], per database a fingerprint.
+try:
+    KNOWN
+except NameError:
+    KNOWN = {}
+known_files = KNOWN.get('files') or {}
+known_databases = KNOWN.get('databases') or {}
+
+def emit(value, flush=False):
+    print(json.dumps(value, separators=(',', ':')), flush=flush)
+
+def tail_digest(handle, end):
+    start = max(0, end - 4096)
+    handle.seek(start)
+    return hashlib.sha256(handle.read(end - start)).hexdigest()
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
@@ -136,6 +150,52 @@ def document_records(source, document):
         return document
     raise ValueError('Unsupported log document')
 
+def read_lines(source, handle, start):
+    """Streams usage records from start; returns the offset after the last complete line."""
+    global skipped
+    markers = {'pi': [b'"usage"', b'"session"'], 'claude': [b'"usage"'],
+               'gemini': [b'"tokens"'], 'qwen': [b'"usageMetadata"']}.get(source,
+               [b'"token_count"', b'"token_usage_record"', b'"turn_context"', b'"session_meta"'])
+    required = b'"assistant"' if source == 'claude' else None
+    handle.seek(start)
+    position, records = start, 0
+    while True:
+        line = handle.readline(limit + 1)
+        if not line:
+            break
+        if len(line) > limit:
+            ignorable = re.match(rb'^\s*\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?"type"\s*:\s*"(?:response_item|compacted|user|progress|file-history-snapshot)"', line[:1024])
+            length = len(line)
+            while line and not line.endswith(b'\n'):
+                line = handle.readline(limit)
+                length += len(line)
+            if not line:
+                break
+            position += length
+            if not ignorable:
+                skipped += 1
+            continue
+        # An unfinished line belongs to an active writer; the next run starts before it.
+        if not line.endswith(b'\n'):
+            break
+        position += len(line)
+        if not any(marker in line for marker in markers) or required and required not in line:
+            continue
+        try:
+            raw = json.loads(line)
+            record = sanitized(source, raw) if isinstance(raw, dict) else None
+            if record:
+                emit({'record': record})
+                records += 1
+        except (ValueError, TypeError):
+            skipped += 1
+        # Lets the app keep progress when the run hits its time or size limit inside a large file.
+        if records >= 2000:
+            records = 0
+            emit({'checkpoint': position, 'tail': tail_digest(handle, position)}, flush=True)
+            handle.seek(position)
+    return position
+
 seen_files = set()
 for source, root in roots:
     if not root.is_dir():
@@ -146,54 +206,44 @@ for source, root in roots:
                 continue
             path = pathlib.Path(directory) / name
             try:
-                if path.is_symlink() or path.stat().st_mtime < since:
+                if path.is_symlink():
+                    continue
+                info = path.stat()
+                if info.st_mtime < since:
                     continue
                 canonical = str(path.resolve())
                 if canonical in seen_files:
                     continue
                 seen_files.add(canonical)
-                emit({'file': digest(path.parent.name if source == 'roo' else canonical), 'source': source})
+                key = digest(canonical)
+                known = known_files.get(key)
+                if known and known[:3] == [info.st_size, info.st_mtime_ns, info.st_ino]:
+                    continue
+                document = path.suffix == '.json'
                 with path.open('rb') as handle:
-                    if path.suffix == '.json':
-                        data = handle.read(32 * 1024 * 1024 + 1)
-                        if len(data) > 32 * 1024 * 1024:
+                    start = 0
+                    if (known and not document and known[2] == info.st_ino and 0 < known[3] <= info.st_size
+                            and info.st_size > known[0] and tail_digest(handle, known[3]) == known[4]):
+                        start = known[3]
+                    emit({'file': digest(path.parent.name if source == 'roo' else canonical), 'source': source, 'key': key,
+                          'size': info.st_size, 'mtime': info.st_mtime_ns, 'ino': info.st_ino, 'resume': start > 0})
+                    if document:
+                        handle.seek(0)
+                        data = handle.read(limit + 1)
+                        if len(data) > limit:
                             raise ValueError('Log document exceeds 32 MiB')
                         for raw in document_records(source, json.loads(data)):
                             record = sanitized(source, raw) if isinstance(raw, dict) else None
                             if record:
                                 emit({'record': record})
-                        emit({'endFile': True})
+                        emit({'endFile': True}, flush=True)
                         continue
-                    while True:
-                        line = handle.readline(32 * 1024 * 1024 + 1)
-                        if not line:
-                            break
-                        if len(line) > 32 * 1024 * 1024:
-                            ignorable = re.match(rb'^\s*\{\s*(?:"timestamp"\s*:\s*"[^"\\]*"\s*,\s*)?"type"\s*:\s*"(?:response_item|compacted|user|progress|file-history-snapshot)"', line[:1024])
-                            while line and not line.endswith(b'\n'):
-                                line = handle.readline(32 * 1024 * 1024)
-                            if not ignorable:
-                                skipped += 1
-                            continue
-                        if not line.endswith(b'\n'):
-                            continue
-                        markers = {'pi': [b'"usage"', b'"session"'], 'claude': [b'"usage"'],
-                                   'gemini': [b'"tokens"'], 'qwen': [b'"usageMetadata"']}.get(source,
-                                   [b'"token_count"', b'"token_usage_record"', b'"turn_context"', b'"session_meta"'])
-                        if not any(marker in line for marker in markers):
-                            continue
-                        try:
-                            raw = json.loads(line)
-                            record = sanitized(source, raw) if isinstance(raw, dict) else None
-                            if record:
-                                emit({'record': record})
-                        except (ValueError, TypeError):
-                            skipped += 1
-                emit({'endFile': True})
+                    position = read_lines(source, handle, start)
+                    emit({'endFile': True, 'offset': position, 'tail': tail_digest(handle, position)}, flush=True)
             except (OSError, ValueError, TypeError):
                 skipped += 1
 
-# SQLite must be queried each time: new rows may still be in the WAL.
+# Unchanged database, WAL and journal metadata means the same rows; anything else is queried again.
 data_home = pathlib.Path(os.environ.get('XDG_DATA_HOME') or home / '.local/share')
 sqlite_files = [('opencode', data_home / 'opencode/opencode.db')]
 kilo_dir = data_home / 'kilo'
@@ -206,8 +256,21 @@ elif not kilo_override and kilo_dir.is_dir():
 for source, path in sqlite_files:
     if not path.is_file() or path.is_symlink():
         continue
+    key = digest(str(path.resolve()))
+    stamps = []
+    for suffix in ['', '-wal', '-journal']:
+        try:
+            info = os.stat(str(path) + suffix)
+            stamps.append('%d|%d|%d' % (info.st_ino, info.st_size, info.st_mtime_ns))
+        except OSError:
+            stamps.append('missing')
+    fingerprint = digest('\n'.join(stamps))
+    if known_databases.get(key) == fingerprint:
+        emit({'database': key, 'source': source, 'unchanged': True})
+        continue
     try:
         db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0.1)
+        emit({'database': key, 'source': source, 'fingerprint': fingerprint})
         supported = False
         for table in ['message', 'session_message']:
             try:
@@ -239,11 +302,13 @@ for source, path in sqlite_files:
                                     'provider': row.get('providerID') or model.get('providerID') or model.get('providerId') or 'Unbekannt', 'tokens': total, **({'reportedCost': numbers(row, ['cost']).get('cost')} if source == 'kilo' else {}), 'tokenBreakdown': {**numbers(tokens, ['input', 'output', 'reasoning']), 'cache': numbers(cache, ['read', 'write'])}}})
                 except (ValueError, TypeError, AttributeError):
                     skipped += 1
-        if not supported:
+        if supported:
+            emit({'endDatabase': True}, flush=True)
+        else:
             emit({'notice': source + ': unbekanntes Datenbankschema.'})
         db.close()
     except (OSError, sqlite3.Error):
         emit({'notice': source + ': Datenbank nicht lesbar.'})
 if skipped:
     emit({'notice': str(skipped) + ' Dateien oder Logzeilen wurden übersprungen.'})
-emit({'done': True})
+emit({'done': True}, flush=True)

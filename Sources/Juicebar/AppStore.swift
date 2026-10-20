@@ -85,8 +85,8 @@ final class AppStore {
         localDatabasePath = load(String.self, key: "opencode-path", missing: "", unreadable: "")
         sshHosts = load([String].self, key: "ssh-hosts", missing: [], unreadable: [])
         activityRoots = load([ActivityLogs.Root].self, key: "activity-roots", missing: [], unreadable: [])
-        activity = load(ActivityReport?.self, key: "activity-report-v2", missing: nil, unreadable: nil)
-        localUsage = load(LocalUsageReport?.self, key: "local-usage-v2", missing: nil, unreadable: nil)
+        activity = try? database.readCache(ActivityReport.self, key: "activity-report-v2")
+        localUsage = try? database.readCache(LocalUsageReport.self, key: "local-usage-v2")
         do { warnings = try database.warnings() } catch { startupError = error.localizedDescription }
         storageError = startupError
         hasRecoverableStorageError = !database.unreadablePreferenceKeys.isEmpty
@@ -161,15 +161,16 @@ final class AppStore {
                 do {
                     var snapshot = try await registry.provider(for: account.provider).read(configuration: account, includeHistory: includeUsage)
                     guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
-                    snapshot = QuotaPeriod.normalizing(snapshot, previous: snapshots[account.id])
-                    if let previous = snapshots[account.id], previous.identity != snapshot.identity {
-                        history[account.id] = []; try database.removeAccount(account.id)
+                    let identity = AccountIdentity.reconcile(snapshot, previous: snapshots[account.id], configuration: account)
+                    snapshot = QuotaPeriod.normalizing(identity.snapshot, previous: snapshots[account.id])
+                    if identity.switchedLogin {
+                        history[account.id] = []
+                        do { try database.removeAccount(account.id) } catch { storageError = error.localizedDescription }
                     }
                     if snapshot.dailyUsage.isEmpty, let previous = snapshots[account.id], previous.identity == snapshot.identity {
                         snapshot.dailyUsage = previous.dailyUsage
                     }
                     snapshots[account.id] = snapshot; failures[account.id] = nil
-                    try? database.write(failures, key: "last-errors")
                     var entries = history[account.id] ?? []; entries.append(snapshot)
                     history[account.id] = Array(entries.suffix(1200))
                     do { try database.save(snapshot) } catch { storageError = error.localizedDescription }
@@ -180,7 +181,6 @@ final class AppStore {
                 catch {
                     guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
                     failures[account.id] = error.localizedDescription
-                    try? database.write(failures, key: "last-errors")
                     refreshPolicy.failed(id: account.id, error: error, refreshSeconds: settings.refreshSeconds, now: Date())
                 }
                 lastChecked = Date()
@@ -222,12 +222,22 @@ final class AppStore {
             guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
             guard permission.authorizationStatus == .authorized || permission.authorizationStatus == .provisional else { return }
             try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: events[0].id, content: content, trigger: nil))
-            guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
-            for event in events { try database.saveWarning(event); warnings.insert(event, at: 0) }
         } catch {
             guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
             storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", error.localizedDescription)
+            return
         }
+        // Delivered even if the Mac slept or the account changed meanwhile, so it must count as sent.
+        recordDelivered(events)
+    }
+
+    func recordDelivered(_ events: [WarningEvent]) {
+        var failure: Error?
+        for event in events {
+            warnings.insert(event, at: 0)
+            do { try database.saveWarning(event) } catch { failure = error }
+        }
+        if let failure { storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", failure.localizedDescription) }
     }
 
     func enableNotifications() async {
@@ -277,8 +287,6 @@ final class AppStore {
             if keys.contains("opencode-path") { localDatabasePath = "" }
             if keys.contains("ssh-hosts") { sshHosts = [] }
             if keys.contains("activity-roots") { activityRoots = [] }
-            if keys.contains("activity-report-v2") { activity = nil }
-            if keys.contains("local-usage-v2") { localUsage = nil }
             hasRecoverableStorageError = false
             storageError = tr("Zurückgesetzt: {0}. Die Originaldaten bleiben gesichert.", keys.sorted().joined(separator: ", "))
         } catch { storageError = error.localizedDescription }
@@ -290,7 +298,6 @@ final class AppStore {
     private func invalidateAccount(_ id: String) {
         scheduler.invalidate(id: id)
         failures[id] = nil
-        do { try database.write(failures, key: "last-errors") } catch { storageError = error.localizedDescription }
         refreshPolicy.remove(id: id)
     }
     func saveAccount(_ account: AccountConfiguration, secret: String) throws {
@@ -332,9 +339,9 @@ final class AppStore {
     func refreshActivityIfNeeded() {
         nextActivityImport = min(nextActivityImport, Date().addingTimeInterval(300))
         guard !isPaused, Date() >= nextActivityImport else { return }
-        loadLocalUsage()
+        loadLocalUsage(refreshRemote: false)
     }
-    func loadLocalUsage() {
+    func loadLocalUsage(refreshRemote: Bool = true) {
         guard !localUsageLoading, !isDemo else { return }
         nextActivityImport = Date().addingTimeInterval(300)
         localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
@@ -346,7 +353,7 @@ final class AppStore {
         let owner = self, hosts = sshHosts, directory = storageDirectory
         let worker = Task.detached(priority: .utility) {
             if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
-            return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory) { message in
+            return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory, refreshRemote: refreshRemote) { message in
                 Task { @MainActor in
                     guard owner.activityImportID == importID else { return }
                     let instant = ContinuousClock.now
@@ -364,9 +371,10 @@ final class AppStore {
                 let result = try await worker.value
                 guard !Task.isCancelled else { return }
                 activity = result.0; localUsage = result.1; localUsageError = nil
-                try database.write(result.0, key: "activity-report-v2")
-                if let localUsage { try database.write(localUsage, key: "local-usage-v2") }
                 try database.write(localDatabasePath, key: "opencode-path")
+                // Caches only speed up the next launch; the next import rebuilds them.
+                try? database.write(result.0, key: "activity-report-v2")
+                if let localUsage { try? database.write(localUsage, key: "local-usage-v2") }
             } catch is CancellationError { }
             catch { localUsageError = error.localizedDescription }
         }

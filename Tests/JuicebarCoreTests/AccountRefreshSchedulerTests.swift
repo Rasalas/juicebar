@@ -65,6 +65,26 @@ final class AccountRefreshSchedulerTests: XCTestCase {
         XCTAssertEqual(operations, ["manual"])
     }
 
+    func testForcedRefreshRunsAfterCancelledJobEvenWhenGenerationWasRecreated() async {
+        let scheduler = AccountRefreshScheduler(maxConcurrent: 1)
+        var continuation: CheckedContinuation<Void, Never>?
+        var replacementRan = false
+        let oldStarted = expectation(description: "Old request started")
+        scheduler.enqueue(id: "account") { _ in await withCheckedContinuation { continuation = $0; oldStarted.fulfill() } }
+        await fulfillment(of: [oldStarted], timeout: 10)
+        scheduler.cancelAll()
+        // AppStore's manual-reset check asks for a generation while the cancelled job still runs.
+        _ = scheduler.generation(for: "account")
+        scheduler.enqueue(id: "account", replacingPending: true) { generation in
+            replacementRan = scheduler.isCurrent(id: "account", generation: generation)
+        }
+        XCTAssertTrue(scheduler.activeIDs.contains("account"))
+        continuation?.resume()
+        await scheduler.waitUntilIdle()
+        XCTAssertTrue(replacementRan)
+        XCTAssertTrue(scheduler.activeIDs.isEmpty)
+    }
+
     func testCancellationDropsQueuedJobs() async {
         let scheduler = AccountRefreshScheduler(maxConcurrent: 1)
         var continuation: CheckedContinuation<Void, Never>?
