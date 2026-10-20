@@ -62,10 +62,26 @@ final class AppStorePersistenceTests: XCTestCase {
 
     func testRelativeTimeOmitsZeroUnits() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
-        XCTAssertEqual(relativeTime(now.addingTimeInterval(2 * 3600), now: now), tr("in {0} Std.", 2))
-        XCTAssertEqual(relativeTime(now.addingTimeInterval(2 * 3600 + 300), now: now), tr("in {0} Std. {1} Min.", 2, 5))
-        XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400), now: now), tr("in {0} T.", 3))
-        XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400 + 7200), now: now), tr("in {0} T. {1} Std.", 3, 2))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(-5), now: now), tr("jetzt"))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(20), now: now), tr("in {0}", tr("{0} Min.", 1)))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(2 * 3600), now: now), tr("in {0}", tr("{0} Std.", 2)))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(2 * 3600 + 300), now: now), tr("in {0}", tr("{0} Std. {1} Min.", 2, 5)))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400), now: now), tr("in {0}", tr("{0} T.", 3)))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400 + 7200), now: now), tr("in {0}", tr("{0} T. {1} Std.", 3, 2)))
+    }
+
+    func testRemainingTimesUseOneWordingAtEveryRange() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        // A week or more keeps the short day unit and drops the hours.
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(8 * 86400 + 5 * 3600), now: now), tr("in {0}", tr("{0} T.", 8)))
+        XCTAssertEqual(QuotaStatus.projectedExhaustion(now.addingTimeInterval(2 * 3600)).title(now: now), tr("Limit in {0}", tr("{0} Std.", 2)))
+        XCTAssertEqual(QuotaStatus.projectedPaceCrossing(now.addingTimeInterval(90 * 60)).title(now: now), tr("Über Soll in {0}", tr("{0} Std. {1} Min.", 1, 30)))
+        for (language, short, long) in [("de", "in 3 T.", "in 8 T."), ("en", "in 3 d", "in 8 d")] {
+            func text(_ days: Int) -> String {
+                Localization.text("in {0}", arguments: [Localization.text("{0} T.", arguments: ["\(days)"], language: language)], language: language)
+            }
+            XCTAssertEqual([text(3), text(8)], [short, long], language)
+        }
     }
 
     func testOutdatedCachesAreDiscardedWithoutErrorAndKeepOpenCodePath() async throws {

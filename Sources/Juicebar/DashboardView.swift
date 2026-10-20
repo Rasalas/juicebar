@@ -65,9 +65,9 @@ struct DashboardView: View {
                 Spacer()
                 VStack(alignment: .leading, spacing: 8) {
                     Label(store.isDemo ? tr("Beispieldaten") : tr("Bleibt auf deinem Mac"), systemImage: store.isDemo ? "testtube.2" : "lock.shield")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.subheadline.weight(.medium))
                     Text(store.isDemo ? tr("Demo · keine Abfragen") : tr("Keine Telemetrie.\nKeine Gesprächsinhalte."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
+                        .font(.subheadline).foregroundStyle(.secondary).lineSpacing(3)
                 }.padding(22)
             }.frame(width: 190).background(Palette.sidebar)
             Divider()
@@ -77,7 +77,7 @@ struct DashboardView: View {
                         HStack(spacing: 6) {
                             Circle().fill(store.isPaused ? Color.secondary : store.failures.isEmpty ? Palette.green : Palette.warning).frame(width: 6, height: 6)
                             Text(store.isDemo ? "Demo" : store.isPaused ? tr("Pausiert") : store.isRefreshing ? tr("Wird aktualisiert …") : !store.failures.isEmpty ? tr("Nicht alle Konten erreichbar") : updatedText(store.lastChecked, now: store.now))
-                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .font(.subheadline).foregroundStyle(.secondary)
                         }
                         Spacer()
                         refreshButton
@@ -167,7 +167,7 @@ struct DashboardView: View {
                     HStack(spacing: 16) {
                         Image(systemName: "bell.badge").font(.system(size: 23, weight: .light)).foregroundStyle(Palette.accent)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(tr("Rechtzeitig Bescheid wissen")).font(.system(size: 14, weight: .semibold))
+                            Text(tr("Rechtzeitig Bescheid wissen")).font(.body.weight(.semibold))
                             Text(tr("Warnungen ab {0} % verbraucht, bei hohem Tempo und für ablaufende Reset-Gutschriften.", Int(store.settings.threshold))).font(.callout).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -189,8 +189,8 @@ struct AccountCard: View {
                 HStack(spacing: 10) {
                     ProviderMark(kind: account.provider)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(account.displayName).font(.system(size: 15, weight: .semibold))
-                        Text(store.snapshots[account.id]?.plan.capitalized ?? tr("Noch nicht verbunden")).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(account.displayName).font(.title3.weight(.semibold))
+                        Text(store.snapshots[account.id]?.plan.capitalized ?? tr("Noch nicht verbunden")).font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if store.refreshingAccountIDs.contains(account.id) { ProgressView().controlSize(.small) }

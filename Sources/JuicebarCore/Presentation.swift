@@ -5,6 +5,15 @@ public enum QuotaDisplay: String, Codable, CaseIterable, Sendable {
     public var label: String { self == .remaining ? tr("Verbleibend") : tr("Verbraucht") }
     public func value(used: Double) -> Double { self == .remaining ? max(0, 100 - used) : max(0, used) }
 }
+/// One wording for every remaining time: zero units are dropped, and from a week on only days are shown.
+public func durationText(_ seconds: TimeInterval) -> String {
+    let minutes = max(1, Int(seconds / 60))
+    if minutes < 60 { return tr("{0} Min.", minutes) }
+    let hours = minutes / 60
+    if hours < 24 { return minutes % 60 == 0 ? tr("{0} Std.", hours) : tr("{0} Std. {1} Min.", hours, minutes % 60) }
+    let days = hours / 24
+    return days >= 7 || hours % 24 == 0 ? tr("{0} T.", days) : tr("{0} T. {1} Std.", days, hours % 24)
+}
 public enum TrayStyle: String, Codable, CaseIterable, Sendable {
     case lines, focused
     public var label: String { self == .lines ? tr("Alle Konten · Limitlinien") : tr("Ein Limit") }

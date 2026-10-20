@@ -59,7 +59,7 @@ struct PageHeading: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-0.6)
-            Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(subtitle).font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.padding(.bottom, 12)
     }
 }
@@ -270,9 +270,9 @@ extension QuotaStatus {
         case .unavailable: return ""
         case .exhausted: return tr("Limit erreicht")
         case .projectedPaceCrossing(let date):
-            return tr("Über Soll in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
+            return tr("Über Soll in {0}", durationText(date.timeIntervalSince(now)))
         case .projectedExhaustion(let date):
-            return tr("Limit in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
+            return tr("Limit in {0}", durationText(date.timeIntervalSince(now)))
         }
     }
     var isAlert: Bool {
@@ -323,17 +323,7 @@ func pointInTime(_ date: Date) -> String {
 
 func relativeTime(_ date: Date, now: Date = Date()) -> String {
     let delta = date.timeIntervalSince(now)
-    if delta <= 0 { return tr("jetzt") }
-    if delta < 3600 { return tr("in {0} Min.", max(1, Int(delta / 60))) }
-    if delta < 86400 {
-        let hours = Int(delta / 3600), minutes = Int(delta.truncatingRemainder(dividingBy: 3600) / 60)
-        return minutes == 0 ? tr("in {0} Std.", hours) : tr("in {0} Std. {1} Min.", hours, minutes)
-    }
-    if delta < 7 * 86400 {
-        let days = Int(delta / 86400), hours = Int(delta.truncatingRemainder(dividingBy: 86400) / 3600)
-        return hours == 0 ? tr("in {0} T.", days) : tr("in {0} T. {1} Std.", days, hours)
-    }
-    return tr("in {0} Tagen", Int(delta / 86400))
+    return delta <= 0 ? tr("jetzt") : tr("in {0}", durationText(delta))
 }
 
 func updatedText(_ date: Date?, now: Date) -> String {
@@ -399,8 +389,8 @@ struct EmptyState: View {
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(Palette.accent)
-            Text(title).font(.system(size: 18, weight: .semibold))
-            Text(message).font(.system(size: 13)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 410)
+            Text(title).font(.title2.weight(.semibold))
+            Text(message).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 410)
         }.padding(36).frame(maxWidth: .infinity)
     }
 }
