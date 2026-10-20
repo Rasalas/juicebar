@@ -14,7 +14,7 @@ struct ActivitySourcesView: View {
                 ForEach(store.activityRoots) { root in
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(root.source.name).font(.system(size: 13, weight: .medium))
+                            Text(root.source.name).font(.body.weight(.medium))
                             Text(root.url.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                         Spacer()

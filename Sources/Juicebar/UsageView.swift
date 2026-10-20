@@ -48,7 +48,7 @@ struct UsageView: View {
                             }
                             Spacer()
                             Text(tr("{0} aktive Tage", Set(filtered.map(\.day)).count))
-                                .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.accent)
+                                .font(.callout.weight(.medium)).foregroundStyle(Palette.accent)
                         }
                         ActivityCalendar(days: filtered, now: store.now, numberOfDays: days)
                     }
@@ -89,7 +89,7 @@ struct UsageView: View {
                         ForEach(ActivitySource.allCases.filter { item in filtered.contains { $0.source == item } }) { item in
                             let values = filtered.filter { $0.source == item }
                             VStack(alignment: .leading, spacing: 8) {
-                                HStack(spacing: 6) { Circle().fill(activityColor(item)).frame(width: 6, height: 6); Text(item.name).font(.system(size: 12, weight: .semibold)) }
+                                HStack(spacing: 6) { Circle().fill(activityColor(item)).frame(width: 6, height: 6); Text(item.name).font(.callout.weight(.semibold)) }
                                 Text(costLabel(values)).font(.system(size: 23, weight: .medium, design: .rounded)).monospacedDigit()
                                 Text(tr("{0} Tokens · API-Gegenwert", compactNumber(values.reduce(0) { $0 + $1.tokens }))).font(.caption).foregroundStyle(.secondary)
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -179,7 +179,7 @@ struct UsageView: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 28) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(tr("THEORETISCHE API-KOSTEN · {0} TAGE", days)).font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Palette.accent)
+                    Text(tr("THEORETISCHE API-KOSTEN · {0} TAGE", days)).font(.caption.weight(.semibold)).tracking(1).foregroundStyle(Palette.accent)
                     Text(costLabel(filtered)).font(.system(size: 34, weight: .medium, design: .rounded)).tracking(-1.2).monospacedDigit()
                     Label(tr("Keine Rechnung: so viel hätte diese Nutzung zu API-Preisen gekostet."), systemImage: "info.circle")
                         .font(.callout.weight(.medium))

@@ -11,7 +11,7 @@ struct JuiceButtonStyle: ButtonStyle {
     var prominent = false
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12, weight: .medium))
+        configuration.label.font(.callout.weight(.medium))
             .padding(.horizontal, 12).padding(.vertical, 8)
             .foregroundStyle(prominent ? Palette.accent : Color.primary.opacity(0.85))
             .background {

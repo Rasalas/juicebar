@@ -117,7 +117,7 @@ struct AccountEditor: View {
 struct OpenCodeSetupHelp: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(tr("Mit OpenCode Go verbinden")).font(.system(size: 13, weight: .semibold))
+            Text(tr("Mit OpenCode Go verbinden")).font(.body.weight(.semibold))
             Text(tr("1. In der Konsole mit der bisherigen Anmeldeart anmelden und den Workspace wählen, in dem du Go abgeschlossen hast."))
             Text(tr("2. Wenn unten ein lokaler Go-Key erkannt wird, kannst du ihn direkt übernehmen. Sonst einen vorhandenen Go-Key in das API-Key-Feld eintragen."))
             Text(tr("3. Speichern wählen. Juicebars prüft die Verbindung und lädt die Limits. Die neue CLI-Anmeldung über opencode console login richtet OpenCode ein; deren Sitzung unterstützt dieser Verbrauchsabruf noch nicht."))

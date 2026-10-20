@@ -14,7 +14,7 @@ struct SSHSourcesView: View {
                 ForEach(store.sshHosts, id: \.self) { value in
                     HStack {
                         Image(systemName: "desktopcomputer").foregroundStyle(.secondary)
-                        Text(value).font(.system(size: 13, weight: .medium, design: .monospaced))
+                        Text(value).font(.body.monospaced().weight(.medium))
                         Spacer()
                         Button(tr("Entfernen")) { store.removeSSHHost(value) }.disabled(store.localUsageLoading || store.isDemo)
                     }
