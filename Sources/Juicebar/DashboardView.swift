@@ -156,7 +156,7 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 7) {
                         Image(systemName: "diamond.fill").font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
-                        Text(tr("Die Raute zeigt den Sollstand bei gleichmäßiger Nutzung. Jeder Balken gehört zu einem eigenen Limit."))
+                        Text(tr("Die Raute zeigt den Stand bei gleichmäßigem Verbrauch. Jeder Balken gehört zu einem eigenen Limit."))
                     }
                     let reaches = overviewAccounts.flatMap { account in store.weeklyReach(for: account).filter(\.isRelevant) }
                     if !reaches.isEmpty { WeeklyReachLegend(expiring: reaches.contains { $0.expiring >= 0.5 }) }

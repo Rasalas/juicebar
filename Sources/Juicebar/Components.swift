@@ -78,6 +78,11 @@ struct QuotaBar: View {
     private var expired: Bool { window.resetsAt.map { $0 <= now } ?? false }
     private var weeklyTarget: WeeklyReach? { reach.flatMap { !expired && $0.shortWindowID == window.id ? $0 : nil } }
     private var weeklyReach: WeeklyReach? { reach.flatMap { !expired && $0.longWindowID == window.id ? $0 : nil } }
+    private var weeklyTargetPointsRight: Bool {
+        guard let weeklyTarget, let ideal = window.idealPercent(at: now) else { return mode == .used }
+        let target = mode.value(used: 100 - weeklyTarget.targetRemainingShort)
+        return target == mode.value(used: ideal) ? mode == .used : target > mode.value(used: ideal)
+    }
     private var barY: CGFloat { compact ? 7 : 12 }
     var body: some View {
         Button { showingDetails.toggle() } label: {
@@ -109,14 +114,13 @@ struct QuotaBar: View {
                                 .clipShape(Capsule()).offset(y: barY)
                         }
                         if let weeklyTarget {
-                            WeeklyTargetTick(height: 12)
-                                .offset(x: max(0, min(proxy.size.width - 5, proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 2.5)),
-                                        y: barY - 4)
+                            WeeklyTargetMarker(height: 10, pointsRight: weeklyTargetPointsRight)
+                                // The lower corner anchors x; both diamonds share the same vertical center.
+                                .offset(x: proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 5,
+                                        y: barY - 5)
                         }
                         if !expired, let ideal = window.idealPercent(at: now) {
-                            Image(systemName: "diamond.fill")
-                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary)
-                                .frame(width: 10, height: 10)
+                            QuotaDiamond()
                                 // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
                                 .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
                         }
@@ -170,10 +174,9 @@ struct QuotaBar: View {
         }
     }
     @ViewBuilder private var reachLabel: some View {
-        if !reachTitle.isEmpty {
+        if weeklyReach != nil, !reachTitle.isEmpty {
             let expiring = (weeklyReach?.expiring ?? 0) >= 0.5
             HStack(spacing: 4) {
-                if weeklyTarget != nil { WeeklyTargetTick(height: 10) }
                 if expiring { ExpiryPattern.swatch }
                 Text(reachTitle)
             }
@@ -200,7 +203,7 @@ struct QuotaBar: View {
     private var detailRows: [(String, String)] {
         var rows: [(String, String)] = []
         if !expired, let ideal = window.idealPercent(at: now) {
-            rows.append((tr("Soll jetzt"), tr("{0} %", Int(mode.value(used: ideal).rounded()))))
+            rows.append((tr("Bei gleichmäßigem Verbrauch"), tr("{0} %", Int(mode.value(used: ideal).rounded()))))
             if let recovery = window.paceRecovery(at: now) {
                 rows.append((tr("Ohne weitere Nutzung im Soll"), pointInTime(recovery)))
             } else {
@@ -213,6 +216,7 @@ struct QuotaBar: View {
             rows.append((tr("Ein volles 5-Stunden-Fenster"), tr("≈ {0} % dieses Limits", share)))
             rows.append((tr("Nutzbare Fenster bis Reset"), windowCount(reach.windowsAvailable)))
             rows.append((tr("Benötigte Fenster"), windowCount(reach.windowsNeeded)))
+            rows.append((tr("Geschätzt noch nutzbar"), tr("≈ {0} % dieses Limits", Int(min(reach.remainingLong, reach.capacity).rounded()))))
             if reach.expiring >= 0.5 { rows.append((tr("Verfällt trotz voller Nutzung"), tr("≈ {0} %", Int(reach.expiring.rounded())))) }
         }
         switch status {
@@ -225,7 +229,7 @@ struct QuotaBar: View {
     }
     private var detailExplanation: String {
         [window.supportsPace ? "" : tr("Kein Sollwert: Der Anbieter nennt keinen Fensterbeginn."), expired ? "" : statusHelp,
-         weeklyTarget == nil && weeklyReach == nil ? "" : tr("Das Wochenziel verteilt den Rest der Woche gleichmäßig auf die verbleibenden nutzbaren 5-Stunden-Fenster. Geschätzt aus deinem Verlauf und deinen üblichen Nutzungszeiten; wie viel der Woche ein Fenster ausmacht, hängt vom Modellmix ab.")]
+         weeklyTarget == nil && weeklyReach == nil ? "" : tr("Das Wochenziel verteilt den Wochenrest auf die verbleibenden nutzbaren 5-Stunden-Fenster. Wie viel ein volles Fenster vom Wochenlimit verbraucht, wird aus den gemeldeten Limitständen geschätzt. Ein verfallender Rest bleibt rechnerisch selbst bei voller Nutzung dieser Fenster übrig. Andere Nutzungszeiten können das Ergebnis ändern. Ein letztes verkürztes Fenster zählt nur anteilig.")]
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
     private var detailText: String {
@@ -290,13 +294,30 @@ private struct Hatch: Shape {
     }
 }
 
-/// Weekly target on the short bar: neutral, outlined so it reads on any provider colour and next to the diamond.
-struct WeeklyTargetTick: View {
-    var height: CGFloat
+struct QuotaDiamond: View {
+    var size: CGFloat = 10
     var body: some View {
-        RoundedRectangle(cornerRadius: 1).fill(.primary).frame(width: 3, height: height - 2)
-            .padding(1).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 1.5))
-            .accessibilityHidden(true)
+        Image(systemName: "diamond.fill")
+            .font(.system(size: size, weight: .semibold)).foregroundStyle(.primary)
+            .frame(width: size, height: size).accessibilityHidden(true)
+    }
+}
+
+/// The same pace diamond, clipped at its center. Its lower corner anchors the weekly target horizontally.
+struct WeeklyTargetMarker: View {
+    var height: CGFloat
+    var pointsRight = false
+    var body: some View {
+        QuotaDiamond(size: height)
+            .mask(alignment: pointsRight ? .trailing : .leading) {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: pointsRight ? height * 0.12 : 0,
+                    bottomLeadingRadius: pointsRight ? height * 0.12 : 0,
+                    bottomTrailingRadius: pointsRight ? 0 : height * 0.12,
+                    topTrailingRadius: pointsRight ? 0 : height * 0.12,
+                    style: .circular
+                ).frame(width: height / 2, height: height)
+            }
     }
 }
 

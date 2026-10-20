@@ -64,7 +64,7 @@ struct TrayView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 HStack {
-                    Label(tr("Soll = gleichmäßiger Verbrauch"), systemImage: "diamond.fill")
+                    Label(tr("Gleichmäßiger Verbrauch"), systemImage: "diamond.fill")
                     Spacer(minLength: 4)
                     Text(store.isDemo ? tr("Beispieldaten") : store.isPaused ? tr("Pausiert") : updatedText(store.lastChecked, now: store.now))
                 }.font(.subheadline).foregroundStyle(.secondary)
@@ -99,7 +99,7 @@ struct WeeklyReachLegend: View {
     var expiring: Bool
     var body: some View {
         HStack(spacing: 14) {
-            Label { Text(tr("Wochenziel")) } icon: { WeeklyTargetTick(height: 11) }
+            Label { Text(tr("Wochenziel")) } icon: { WeeklyTargetMarker(height: 11) }
             if expiring { Label { Text(tr("Verfällt trotz voller Nutzung")) } icon: { ExpiryPattern.swatch } }
         }
     }

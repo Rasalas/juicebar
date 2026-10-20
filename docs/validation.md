@@ -1,5 +1,11 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.13 UI validation, 20 October
+
+The weekly target uses the same neutral diamond symbol as the even-usage marker, clipped to one half with rounded cut corners. Both markers share their vertical center; the lower corner of the half diamond anchors its horizontal target. The extra target line under the five-hour bar is removed. The legend now says “Gleichmäßiger Verbrauch”, and quota details show the estimated usable weekly balance and explain how full windows are estimated from provider measurements, without asserting a model-mix conversion.
+
+Local validation passed 159 Swift tests, with seven opt-in benchmarks skipped, and 13 Python collector tests. Tray checks passed in both languages, at the constrained height and with always-visible system scrollbars; activity persistence and source packaging passed. English and German native screenshots were refreshed. Marker fixtures cover both sides of the even-usage marker, both quota display modes, both appearances and exhausted quota at the track edge. A pixel comparison confirms the cut-corner rounding affects both marker directions. The website loaded all images without horizontal overflow at 1280 and 390 CSS pixels. Offscreen SwiftUI still does not expose accessibility descendants on this Mac; live VoiceOver remains unverified.
+
 ## Juicebars 0.1.12 release, 20 October
 
 Version 0.1.12, build 14, includes the history retention fix in PR #12, streaming activity aggregation in #13 and consistent time labels in #10. Main CI passed for the combined source commit `cb0b341`. Local validation passed 170 Swift tests with seven opt-in benchmarks skipped, 13 Python collector tests, tray checks in English and German, the constrained-height and always-visible-scrollbar cases, and activity persistence in the signed bundle.

@@ -116,7 +116,7 @@ import JuicebarCore
         }
         guard buttons.contains(where: {
             let value = $0.accessibilityValue() as? String ?? ""
-            return value.contains(pointInTime(reset)) && value.contains(tr("Soll jetzt"))
+            return value.contains(pointInTime(reset)) && value.contains(tr("Bei gleichmäßigem Verbrauch"))
         }) else { throw ProviderFailure.unavailable("Quota button accessibility must include exact reset and pace") }
         print("Quota accessibility: button includes exact reset and pace")
     }
@@ -283,6 +283,39 @@ import JuicebarCore
     private static func renderWeeklyReach(to directory: URL) throws {
         let store = AppStore(demo: true)
         store.accounts = store.accounts.filter { $0.provider != .opencodeGo }
+        let now = store.now
+        // Exhausted at the left edge, target left of pace, and target right of pace.
+        let markerFixtures = [(100.0, 52.0 / 60, 17.0, 24.0 + 20.0 / 60), (40, 1, 80, 9), (0, 0.5, 83, 7.5)].map { short, shortHours, long, longHours in
+            let snapshot = AccountSnapshot(configurationID: "marker", identity: "fixture", observedAt: now, source: "fixture", windows: [
+                QuotaWindow(id: "short", title: tr("5 Stunden"), usedPercent: short, resetsAt: now.addingTimeInterval(shortHours * 3600), duration: 18000),
+                QuotaWindow(id: "week", title: tr("Woche"), usedPercent: long, resetsAt: now.addingTimeInterval(longHours * 3600), duration: 604800)
+            ])
+            let history = [0.0, 100.0].map { used in
+                var sample = snapshot
+                sample.observedAt = now.addingTimeInterval((-10 + used / 100) * 3600)
+                sample.windows[0].resetsAt = now.addingTimeInterval(-6 * 3600)
+                sample.windows[0].usedPercent = used
+                sample.windows[1].usedPercent = long - 10 + used / 10
+                return sample
+            }
+            return (snapshot, WeeklyReach.assess(snapshot: snapshot, history: history, hours: .all, now: now).first!)
+        }
+        let reportedStore = AppStore(demo: true)
+        let reportedAccount = AccountConfiguration(id: "demo-claude", provider: .claude, label: "Claude Team")
+        var reported = markerFixtures[0].0
+        reported.configurationID = reportedAccount.id
+        reported.identity = reportedAccount.id
+        reported.plan = "Team"
+        reported.windows[0].id = "five_hour"
+        reported.windows[1].id = "seven_day"
+        reported.windows.append(QuotaWindow(id: "model.Fable", title: "Fable · \(tr("Woche"))", usedPercent: 0,
+                                            resetsAt: reported.windows[1].resetsAt, duration: 604800))
+        reportedStore.now = now
+        reportedStore.accounts = [reportedAccount]
+        reportedStore.snapshots = [reportedAccount.id: reported]
+        reportedStore.history = [reportedAccount.id: DemoData.history(for: reported, now: now)]
+        reportedStore.activity = nil
+        reportedStore.settings.quietEnabled = false
         for mode in QuotaDisplay.allCases {
             store.settings.quotaDisplay = mode
             for dark in [false, true] {
@@ -292,6 +325,22 @@ import JuicebarCore
                     .environment(\.colorScheme, dark ? .dark : .light).background(Color(nsColor: .windowBackgroundColor))
                 try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: appearance,
                                to: directory.appendingPathComponent("weekly-reach-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))
+                let markers = VStack(alignment: .leading, spacing: 26) {
+                    ForEach(markerFixtures.indices, id: \.self) { index in
+                        let (snapshot, reach) = markerFixtures[index]
+                        ForEach(snapshot.windows) { window in
+                            QuotaBar(window: window, color: Palette.provider(.claude), now: now, reach: reach)
+                        }
+                    }
+                }.padding(24).frame(width: 380)
+                    .environment(\.quotaDisplay, mode).environment(\.colorScheme, dark ? .dark : .light)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                try renderView(markers, size: NSHostingView(rootView: markers).fittingSize, appearance: appearance,
+                               to: directory.appendingPathComponent("weekly-markers-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))
+                let reportedCard = AccountCard(store: reportedStore, account: reportedAccount, manage: {})
+                    .frame(width: 348).environment(\.quotaDisplay, mode).environment(\.colorScheme, dark ? .dark : .light)
+                try renderView(reportedCard, size: NSHostingView(rootView: reportedCard).fittingSize, appearance: appearance,
+                               to: directory.appendingPathComponent("weekly-reported-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))
             }
         }
     }

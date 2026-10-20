@@ -104,7 +104,7 @@
   "Warnungen 1 Stunde stummschalten": "Mute warnings for 1 hour",
   "Juicebars beenden": "Quit Juicebars",
   "Weitere Aktionen": "More actions",
-  "Soll = gleichmäßiger Verbrauch": "Target = even usage pace",
+  "Gleichmäßiger Verbrauch": "Even usage",
   "Keine Kontingente verfügbar": "No quotas available",
   "Verbindung wird hergestellt …": "Connecting…",
   "Keinen Reset verschenken.": "Don't lose a reset.",
@@ -415,7 +415,7 @@
   "{0}: Import auf die neuesten 100.000 Zeilen je Tabelle begrenzt.": "{0}: import limited to the latest 100,000 rows per table.",
   "Kilo-Dateistand konnte nicht gelesen werden.": "Could not read Kilo file metadata.",
   "Ordner mit Kilo-Datenbanken auswählen.": "Select a folder containing Kilo databases.",
-  "Soll jetzt": "Target now",
+  "Bei gleichmäßigem Verbrauch": "At an even usage pace",
   "{0} %": "{0}%",
   "Ohne weitere Nutzung im Soll": "Back on target without further use",
   "Puffer zum Soll": "Headroom to target",
@@ -439,7 +439,7 @@
   "An ablaufende Reset-Gutschriften erinnern": "Remind me about expiring reset credits",
   "Angesparte Reset-Gutschriften und befristete Angebote. Einlösen kannst du sie direkt beim Anbieter.": "Banked reset credits and limited-time offers. Redeem them directly with your provider.",
   "Das gemeldete Kontingent ist ausgeschöpft. Warte auf den Reset oder löse eine verfügbare Reset-Gutschrift ein.": "The reported quota is exhausted. Wait for the reset or redeem an available reset credit.",
-  "Die Raute zeigt den Sollstand bei gleichmäßiger Nutzung. Jeder Balken gehört zu einem eigenen Limit.": "The diamond marks the target for even usage. Each bar is a separate limit.",
+  "Die Raute zeigt den Stand bei gleichmäßigem Verbrauch. Jeder Balken gehört zu einem eigenen Limit.": "The diamond marks the balance at an even usage pace. Each bar is a separate limit.",
   "Die Schwelle zählt immer den Verbrauch, auch wenn Balken den verbleibenden Rest zeigen.": "The threshold always counts usage, even when bars show what remains.",
   "Die neue Sprache gilt nach einem Neustart.": "The new language applies after a relaunch.",
   "Jetzt neu starten": "Relaunch now",
@@ -477,6 +477,7 @@
   "≈ {0} % dieses Limits": "≈ {0}% of this limit",
   "Nutzbare Fenster bis Reset": "Usable windows until reset",
   "Benötigte Fenster": "Windows needed",
+  "Geschätzt noch nutzbar": "Estimated usable quota",
   "Verfällt trotz voller Nutzung": "Expires even with full use",
-  "Das Wochenziel verteilt den Rest der Woche gleichmäßig auf die verbleibenden nutzbaren 5-Stunden-Fenster. Geschätzt aus deinem Verlauf und deinen üblichen Nutzungszeiten; wie viel der Woche ein Fenster ausmacht, hängt vom Modellmix ab.": "The weekly target spreads the rest of the week evenly across the remaining usable 5-hour windows. Estimated from your history and usual hours of use; how much of the week one window covers depends on the model mix."
+  "Das Wochenziel verteilt den Wochenrest auf die verbleibenden nutzbaren 5-Stunden-Fenster. Wie viel ein volles Fenster vom Wochenlimit verbraucht, wird aus den gemeldeten Limitständen geschätzt. Ein verfallender Rest bleibt rechnerisch selbst bei voller Nutzung dieser Fenster übrig. Andere Nutzungszeiten können das Ergebnis ändern. Ein letztes verkürztes Fenster zählt nur anteilig.": "The weekly target spreads the remaining weekly quota across the remaining usable 5-hour windows. The share of the weekly limit consumed by a full window is estimated from reported quota balances. Any expiring quota is estimated to remain even with full use of these windows. Different hours of use can change the result. A shortened final window counts proportionally."
 }
