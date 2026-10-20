@@ -114,8 +114,8 @@ public enum WarningEngine {
                 if settings.forecastEnabled,
                    let forecast = projection(window: window, snapshot: snapshot, history: history, now: now),
                    forecast.reachesLimitAt.timeIntervalSince(now) <= settings.forecastHours * 3600 {
-                    let minutes = max(1, Int(forecast.reachesLimitAt.timeIntervalSince(now) / 60))
-                    append("\(key)|forecast", .forecast, tr("{0}: Bei diesem Tempo voraussichtlich in {1} Min. ausgeschöpft, vor dem Reset.", window.title, minutes), legacyKey: legacyKey.map { "\($0)|forecast" })
+                    let remaining = durationText(forecast.reachesLimitAt.timeIntervalSince(now))
+                    append("\(key)|forecast", .forecast, tr("{0}: Bei diesem Tempo voraussichtlich in {1} ausgeschöpft, vor dem Reset.", window.title, remaining), legacyKey: legacyKey.map { "\($0)|forecast" })
                 }
             }
         }
