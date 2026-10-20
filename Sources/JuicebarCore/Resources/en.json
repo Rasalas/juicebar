@@ -290,7 +290,7 @@
   "Ein SSH-Alias darf nur Buchstaben, Zahlen, Punkt, Bindestrich, Unterstrich und @ enthalten.": "An SSH alias may only contain letters, numbers, dots, hyphens, underscores and @.",
   "SSH-Collector fehlt im App-Bundle.": "The SSH collector is missing from the app bundle.",
   "Unbekannt": "Unknown",
-  "{0}: SSH-Import nicht abgeschlossen. Verbindung, bekannten Host-Schlüssel, Schlüsselanmeldung und Python 3 prüfen. Der Import ist auf 3 Minuten begrenzt.": "{0}: SSH import did not finish. Check the connection, known host key, key authentication and Python 3. Imports are limited to 3 minutes.",
+  "{0}: SSH-Import nicht abgeschlossen. Verbindung, bekannten Host-Schlüssel, Schlüsselanmeldung und Python 3 prüfen. Übertragene Dateien bleiben erhalten, der nächste Import setzt fort.": "{0}: SSH import did not finish. Check the connection, known host key, key authentication and Python 3. Transferred files are kept and the next import continues from there.",
   "Kostenbericht enthält keine lesbaren Ergebnisse.": "The cost report contains no readable results.",
   "Unbekannte Währung oder Kosteneinheit.": "Unknown currency or cost unit.",
   "Codex liefert ein unbekanntes Limitformat.": "Codex returned an unknown limit format.",

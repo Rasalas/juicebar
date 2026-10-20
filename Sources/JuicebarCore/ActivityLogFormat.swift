@@ -25,6 +25,9 @@ extension ActivitySource {
         return markers.map { Data($0.utf8) }
     }
 
+    /// Claude tool results can carry nested usage objects; only assistant envelopes are usage records.
+    var requiredLogMarker: Data? { self == .claude ? Data("\"assistant\"".utf8) : nil }
+
     func fileIdentity(_ file: URL) -> String {
         // Roo stores one array per task; its timestamp IDs are only unique within that task.
         stableID(self == .roo ? file.deletingLastPathComponent().lastPathComponent : file.path)

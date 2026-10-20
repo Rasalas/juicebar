@@ -3,13 +3,96 @@ import CSQLite
 import Darwin
 @testable import JuicebarCore
 
-/// Opt-in measurements use synthetic data only; timing thresholds are not CI assertions.
+/// Opt-in measurements use synthetic data only. Thresholds are generous and catch only order-of-magnitude regressions.
 final class ActivityPerformanceTests: XCTestCase {
     private func resources() -> (cpu: Double, rss: Int) {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)
         let cpu = Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
         return (cpu, Int(usage.ru_maxrss))
+    }
+
+    private func claudeLog(file: Int, rows: Range<Int>, stamp: String, content: Int) throws -> Data {
+        var data = Data()
+        for row in rows {
+            let user: [String: Any] = ["type": "user", "timestamp": stamp, "message": ["role": "user", "content": String(repeating: "u", count: content)]]
+            let assistant: [String: Any] = ["type": "assistant", "timestamp": stamp, "requestId": "r-\(file)-\(row)",
+                "message": ["id": "m-\(file)-\(row)", "model": "claude-opus-5", "content": [["type": "text", "text": String(repeating: "a", count: content)]],
+                            "usage": ["input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 40]]]
+            for line in [user, assistant] { data.append(try JSONSerialization.data(withJSONObject: line)); data.append(10) }
+        }
+        return data
+    }
+
+    private func measure(_ name: String, _ body: () throws -> Void) rethrows -> (wall: Double, cpu: Double) {
+        let start = Date(), before = resources()
+        try body()
+        let result = (wall: Date().timeIntervalSince(start), cpu: resources().cpu - before.cpu)
+        print("BENCHMARK \(name): wall=\(result.wall)s cpu=\(result.cpu)s peakRSS=\(resources().rss)")
+        return result
+    }
+
+    // Steady state of the five-minute import: many logs and an OpenCode database, nothing changed.
+    func testUnchangedImport() throws {
+        guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else { throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure imports") }
+        let fileCount = ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK_FILES"].flatMap(Int.init) ?? 1000
+        let fm = FileManager.default, root = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        let logs = root.appendingPathComponent("claude/projects")
+        try fm.createDirectory(at: logs, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let now = Date(), stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-3600))
+        for file in 0..<fileCount {
+            let project = logs.appendingPathComponent("project-\(file % 20)")
+            try fm.createDirectory(at: project, withIntermediateDirectories: true)
+            try claudeLog(file: file, rows: 0..<50, stamp: stamp, content: 400).write(to: project.appendingPathComponent("session-\(file).jsonl"))
+        }
+        let dbFile = root.appendingPathComponent("opencode.db")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbFile.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, "PRAGMA journal_mode=WAL; CREATE TABLE message (id TEXT, data TEXT, time_created INTEGER); BEGIN", nil, nil, nil), SQLITE_OK)
+        let record = #"{"role":"assistant","modelID":"custom","cost":0.2,"tokens":{"input":100,"output":20,"cache":{"read":60}}}"#
+        for row in 0..<20000 {
+            XCTAssertEqual(sqlite3_exec(db, "INSERT INTO message VALUES ('\(row)', '\(record)', \(Int(now.timeIntervalSince1970 * 1000) - 7_200_000))", nil, nil, nil), SQLITE_OK)
+        }
+        XCTAssertEqual(sqlite3_exec(db, "COMMIT", nil, nil, nil), SQLITE_OK)
+        let roots = [ActivityLogs.Root(source: .claude, url: logs)], directory = root.appendingPathComponent("state")
+        var passes: [(wall: Double, cpu: Double)] = []
+        for label in ["cold", "unchanged", "unchanged again"] {
+            passes.append(try measure("\(label) import of \(fileCount) logs and 20,000 OpenCode rows") {
+                let report = try ActivityImport.read(roots: roots, databasePath: dbFile.path, hosts: [], directory: directory, now: now).0
+                XCTAssertEqual(report.days.reduce(0) { $0 + $1.responses }, fileCount * 50 + 20000)
+            })
+        }
+        // Release, 1,000 files: 0.77 s CPU before (cache decoding and archive rewrite), 0.08 s after.
+        XCTAssertLessThan(passes[2].cpu, 0.6 * Double(fileCount) / 1000, "Unchanged imports must not decode or rewrite caches")
+    }
+
+    // An active session grows by a few lines between imports.
+    func testAppendToLargeLog() throws {
+        guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else { throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure imports") }
+        let fm = FileManager.default, root = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        let logs = root.appendingPathComponent("logs"), cache = root.appendingPathComponent("cache")
+        try fm.createDirectory(at: logs, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let now = Date(), stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-60))
+        let file = logs.appendingPathComponent("session.jsonl")
+        try claudeLog(file: 0, rows: 0..<20000, stamp: stamp, content: 2000).write(to: file)
+        let size = try XCTUnwrap(fm.attributesOfItem(atPath: file.path)[.size] as? Int)
+        let roots = [ActivityLogs.Root(source: .claude, url: logs)]
+        _ = try measure("cold parse of \(size / 1_048_576) MiB log") {
+            XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, 20000)
+        }
+        var appended: (wall: Double, cpu: Double) = (0, 0)
+        for round in 1...3 {
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.seekToEnd(); try handle.write(contentsOf: try claudeLog(file: 0, rows: (20000 + (round - 1) * 10)..<(20000 + round * 10), stamp: stamp, content: 2000)); try handle.close()
+            appended = try measure("append round \(round)") {
+                XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, 20000 + round * 10)
+            }
+        }
+        // Release: 1.7 s CPU before (full re-parse), 0.21 s after.
+        XCTAssertLessThan(appended.cpu, 0.5, "Appending must not re-parse the whole log")
     }
 
     func testEventAggregation() throws {
