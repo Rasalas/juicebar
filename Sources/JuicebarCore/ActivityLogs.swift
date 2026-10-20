@@ -94,9 +94,16 @@ public enum ActivityLogs {
     }
     public static func read(roots: [Root], cacheDirectory: URL?, now: Date = Date(),
                             progress: @Sendable (String) -> Void = { _ in }) throws -> (events: [ActivityEvent], notices: [String]) {
+        var events: [ActivityEvent] = []
+        let notices = try read(roots: roots, cacheDirectory: cacheDirectory, now: now, progress: progress) { events.append($0) }
+        return (events, notices)
+    }
+    /// Passes each event in the window to `each` instead of collecting them, in the order `read` returns them.
+    static func read(roots: [Root], cacheDirectory: URL?, now: Date, progress: @Sendable (String) -> Void,
+                     each: (ActivityEvent) -> Void) throws -> [String] {
         let fm = FileManager.default, since = Calendar.current.date(byAdding: .day, value: -90, to: now)!
         if let cacheDirectory { try fm.createDirectory(at: cacheDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
-        var events: [ActivityEvent] = [], notices: [String] = [], seen = Set<String>(), activeCache = Set<String>()
+        var notices: [String] = [], seen = Set<String>(), activeCache = Set<String>()
         let decoder = PropertyListDecoder(), encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         func cached(_ url: URL?) -> CachedFile? {
@@ -137,7 +144,7 @@ public enum ActivityLogs {
                     let inode = resource.fileIdentifier
                     if let known, known.size == size, known.modified == modified, known.inode == nil || known.inode == inode {
                         current.files[id] = known
-                        known.events.append(to: &events, since: since, through: now)
+                        known.events.forEach(since: since, through: now, each)
                         skipped += known.skipped
                     } else {
                         let result: CachedFile = try autoreleasepool {
@@ -148,7 +155,7 @@ public enum ActivityLogs {
                             return parsed
                         }
                         if cacheDirectory != nil { current.files[id] = Entry(key: key, file: result) }
-                        events.append(contentsOf: result.usage.lazy.filter { $0.date >= since && $0.date <= now })
+                        for event in result.usage where event.date >= since && event.date <= now { each(event) }
                         skipped += result.skipped
                     }
                     filesRead += 1
@@ -161,7 +168,7 @@ public enum ActivityLogs {
                     if let last = known ?? cached(cacheURL).map({ Entry(key: key, file: $0) }) {
                         activeCache.insert(key)
                         current.files[id] = last
-                        last.events.append(to: &events, since: since, through: now)
+                        last.events.forEach(since: since, through: now, each)
                     }
                 }
             }
@@ -176,15 +183,15 @@ public enum ActivityLogs {
                 try Task.checkCancellation()
                 let url = cacheDirectory.appendingPathComponent(name)
                 if let usage = vanished[name] ?? cached(url).map({ CompactEvents($0.usage) }) {
-                    let count = events.count
-                    usage.append(to: &events, since: since, through: now)
-                    if events.count > count { current.orphans[name] = usage; continue }
+                    var retained = false
+                    usage.forEach(since: since, through: now) { retained = true; each($0) }
+                    if retained { current.orphans[name] = usage; continue }
                 }
                 try? fm.removeItem(at: url)
             }
         }
         completed = true
-        return (events, notices)
+        return notices
     }
     private static func knownNonUsagePrefix(_ data: Data, source: ActivitySource) -> Bool {
         let text = String(decoding: data.prefix(1024), as: UTF8.self)
@@ -409,26 +416,26 @@ struct CompactEvents {
         }
     }
 
-    func append(to events: inout [ActivityEvent], since: Date, through now: Date) {
+    func forEach(since: Date, through now: Date, _ body: (ActivityEvent) -> Void) {
         let lower = since.timeIntervalSinceReferenceDate, upper = now.timeIntervalSinceReferenceDate
         for item in items where item.date >= lower && item.date <= upper {
             let extra = item.extra >= 0 ? extras[Int(item.extra)] : nil, label = Self.labels.label(item.label)
             let usage = item.flags & Self.inlineUsage != 0
                 ? TokenBreakdown(input: Double(item.usage.0), output: Double(item.usage.1), cacheRead: Double(item.usage.2), cacheWrite: Double(item.usage.3), cacheWriteHour: Double(item.usage.4))
                 : extra?.usage
-            events.append(ActivityEvent(id: item.flags & Self.hexID != 0 ? Self.hex(item.id) : extra?.id ?? "", source: ActivitySource.allCases[Int(item.source)],
-                                        date: Date(timeIntervalSinceReferenceDate: item.date), model: label.model, provider: label.provider,
-                                        tokens: item.flags & Self.inlineTokens != 0 ? Double(item.tokens) : extra?.tokens ?? 0, usage: usage,
-                                        responseCount: extra?.responseCount, reportedCost: extra?.reportedCost, sessionStartedAt: extra?.sessionStartedAt))
+            body(ActivityEvent(id: item.flags & Self.hexID != 0 ? Self.hex(item.id) : extra?.id ?? "", source: ActivitySource.allCases[Int(item.source)],
+                               date: Date(timeIntervalSinceReferenceDate: item.date), model: label.model, provider: label.provider,
+                               tokens: item.flags & Self.inlineTokens != 0 ? Double(item.tokens) : extra?.tokens ?? 0, usage: usage,
+                               responseCount: extra?.responseCount, reportedCost: extra?.reportedCost, sessionStartedAt: extra?.sessionStartedAt))
         }
     }
     func events(since: Date = .distantPast, through now: Date = .distantFuture) -> [ActivityEvent] {
         var events: [ActivityEvent] = []
-        append(to: &events, since: since, through: now)
+        forEach(since: since, through: now) { events.append($0) }
         return events
     }
 
-    private static func digest(_ id: String) -> (UInt64, UInt64, UInt64, UInt64)? {
+    static func digest(_ id: String) -> (UInt64, UInt64, UInt64, UInt64)? {
         var id = id
         return id.withUTF8 { bytes -> (UInt64, UInt64, UInt64, UInt64)? in
             guard bytes.count == 64 else { return nil }

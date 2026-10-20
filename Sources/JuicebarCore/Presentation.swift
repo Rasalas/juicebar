@@ -135,11 +135,12 @@ public struct ActivityEvent: Codable, Sendable, Identifiable {
     }
     /// Independent of directory, host and cache traversal order: Pi originals win over forks.
     static func preferred(_ first: Self, _ second: Self) -> Self {
-        if first.source == .pi, first.sessionStartedAt != second.sessionStartedAt {
-            return (first.sessionStartedAt ?? .distantFuture) < (second.sessionStartedAt ?? .distantFuture) ? first : second
-        }
-        if first.tokens > second.tokens || (first.tokens == second.tokens && first.usage != nil) { return first }
-        return second
+        keepsFirst(source: first.source, (first.tokens, first.usage != nil, first.sessionStartedAt), (second.tokens, second.usage != nil, second.sessionStartedAt)) ? first : second
+    }
+    /// The fields `preferred` decides on; the report builder keeps only these.
+    static func keepsFirst(source: ActivitySource, _ first: (tokens: Double, hasUsage: Bool, session: Date?), _ second: (tokens: Double, hasUsage: Bool, session: Date?)) -> Bool {
+        if source == .pi, first.session != second.session { return (first.session ?? .distantFuture) < (second.session ?? .distantFuture) }
+        return first.tokens > second.tokens || (first.tokens == second.tokens && first.hasUsage)
     }
 }
 public struct ActivityDay: Codable, Identifiable, Sendable {
@@ -170,67 +171,11 @@ public struct ActivityReport: Codable, Sendable {
     public var warnings: [String]
     public var observedAt: Date
     public init(events: [ActivityEvent], notices: [String] = [], warnings: [String] = [], now: Date = Date(), calendar: Calendar = .current) {
-        struct Key: Hashable { var source: ActivitySource; var id: String }
-        var unique: [Key: ActivityEvent] = [:]
-        unique.reserveCapacity(events.count)
-        for event in events where event.date <= now && event.tokens.isFinite && event.tokens > 0 {
-            let key = Key(source: event.source, id: event.id)
-            // Streaming blocks may repeat a message with an updated output count.
-            unique[key] = unique[key].map { ActivityEvent.preferred($0, event) } ?? event
-        }
-        struct DayKey: Hashable { var source: ActivitySource; var day: Date }
-        struct ModelKey: Hashable { var model: String; var provider: String }
-        struct ResolvedModel { var rate: CatalogDocument.Rate?; var alias: String? }
-        let catalog = ModelCatalog.shared.snapshot
-        var models: [ModelKey: ResolvedModel] = [:]
-        var groups: [DayKey: ActivityDay] = [:]
-        var hourMasks: [DayKey: Int] = [:]
-        let hoursSince = now.addingTimeInterval(-Double(Self.hourHistoryDays) * 86400)
-        // UTC buckets only index calendar-derived intervals. The intervals decide
-        // membership, including local midnight, short/long DST days, and date skips.
-        var dayIntervals: [Double: [DateInterval]] = [:]
-        func startOfDay(_ date: Date) -> Date {
-            let bucket = floor(date.timeIntervalSince1970 / 86400)
-            let intervals = dayIntervals[bucket] ?? []
-            if let interval = intervals.first(where: { date >= $0.start && date < $0.end }) { return interval.start }
-            guard let interval = calendar.dateInterval(of: .day, for: date) else { return calendar.startOfDay(for: date) }
-            if intervals.count < 4 && (dayIntervals.count < 256 || dayIntervals[bucket] != nil) {
-                dayIntervals[bucket] = intervals + [interval]
-            }
-            return interval.start
-        }
-        for event in unique.values {
-            let modelKey = ModelKey(model: event.model, provider: event.provider)
-            let resolved: ResolvedModel
-            if let existing = models[modelKey] { resolved = existing }
-            else {
-                let alias = catalog.resolve(model: event.model, provider: event.provider)
-                resolved = ResolvedModel(rate: APICost.rate(model: event.model, provider: event.provider, catalog: catalog),
-                                         alias: alias.map { "\(event.model) → \($0.displayName)" })
-                models[modelKey] = resolved
-            }
-            let day = startOfDay(event.date)
-            let key = DayKey(source: event.source, day: day)
-            var value = groups[key] ?? ActivityDay(day: day, source: event.source, tokens: 0, responses: 0)
-            value.tokens += event.tokens; value.responses += event.responseCount ?? 1
-            if let cost = event.reportedCost, cost.isFinite, cost >= 0 {
-                value.apiCost += cost; value.pricedTokens += event.tokens
-            } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let rate = resolved.rate,
-                      let cost = APICost.estimate(rate: rate, usage: usage) {
-                value.apiCost += cost; value.pricedTokens += event.tokens
-            } else { value.unpricedModels.insert(event.model) }
-            groups[key] = value
-            if event.date >= hoursSince {
-                // Offset from the day start; on DST change days this shifts by one hour.
-                let hour = min(23, max(0, Int(event.date.timeIntervalSince(day) / 3600)))
-                hourMasks[key, default: 0] |= 1 << hour
-            }
-        }
-        days = groups.values.sorted { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
-        activeHours = hourMasks.map { ActivityHours(day: $0.key.day, source: $0.key.source, hours: $0.value) }
-            .sorted { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
-        let resolved = Set(models.values.compactMap(\.alias)).sorted()
-        self.notices = notices + (resolved.isEmpty ? [] : [tr("Veröffentlichte Modell-Aliase: ") + resolved.joined(separator: "; ") + tr(". Auch ältere Nutzung wird zum aktuellen API-Gegenwert bewertet; die damals kostenlose Preview bleibt in gemeldeten Kosten unverändert.")])
-        self.warnings = warnings; observedAt = now
+        var builder = Builder(now: now, calendar: calendar)
+        for event in events { builder.add(event) }
+        self = builder.report(notices: notices, warnings: warnings)
+    }
+    init(days: [ActivityDay], activeHours: [ActivityHours]?, notices: [String], warnings: [String], observedAt: Date) {
+        self.days = days; self.activeHours = activeHours; self.notices = notices; self.warnings = warnings; self.observedAt = observedAt
     }
 }
