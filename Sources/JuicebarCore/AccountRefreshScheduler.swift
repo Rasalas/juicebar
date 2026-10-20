@@ -22,7 +22,8 @@ public final class AccountRefreshScheduler {
 
     public func enqueue(id: String, replacingPending: Bool = false, operation: @escaping (UUID) async -> Void) {
         if pending[id] != nil && !replacingPending { return }
-        guard running[id] == nil || generations[id] == nil || pending[id] != nil else { return }
+        // A cancelled job may still be finishing; its successor waits in the queue until it exits.
+        guard running[id] == nil || running[id]?.0 != generations[id] || pending[id] != nil else { return }
         let generation = generation(for: id)
         let alreadyQueued = pending[id] != nil
         pending[id] = Job(generation: generation, operation: { await operation(generation) })

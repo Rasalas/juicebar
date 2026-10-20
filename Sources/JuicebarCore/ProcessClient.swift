@@ -19,7 +19,8 @@ public final class ProcessClient {
         // Otherwise a CLI may inspect the app launcher's unrelated project.
         process.currentDirectoryURL = workingDirectory
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
+        // A custom install such as nvm's `#!/usr/bin/env node` needs its own bin directory.
+        env["PATH"] = executable.deletingLastPathComponent().path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
         environment.forEach { env[$0] = $1 }
         env["PWD"] = process.currentDirectoryURL!.path
         env.removeValue(forKey: "OLDPWD")
@@ -27,15 +28,21 @@ public final class ProcessClient {
         process.standardInput = input; process.standardOutput = output
         process.standardError = diagnosticOutput
         try process.run()
+        // A child that already exited must surface as EPIPE, not kill the app with SIGPIPE.
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
     }
     deinit { close() }
     public func close() {
         try? input.fileHandleForWriting.close()
         if process.isRunning {
-            process.terminate()
+            // Foundation makes the child a process group leader. The final group SIGKILL also stops
+            // helpers that ignore SIGTERM, such as MCP servers.
+            let group = process.processIdentifier
+            process.terminate(); killpg(group, SIGTERM)
             let end = Date().addingTimeInterval(0.4)
             while process.isRunning && Date() < end { Thread.sleep(forTimeInterval: 0.01) }
-            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            if process.isRunning { kill(group, SIGKILL) }
+            killpg(group, SIGKILL)
             process.waitUntilExit()
         }
         try? output.fileHandleForReading.close()

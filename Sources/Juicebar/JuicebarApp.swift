@@ -6,6 +6,8 @@ import JuicebarCore
 @main
 enum JuicebarEntry {
     @MainActor static func main() {
+        // Writing to an exited CLI or ssh must throw EPIPE instead of terminating the app.
+        signal(SIGPIPE, SIG_IGN)
         if CommandLine.arguments.contains("--verify-activity-persistence") {
             _ = NSApplication.shared
             do { try PreviewRenderer.verifyActivityPersistence() }
