@@ -1,10 +1,24 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.12 release, 20 October
+
+Version 0.1.12, build 14, includes the history retention fix in PR #12, streaming activity aggregation in #13 and consistent time labels in #10. Main CI passed for the combined source commit `cb0b341`. Local validation passed 170 Swift tests with seven opt-in benchmarks skipped, 13 Python collector tests, tray checks in English and German, the constrained-height and always-visible-scrollbar cases, and activity persistence in the signed bundle.
+
+The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. Both checksum entries passed. All four files downloaded from the GitHub draft matched the local originals. The Sparkle ZIP signature verified against the bundled public key; changing one byte caused rejection. Repeated archive signing completed without interaction in 0.13 and 0.08 seconds. The published stable feed serves build 14.
+
+Before publication, the installed signed 0.1.10 was offered this exact candidate through a temporary loopback feed. A missing ZIP produced a download error and left 0.1.10 installed. Dismissing the offer with Remind Me Later allowed it to be offered again. Sparkle then downloaded, installed and relaunched 0.1.12, build 14. Its installed signature, notarization ticket and Gatekeeper checks passed. The test feed override was removed, and the app was restarted against its normal feed.
+
+An online SQLite backup taken before the update held 12,000 quota observations. While 0.1.10 remained open during preparation, its existing global row limit removed the oldest six rows; these were restored from the backup after the update. Every meaningful observation in the backup is present after the update: quota changes, period boundaries and all observations younger than a day. Replaying the new retention code against a separate untouched copy of that backup also preserved all such observations across four accounts. Four account/settings/SSH/path preference groups remained byte-for-byte identical. Both imported usage caches remain present with the same 206 activity-day and 22 local-usage-day entries. Repeated unchanged older quota observations were thinned as intended. Codex and both Claude accounts returned fresh results; OpenCode Go still reports the pre-existing expired login.
+
+The suspected import slowdown did not reproduce in optimized builds. Alternating runs of `testOpenCodeImportPropagatesRowLimitWarning` took 1.16/1.07 seconds before the three merges and 1.03/0.99 seconds after them. The debug suite completed in about ten seconds after host load fell; earlier 253-second timings under heavy host load are not evidence of a release regression.
+
+Version 0.1.11 was withdrawn from the stable feed before this release because its 1,200-row per-account quota history was too short for weekly-target learning. Direct updates from 0.1.10 to 0.1.12 bypass that cap. English and German native screenshots were refreshed. The website loaded all images without horizontal overflow at 1280 and 390 CSS pixels, and both download buttons target the public 0.1.12 DMG. Live VoiceOver and installation on a second Mac remain unverified.
+
 ## Juicebars 0.1.11 release, 20 October
 
 Version 0.1.11, build 13, contains PRs [#5](https://github.com/Rasalas/juicebar/pull/5) to [#9](https://github.com/Rasalas/juicebar/pull/9): reliability fixes, lower idle cost, incremental activity imports, the UI/UX review fixes and the weekly target. Each merge into a branch with conflicts was resolved and tested locally before merging; the final merged tree ran 151 Swift tests (6 benchmarks skipped) and passed tray layout in both languages. Main CI passed for every merge.
 
-The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. Both checksum entries passed, all four downloaded draft assets matched the local originals, and the public ZIP matched after publishing. The Sparkle archive verified against the public key, while changing one byte caused rejection. Tray layout and activity persistence checks passed in the signed bundle. The stable feed serves build 13.
+The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. Both checksum entries passed, all four downloaded draft assets matched the local originals, and the public ZIP matched after publishing. The Sparkle archive verified against the public key, while changing one byte caused rejection. Tray layout and activity persistence checks passed in the signed bundle. The stable feed initially served build 13; this release was later withdrawn and superseded by 0.1.12.
 
 No old-to-new Sparkle update or failed-download test was run before publishing; the installed 0.1.10 is updated through the public feed instead. English and German screenshots were refreshed with a pinned region per language. Live VoiceOver and installation on a second Mac remain unverified.
 
