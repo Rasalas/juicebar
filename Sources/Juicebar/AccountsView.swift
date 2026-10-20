@@ -5,6 +5,7 @@ struct AccountsView: View {
     let store: AppStore
     @State private var editing: AccountConfiguration?
     @State private var removing: AccountConfiguration?
+    private let navigation = DashboardNavigation.shared
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
@@ -19,12 +20,13 @@ struct AccountsView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(account.displayName).font(.headline)
                             Text(account.provider.name + (account.enabled ? "" : tr(" · Pausiert"))).font(.caption).foregroundStyle(.secondary)
-                            if let failure = store.failures[account.id] { Text(failure).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+                            if let failure = store.failures[account.id] { Text(failure).font(.caption).foregroundStyle(Palette.warning).fixedSize(horizontal: false, vertical: true) }
                             else if let snapshot = store.snapshots[account.id] { Text("\(snapshot.source) · \(updatedText(snapshot.observedAt, now: store.now))").font(.caption).foregroundStyle(.secondary) }
                         }
                         Spacer()
                         Button(tr("Bearbeiten")) { editing = account }
                         Menu { Button(tr("Konto entfernen"), role: .destructive) { removing = account } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+                            .accessibilityLabel(tr("Weitere Aktionen für {0}", account.displayName)).help(tr("Weitere Aktionen"))
                     }
                 }
             }
@@ -36,6 +38,11 @@ struct AccountsView: View {
                 }
             }
         }.sheet(item: $editing) { AccountEditor(store: store, configuration: $0) }
+            .onChange(of: navigation.editAccountID, initial: true) { _, id in
+                guard let id else { return }
+                navigation.editAccountID = nil
+                editing = store.accounts.first { $0.id == id }
+            }
             .alert(tr("Konto entfernen?"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
                 Button(tr("Abbrechen"), role: .cancel) { removing = nil }
                 Button(tr("Entfernen"), role: .destructive) { if let account = removing { store.removeAccount(account) }; removing = nil }
@@ -50,6 +57,7 @@ struct AccountEditor: View {
     @State private var secret = ""
     @State private var budget = ""
     @State private var error: String?
+    @State private var hasStoredKey = false
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             Text(store.accounts.contains(where: { $0.id == configuration.id }) ? tr("Konto bearbeiten") : tr("Konto hinzufügen")).font(.title2.bold())
@@ -75,7 +83,7 @@ struct AccountEditor: View {
                         }
                         Text(tr("Ein hier gespeicherter Key hat Vorrang. Ohne eigenen Key liest Juicebars den Eintrag opencode-go auf diesem Mac. Ein Browser-Login allein ändert diesen Key nicht.")).font(.caption).foregroundStyle(.secondary)
                     }
-                    SecureField(tr("API-Key"), text: $secret, prompt: Text(tr("Leer lassen, um gespeicherten Key zu behalten")))
+                    SecureField(tr("API-Key"), text: $secret, prompt: Text(hasStoredKey ? tr("Leer lassen, um gespeicherten Key zu behalten") : tr("Key einfügen")))
                     Text(configuration.provider.keyHelp).font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text(tr("Zen-Aktivität ist über die lokale OpenCode-Datenbank verfügbar. Ein Guthabenabruf wird derzeit nicht angeboten.")).font(.callout).foregroundStyle(.secondary)
@@ -99,7 +107,10 @@ struct AccountEditor: View {
                     catch { self.error = error.localizedDescription }
                 }.buttonStyle(JuiceButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
             }
-        }.padding(28).frame(width: 600).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear { budget = configuration.monthlyBudget.map { String($0) } ?? "" }
+        }.padding(28).frame(width: 600).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear {
+            budget = configuration.monthlyBudget.map { String($0) } ?? ""
+            hasStoredKey = !store.isDemo && store.accounts.contains { $0.id == configuration.id } && SecretStore.contains(account: configuration.id)
+        }
     }
 }
 
@@ -125,7 +136,15 @@ struct OpenCodeSetupHelp: View {
 struct CLISetupHelp: View {
     let configuration: AccountConfiguration
     @State private var copied = false
-    private var command: String { configuration.provider == .codex ? "codex login" : "claude auth login" }
+    static func loginCommand(for provider: ProviderKind) -> String? {
+        switch provider { case .codex: return "codex login"; case .claude: return "claude auth login"; default: return nil }
+    }
+    private var command: String { Self.loginCommand(for: configuration.provider) ?? "" }
+    /// A first run only adds the CLIs installed on this Mac, so nobody starts with errors for tools they don't use.
+    static func detectedDefaultAccounts(isInstalled: (String) -> Bool = { (try? ProcessClient.executable($0)) != nil }) -> [AccountConfiguration] {
+        [(ProviderKind.codex, "codex"), (.claude, "claude")].filter { isInstalled($0.1) }
+            .map { AccountConfiguration(id: "default-\($0.1)", provider: $0.0) }
+    }
     private var installed: Bool { (try? ProcessClient.executable(configuration.provider == .codex ? "codex" : "claude", custom: configuration.executablePath)) != nil }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -78,8 +78,7 @@ final class AppStore {
                 return unreadable
             }
         }
-        let defaultAccounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)]
-        accounts = demo ? DemoData.accounts : load([AccountConfiguration].self, key: "accounts", missing: defaultAccounts, unreadable: [])
+        accounts = demo ? DemoData.accounts : load([AccountConfiguration].self, key: "accounts", missing: CLISetupHelp.detectedDefaultAccounts(), unreadable: [])
         settings = load(MonitorSettings.self, key: "settings", missing: MonitorSettings(), unreadable: MonitorSettings())
         manualResets = load([ManualReset].self, key: "manual-resets", missing: [], unreadable: [])
         localDatabasePath = load(String.self, key: "opencode-path", missing: "", unreadable: "")

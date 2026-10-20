@@ -71,4 +71,9 @@ final class ModelCatalogTests: XCTestCase {
         func placeholders(_ s: String) -> [String] { regex.matches(in: s, range: NSRange(s.startIndex..., in: s)).map { String(s[Range($0.range, in: s)!]) }.sorted() }
         for (key, translated) in Localization.english { XCTAssertEqual(placeholders(key), placeholders(translated), key) }
     }
+    func testFormattingLocaleCombinesUILanguageWithUserRegion() {
+        XCTAssertEqual(Localization.locale.language.languageCode?.identifier, Localization.language)
+        XCTAssertEqual(Localization.locale.region, Locale.current.region)
+        XCTAssertEqual(Localization.locale.hourCycle, Locale.current.hourCycle)
+    }
 }

@@ -29,9 +29,15 @@ final class AppStorePersistenceTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-empty-store-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = AppStore(directory: directory)
-        XCTAssertEqual(store.accounts.map(\.id), ["default-codex", "default-claude"])
+        XCTAssertEqual(store.accounts.map(\.id), CLISetupHelp.detectedDefaultAccounts().map(\.id))
         XCTAssertFalse(store.hasRecoverableStorageError)
         XCTAssertNil(store.storageError)
+    }
+
+    func testFirstRunOnlyAddsInstalledCLIs() {
+        XCTAssertEqual(CLISetupHelp.detectedDefaultAccounts { _ in true }.map(\.id), ["default-codex", "default-claude"])
+        XCTAssertEqual(CLISetupHelp.detectedDefaultAccounts { $0 == "claude" }.map(\.id), ["default-claude"])
+        XCTAssertTrue(CLISetupHelp.detectedDefaultAccounts { _ in false }.isEmpty)
     }
 
     func testClockTickOnlyPublishesNewMinutes() {
@@ -52,6 +58,14 @@ final class AppStorePersistenceTests: XCTestCase {
         var next = try XCTUnwrap(store.history[id]?.last); next.observedAt = next.observedAt.addingTimeInterval(60)
         store.history[id]?.append(next)
         XCTAssertEqual(store.quotaHistory(for: id).count, count + 1)
+    }
+
+    func testRelativeTimeOmitsZeroUnits() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(2 * 3600), now: now), tr("in {0} Std.", 2))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(2 * 3600 + 300), now: now), tr("in {0} Std. {1} Min.", 2, 5))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400), now: now), tr("in {0} T.", 3))
+        XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400 + 7200), now: now), tr("in {0} T. {1} Std.", 3, 2))
     }
 
     func testOutdatedCachesAreDiscardedWithoutErrorAndKeepOpenCodePath() async throws {

@@ -125,7 +125,7 @@ public enum WarningEngine {
                       let expiry = benefit.expiresAt, expiry > now else { continue }
                 let hours = expiry.timeIntervalSince(now) / 3600
                 guard let stage = settings.expiryHours.filter({ $0 > 0 && hours <= $0 }).min() else { continue }
-                let when = expiry.formatted(.dateTime.day().month().hour().minute())
+                let when = expiry.formatted(.dateTime.day().month().hour().minute().locale(Localization.locale))
                 append("benefit|\(benefit.id)|\(expiry.timeIntervalSince1970)|\(stage)", .expiry,
                        tr("{0} · {1}: läuft am {2} ab.{3}", benefit.title, benefit.scope, when, benefit.isManual ? tr(" Manuell eingetragen.") : ""), manual: benefit.isManual)
             }

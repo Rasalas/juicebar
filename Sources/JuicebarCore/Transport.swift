@@ -19,6 +19,15 @@ public enum SecretStore {
         guard SecItemCopyMatching(query as CFDictionary, &value) == errSecSuccess, let data = value as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
+    /// Checks attributes only, so no item data and no access prompt is involved.
+    public static func contains(account: String) -> Bool {
+        SecKeychainSetUserInteractionAllowed(false)
+        let context = LAContext(); context.interactionNotAllowed = true
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecAttrAccount as String: account, kSecReturnAttributes as String: true,
+                                    kSecUseAuthenticationContext as String: context]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
     public static func save(_ secret: String, account: String) throws {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
         let attributes: [String: Any] = [kSecValueData as String: Data(secret.utf8)]

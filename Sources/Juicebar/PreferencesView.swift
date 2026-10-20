@@ -14,8 +14,16 @@ struct PreferencesView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(tr("Darstellung")).font(.headline)
                     JuiceMenuPicker(title: tr("Sprache"), selection: $appLanguage, options: [(tr("Systemsprache"), "system"), ("Deutsch", "de"), ("English", "en")])
-                    Text(tr("Sprachänderungen gelten nach dem nächsten Start.")).font(.caption).foregroundStyle(.secondary)
-                    JuiceSegments(title: tr("Balken & Zahlen"), selection: Binding(get: { store.settings.displayMode }, set: { store.settings.quotaDisplay = $0 }), options: QuotaDisplay.allCases.map { ($0.label, $0) })
+                    if appLanguage != Localization.selectionAtLaunch && Localization.resolve(appLanguage) != Localization.language {
+                        HStack {
+                            Text(tr("Die neue Sprache gilt nach einem Neustart.")).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button(tr("Jetzt neu starten")) { relaunch() }.buttonStyle(JuiceButtonStyle(prominent: true))
+                                .disabled(store.isDemo || !Bundle.main.bundlePath.hasSuffix(".app"))
+                        }
+                    }
+                    Divider()
+                    JuiceSegments(title: tr("Balken & Zahlen"), selection: Binding(get: { store.settings.displayMode }, set: { store.settings.quotaDisplay = $0 }), options: QuotaDisplay.allCases.map { ($0.label, $0) }, showsTitle: true)
                     Text(tr("Standard: Der Vorrat läuft leer. Balken und Menüleistenlinien lassen sich alternativ auf verbraucht umstellen.")).font(.caption).foregroundStyle(.secondary)
                     Divider()
                     Text(tr("Menüleiste")).font(.headline)
@@ -49,7 +57,7 @@ struct PreferencesView: View {
                             JuiceMenuPicker(title: tr("Kontingent"), selection: Binding(get: { store.settings.selectedTrayWindow ?? "" }, set: { store.settings.selectedTrayWindow = $0.isEmpty ? nil : $0 }), options: [(tr("Automatisch"), "")] + QuotaOrder.visibleWindows(snapshot.windows, provider: store.accounts.first { $0.id == id }?.provider ?? .codex).map { ($0.title, $0.id) })
                         }
                     }
-                    Text(tr("Eine farbige Linie pro Limit. Reihenfolge: Codex, Claude, OpenCode, weitere Konten. Je Konto: Kurzlimit, Woche, Monat, zusätzliche Modelllimits. Größere Abstände trennen Konten. Gestrichelt bedeutet unbekannt oder Reset erreicht; gedimmt mit Punkt bedeutet letzter Stand. Details erscheinen beim Klick.")).font(.caption).foregroundStyle(.secondary)
+                    MenuBarLegend()
                 }
             }
             Panel {
@@ -61,7 +69,7 @@ struct PreferencesView: View {
                         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; loginError = nil }
                         catch { loginError = error.localizedDescription }
                     }
-                    if let loginError { Text(loginError).font(.caption).foregroundStyle(.orange) }
+                    if let loginError { Text(loginError).font(.caption).foregroundStyle(Palette.warning) }
                     Toggle(tr("Automatische Abfragen pausieren"), isOn: $store.isPaused)
                 }
             }
@@ -73,11 +81,55 @@ struct PreferencesView: View {
                         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Juicebar")
                         NSWorkspace.shared.open(url)
                     }.disabled(store.isDemo)
-                    Divider()
-                    HStack { Text("macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button(tr("Beenden")) { store.stop(); NSApp.terminate(nil) } }
                 }
             }
             AboutView()
         }.onChange(of: store.settings) { _, _ in store.persistSettings() }
+    }
+    private func relaunch() {
+        // Wait until this instance has exited so two menu bar items never overlap.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$2\"",
+                             "sh", String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundlePath]
+        do { try process.run(); store.stop(); NSApp.terminate(nil) } catch { store.storageError = error.localizedDescription }
+    }
+}
+
+/// A drawn key for the menu bar lines, matching `MenuLimitImage`.
+private struct MenuBarLegend: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(tr("Eine Linie pro Limit, nach Konto gruppiert. Ein Klick auf das Symbol zeigt Details."))
+                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 18) {
+                item(LegendLine(fill: 0.6), tr("Aktueller Stand"))
+                item(LegendLine(fill: 0.6, stale: true), tr("Letzter Stand"))
+                item(LegendLine(fill: nil), tr("Unbekannt"))
+                item(LegendLine(fill: 0.05, alert: true), tr("Limit erreicht oder bald erreicht"))
+            }.font(.caption).foregroundStyle(.secondary)
+        }.accessibilityElement(children: .combine)
+    }
+    private func item(_ line: LegendLine, _ label: String) -> some View {
+        HStack(spacing: 6) { line; Text(label) }
+    }
+}
+
+private struct LegendLine: View {
+    let fill: Double?
+    var stale = false
+    var alert = false
+    var body: some View {
+        let color = Palette.provider(.codex), shape = RoundedRectangle(cornerRadius: 2)
+        ZStack(alignment: .bottom) {
+            if let fill {
+                shape.fill(color.opacity(0.22))
+                shape.fill(color.opacity(stale ? 0.45 : 1)).frame(height: 18 * fill)
+            } else { shape.strokeBorder(color.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [2, 2])) }
+        }
+        .frame(width: 4, height: 18)
+        .overlay(alignment: .top) { if stale { Circle().fill(.primary).frame(width: 2, height: 2) } }
+        .overlay { if alert { RoundedRectangle(cornerRadius: 2.75).stroke(Palette.warning, lineWidth: 1.5).padding(-0.75) } }
+        .padding(.vertical, 2).accessibilityHidden(true)
     }
 }

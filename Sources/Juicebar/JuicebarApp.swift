@@ -79,7 +79,13 @@ enum JuicebarEntry {
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         AppStore.shared.start()
-        DashboardWindow.shared.show(store: AppStore.shared)
+        // A login launch stays in the menu bar; a first run or an explicit open shows the dashboard.
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let loginLaunch = event?.eventID == kAEOpenApplication
+            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+        let firstRun = !UserDefaults.standard.bool(forKey: "dashboardShownOnce")
+        if firstRun || !loginLaunch { DashboardWindow.shared.show(store: AppStore.shared) }
+        if !AppStore.shared.isDemo { UserDefaults.standard.set(true, forKey: "dashboardShownOnce") }
         AppUpdates.shared.start()
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
@@ -98,23 +104,40 @@ struct JuicebarApplication: App {
             TrayLabel(store: store)
         }
         .menuBarExtraStyle(.window)
-
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button(tr("Einstellungen …")) { DashboardWindow.shared.show(store: store, page: .settings) }.keyboardShortcut(",")
+            }
+        }
     }
 }
 
 struct TrayLabel: View {
+    // Read only so a new image is drawn when the appearance changes; colours resolve at draw time.
     @Environment(\.colorScheme) private var colorScheme
     let store: AppStore
-    private var detail: String {
-        let values = store.trayMeters.map { meter in
+    private func statuses(_ meters: [TrayMeter]) -> [QuotaStatus] {
+        meters.map { meter in
+            guard let window = meter.window, !meter.expired, let snapshot = store.snapshots[meter.account.id] else { return .unavailable }
+            return QuotaStatus.assess(window: window, snapshot: snapshot, history: store.history[meter.account.id] ?? [],
+                                      now: store.now, hasFailure: store.failures[meter.account.id] != nil)
+        }
+    }
+    private func detail(_ meters: [TrayMeter], _ statuses: [QuotaStatus]) -> String {
+        let values = zip(meters, statuses).map { meter, status in
             guard let window = meter.window else { return tr("{0}: kein aktuelles Limit verfügbar", meter.account.displayName) }
             if meter.expired { return tr("{0} · {1}: Reset erreicht, neuer Stand ausstehend", meter.account.displayName, window.title) }
+            let alert = status.title(now: store.now)
             return tr("{0} · {1}: {2} % {3}{4}", meter.account.displayName, window.title, Int(store.settings.displayMode.value(used: window.usedPercent).rounded()), store.settings.displayMode.label.lowercased(), meter.fresh ? "" : tr(" · letzter Stand"))
+                + (alert.isEmpty ? "" : " · \(alert)")
         }
-        return (values.isEmpty ? tr("Juicebars · Keine Limits für die Menüleiste ausgewählt") : values.joined(separator: "\n")) + (store.expiringCount > 0 ? tr("\nReset-Frist läuft bald ab") : "")
+        return (values.isEmpty ? tr("Juicebars · Keine Limits für die Menüleiste ausgewählt") : values.joined(separator: "\n")) + (store.expiringCount > 0 ? tr("\nReset-Gutschrift läuft bald ab") : "")
     }
     var body: some View {
-        Image(nsImage: MenuLimitImage.make(meters: store.trayMeters, mode: store.settings.displayMode, dark: colorScheme == .dark, expiring: store.expiringCount > 0))
+        let meters = store.trayMeters, statuses = statuses(meters), detail = detail(meters, statuses)
+        let _ = colorScheme
+        Image(nsImage: MenuLimitImage.make(meters: meters, statuses: statuses, mode: store.settings.displayMode,
+                                           expiring: store.expiringCount > 0, showsValue: store.settings.menuStyle == .focused))
             .help(detail).accessibilityLabel(detail)
     }
 }
@@ -122,7 +145,9 @@ struct TrayLabel: View {
 @MainActor final class DashboardWindow: NSObject, NSWindowDelegate {
     static let shared = DashboardWindow()
     private var window: NSWindow?
-    func show(store: AppStore) {
+    func show(store: AppStore, page: Page? = nil, editing accountID: String? = nil) {
+        if let page { DashboardNavigation.shared.page = page }
+        DashboardNavigation.shared.editAccountID = accountID
         NSApp.setActivationPolicy(.regular)
         let window = self.window ?? {
             let value = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)

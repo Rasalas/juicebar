@@ -2,20 +2,30 @@ import SwiftUI
 import JuicebarCore
 
 enum Palette {
-    private static func adaptive(_ light: NSColor, _ dark: NSColor) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light })
+    private static func dynamic(_ light: NSColor, _ dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light }
     }
-    static let accent = adaptive(NSColor(red: 0.69, green: 0.29, blue: 0.07, alpha: 1), NSColor(red: 1, green: 0.66, blue: 0.36, alpha: 1))
-    static let green = adaptive(NSColor(red: 0.16, green: 0.48, blue: 0.36, alpha: 1), NSColor(red: 0.4, green: 0.78, blue: 0.62, alpha: 1))
-    static let sidebar = adaptive(NSColor(red: 0.95, green: 0.94, blue: 0.92, alpha: 1), NSColor(red: 0.14, green: 0.15, blue: 0.15, alpha: 1))
-    static func provider(_ kind: ProviderKind) -> Color {
+    private static func adaptive(_ light: NSColor, _ dark: NSColor) -> Color { Color(nsColor: dynamic(light, dark)) }
+    private static func rgb(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> NSColor { NSColor(red: red, green: green, blue: blue, alpha: 1) }
+    static let accent = adaptive(rgb(0.69, 0.29, 0.07), rgb(1, 0.66, 0.36))
+    // Amber, not orange: Claude's brand colour must never read as a warning.
+    static let warningColor = dynamic(rgb(0.62, 0.42, 0), rgb(1, 0.8, 0.25))
+    static let criticalColor = NSColor.systemRed
+    static let warning = Color(nsColor: warningColor)
+    static let critical = Color(nsColor: criticalColor)
+    static let green = adaptive(rgb(0.16, 0.48, 0.36), rgb(0.4, 0.78, 0.62))
+    static let sidebar = adaptive(rgb(0.95, 0.94, 0.92), rgb(0.14, 0.15, 0.15))
+    static func providerColor(_ kind: ProviderKind) -> NSColor {
         switch kind {
-        case .codex: return adaptive(NSColor(red: 0.16, green: 0.39, blue: 0.78, alpha: 1), NSColor(red: 0.42, green: 0.66, blue: 1, alpha: 1))
-        case .claude: return adaptive(NSColor(red: 0.73, green: 0.38, blue: 0.26, alpha: 1), NSColor(red: 0.93, green: 0.62, blue: 0.45, alpha: 1))
-        case .opencodeGo, .opencodeZen: return adaptive(NSColor(white: 0.38, alpha: 1), NSColor(white: 0.75, alpha: 1))
-        default: return Color(red: 0.52, green: 0.42, blue: 0.27)
+        case .codex: return dynamic(rgb(0.16, 0.39, 0.78), rgb(0.42, 0.66, 1))
+        case .claude: return dynamic(rgb(0.73, 0.38, 0.26), rgb(0.93, 0.62, 0.45))
+        case .opencodeGo, .opencodeZen: return dynamic(NSColor(white: 0.38, alpha: 1), NSColor(white: 0.75, alpha: 1))
+        case .openaiAPI: return dynamic(rgb(0.05, 0.5, 0.45), rgb(0.35, 0.8, 0.72))
+        case .anthropicAPI: return dynamic(rgb(0.45, 0.33, 0.72), rgb(0.7, 0.6, 0.95))
+        case .openrouter: return dynamic(rgb(0.66, 0.24, 0.5), rgb(0.93, 0.55, 0.78))
         }
     }
+    static func provider(_ kind: ProviderKind) -> Color { Color(nsColor: providerColor(kind)) }
 }
 
 struct ProviderMark: View {
@@ -69,11 +79,11 @@ struct QuotaBar: View {
         Button { showingDetails.toggle() } label: {
             VStack(alignment: .leading, spacing: compact ? 4 : 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(tr(window.title)).font(.system(size: compact ? 12 : 13, weight: .medium))
+                    Text(tr(window.title)).font((compact ? Font.callout : .body).weight(.medium))
                     Spacer()
                     Text(expired ? "—" : "\(Int(displayed.rounded()))")
                         .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
-                    if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(.system(size: compact ? 10 : 11)).foregroundStyle(.secondary) }
+                    if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(compact ? .caption : .subheadline).foregroundStyle(.secondary) }
                 }
                 GeometryReader { proxy in
                     ZStack(alignment: .topLeading) {
@@ -108,14 +118,14 @@ struct QuotaBar: View {
                         resetLabel
                         statusLabel
                     }
-                }.font(.system(size: 11)).foregroundStyle(.secondary)
+                }.font(.subheadline)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .focused($detailsFocused)
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(detailsFocused ? Palette.accent : .clear, lineWidth: 2).padding(-4))
-        .popover(isPresented: $showingDetails, arrowEdge: .bottom) { details.font(.system(size: 11)).padding(12) }
+        .popover(isPresented: $showingDetails, arrowEdge: .bottom) { details.font(.subheadline).padding(12) }
         .help(detailText)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : ""))
@@ -124,9 +134,10 @@ struct QuotaBar: View {
     private var resetLabel: some View {
         HStack(spacing: 4) {
             if let reset = window.resetsAt {
-                Image(systemName: "arrow.clockwise").font(.system(size: 9))
+                Image(systemName: "arrow.clockwise").font(.caption2).foregroundStyle(.secondary)
                 Text(expired ? tr("Reset erreicht · warte auf neuen Stand") : tr("Reset {0}", relativeTime(reset, now: now)))
-            } else { Text(tr("Resetzeit nicht verfügbar")) }
+                    .foregroundStyle(expired ? .secondary : .primary)
+            } else { Text(tr("Resetzeit nicht verfügbar")).foregroundStyle(.secondary) }
         }
     }
     @ViewBuilder private var statusLabel: some View {
@@ -136,8 +147,8 @@ struct QuotaBar: View {
                 else { Image(systemName: "exclamationmark.triangle") }
                 Text(statusTitle)
             }
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(status == .exhausted ? Color.red : Palette.accent)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(status == .exhausted ? Palette.critical : Palette.warning)
         }
     }
     private var detailRows: [(String, String)] {
@@ -183,27 +194,34 @@ struct QuotaBar: View {
             Text(value).monospacedDigit()
         }.frame(width: 260)
     }
-    private var statusTitle: String {
-        guard !expired else { return "" }
-        switch status {
-        case .unavailable: return ""
-        case .exhausted: return tr("Limit erreicht")
-        case .projectedPaceCrossing(let date):
-            return tr("Soll in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
-        case .projectedExhaustion(let date):
-            return tr("Limit in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
-        }
-    }
+    private var statusTitle: String { expired ? "" : status.title(now: now) }
     private var statusHelp: String {
         switch status {
         case .unavailable: return ""
         case .projectedPaceCrossing:
             return tr("Bei deinem zuletzt gemessenen Tempo erreichst du voraussichtlich den Sollstand. Die Bewegung der Raute ist eingerechnet. Danach verbrauchst du mehr als gleichmäßig vorgesehen, das Kontingent ist aber noch nicht leer.")
         case .exhausted:
-            return tr("Das gemeldete Kontingent ist ausgeschöpft. Warte auf den Reset oder nutze einen verfügbaren Reset.")
+            return tr("Das gemeldete Kontingent ist ausgeschöpft. Warte auf den Reset oder löse eine verfügbare Reset-Gutschrift ein.")
         case .projectedExhaustion:
             return tr("Bei deinem zuletzt gemessenen Tempo ist das Kontingent voraussichtlich vor dem Reset aufgebraucht. Die Schätzung ändert sich mit deiner Nutzung.")
         }
+    }
+}
+
+extension QuotaStatus {
+    /// Shared by the quota bars and the menu bar's VoiceOver summary.
+    func title(now: Date) -> String {
+        switch self {
+        case .unavailable: return ""
+        case .exhausted: return tr("Limit erreicht")
+        case .projectedPaceCrossing(let date):
+            return tr("Über Soll in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
+        case .projectedExhaustion(let date):
+            return tr("Limit in {0} Min.", max(1, Int((date.timeIntervalSince(now) / 60).rounded())))
+        }
+    }
+    var isAlert: Bool {
+        switch self { case .exhausted, .projectedExhaustion: return true; default: return false }
     }
 }
 
@@ -225,8 +243,14 @@ func relativeTime(_ date: Date, now: Date = Date()) -> String {
     let delta = date.timeIntervalSince(now)
     if delta <= 0 { return tr("jetzt") }
     if delta < 3600 { return tr("in {0} Min.", max(1, Int(delta / 60))) }
-    if delta < 86400 { return tr("in {0} Std. {1} Min.", Int(delta / 3600), Int(delta.truncatingRemainder(dividingBy: 3600) / 60)) }
-    if delta < 7 * 86400 { return tr("in {0} T. {1} Std.", Int(delta / 86400), Int(delta.truncatingRemainder(dividingBy: 86400) / 3600)) }
+    if delta < 86400 {
+        let hours = Int(delta / 3600), minutes = Int(delta.truncatingRemainder(dividingBy: 3600) / 60)
+        return minutes == 0 ? tr("in {0} Std.", hours) : tr("in {0} Std. {1} Min.", hours, minutes)
+    }
+    if delta < 7 * 86400 {
+        let days = Int(delta / 86400), hours = Int(delta.truncatingRemainder(dividingBy: 86400) / 3600)
+        return hours == 0 ? tr("in {0} T.", days) : tr("in {0} T. {1} Std.", days, hours)
+    }
     return tr("in {0} Tagen", Int(delta / 86400))
 }
 
@@ -236,6 +260,54 @@ func updatedText(_ date: Date?, now: Date) -> String {
     if minutes < 1 { return tr("Gerade aktualisiert") }
     if minutes < 60 { return tr("Stand vor {0} Min.", minutes) }
     return tr("Stand {0}", date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)))
+}
+
+func moneyText(_ metric: MoneyMetric) -> String {
+    metric.currency == "Credits" ? "\(metric.amount.formatted(.number.precision(.fractionLength(0)).locale(Localization.locale))) Credits"
+        : metric.amount.formatted(.currency(code: metric.currency).locale(Localization.locale))
+}
+
+/// A stale value shows its age; "last value" alone does not say whether it is minutes or days old.
+func lastValueText(_ date: Date, now: Date) -> String {
+    now.timeIntervalSince(date) < 60 ? tr("Letzter Stand") : updatedText(date, now: now)
+}
+
+/// Keeps a refresh error next to its account and offers the next step.
+struct AccountFailureView: View {
+    let store: AppStore
+    let account: AccountConfiguration
+    let failure: String
+    @State private var copied = false
+    private var loginCommand: String? {
+        failure == ProviderFailure.authentication.localizedDescription ? CLISetupHelp.loginCommand(for: account.provider) : nil
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warning).accessibilityHidden(true)
+                Text(failure).fixedSize(horizontal: false, vertical: true)
+            }
+            if let loginCommand {
+                Text(tr("Im Terminal anmelden: {0}", loginCommand)).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            HStack(spacing: 6) {
+                if let loginCommand {
+                    Button(copied ? tr("Kopiert") : tr("Kopieren")) {
+                        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(loginCommand, forType: .string); copied = true
+                    }.accessibilityLabel(tr("Befehl kopieren"))
+                }
+                Button(tr("Einrichten")) { DashboardWindow.shared.show(store: store, page: .accounts, editing: account.id) }
+                Button(tr("Deaktivieren")) {
+                    var disabled = account; disabled.enabled = false
+                    do { try store.saveAccount(disabled, secret: "") } catch { store.storageError = error.localizedDescription }
+                }.help(tr("Verbrauch für dieses Konto nicht mehr abrufen"))
+            }.buttonStyle(JuiceButtonStyle())
+        }
+        .font(.subheadline)
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.warning.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityElement(children: .contain)
+    }
 }
 
 struct EmptyState: View {
@@ -278,8 +350,8 @@ struct ResetAvailability: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             let count = snapshot.benefitCount ?? 0
-            Label("\(count) \(count == 1 ? tr("Reset verfügbar") : tr("Resets verfügbar"))", systemImage: "arrow.counterclockwise")
-                .foregroundStyle(Palette.accent)
+            Label(count == 1 ? tr("1 Reset-Gutschrift verfügbar") : tr("{0} Reset-Gutschriften verfügbar", count), systemImage: "arrow.counterclockwise")
+                .foregroundStyle(Palette.warning)
             if let expiry {
                 Text(expiry <= now ? tr("Ablauf erreicht · neuer Stand ausstehend") :
                      "\(count == 1 ? tr("Läuft") : tr("Nächster Ablauf")) \(relativeTime(expiry, now: now))\(count == 1 ? tr(" ab") : "") · \(expiry.formatted(.dateTime.day().month(.abbreviated).hour().minute().locale(Localization.locale)))")
@@ -288,6 +360,6 @@ struct ResetAvailability: View {
             } else {
                 Text(tr("Ablaufdatum nicht verfügbar")).foregroundStyle(.secondary)
             }
-        }.font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+        }.font(.subheadline).fixedSize(horizontal: false, vertical: true)
     }
 }

@@ -31,49 +31,56 @@ struct TrayView: View {
                 Spacer()
                 if store.isRefreshing { ProgressView().controlSize(.small) }
                 Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 14, height: 14) }
-                    .disabled(store.isPaused || store.isDemo).help(tr("Aktualisieren"))
+                    .disabled(store.isPaused || store.isDemo).help(tr("Aktualisieren")).accessibilityLabel(tr("Aktualisieren"))
                 Menu {
                     Button(store.isPaused ? tr("Abfragen fortsetzen") : tr("Abfragen pausieren")) { store.isPaused.toggle(); if !store.isPaused { store.refresh(force: true) } }
                     Button(tr("Warnungen 1 Stunde stummschalten")) { store.snooze() }
                     Divider()
-                    Button(tr("Juicebars beenden")) { store.stop(); NSApp.terminate(nil) }
+                    Button(tr("Einstellungen …")) { DashboardWindow.shared.show(store: store, page: .settings) }.keyboardShortcut(",")
+                    Button(tr("Juicebars beenden")) { store.stop(); NSApp.terminate(nil) }.keyboardShortcut("q")
                 } label: { Image(systemName: "ellipsis").frame(width: 14, height: 14) }
                     .menuStyle(.button).menuIndicator(.hidden).buttonStyle(JuiceButtonStyle()).fixedSize()
-                    .help(tr("Weitere Aktionen"))
+                    .help(tr("Weitere Aktionen")).accessibilityLabel(tr("Weitere Aktionen"))
             }
             accountSections(rows).hidden().accessibilityHidden(true)
             ViewThatFits(in: .vertical) {
                 accountSections(rows)
-                ScrollView { accountSections(rows) }
+                ScrollView { accountSections(rows).padding(.bottom, 18) }
                     .scrollIndicators(.never)
                     .scrollBounceBehavior(.basedOnSize)
+                    // Indicators stay hidden, so a fade shows that more accounts follow.
+                    .mask(VStack(spacing: 0) { Color.black; LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 28) })
             }
             VStack(alignment: .leading, spacing: 10) {
                 if expiring > 0 {
-                    Label(tr("{0} {1} in den nächsten 3 Tagen", expiring, expiring == 1 ? tr("Reset-Frist") : tr("Reset-Fristen")), systemImage: "hourglass")
-                        .font(.caption).foregroundStyle(Palette.accent)
+                    Label(expiring == 1 ? tr("1 Reset-Gutschrift läuft in den nächsten 3 Tagen ab") : tr("{0} Reset-Gutschriften laufen in den nächsten 3 Tagen ab", expiring), systemImage: "hourglass")
+                        .font(.caption).foregroundStyle(Palette.warning)
                 }
                 HStack {
                     Label(tr("Soll = gleichmäßiger Verbrauch"), systemImage: "diamond.fill")
                     Spacer(minLength: 4)
                     Text(store.isDemo ? tr("Beispieldaten") : store.isPaused ? tr("Pausiert") : updatedText(store.lastChecked, now: store.now))
-                }.font(.system(size: 11)).foregroundStyle(.secondary)
+                }.font(.subheadline).foregroundStyle(.secondary)
             }
         }
         .padding(16).frame(width: 380).background(.ultraThinMaterial)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .background(TrayWindowFit(height: height))
         .tint(Palette.accent).buttonStyle(JuiceButtonStyle())
-        .environment(\.quotaDisplay, store.settings.displayMode).onAppear { store.start() }
+        .environment(\.quotaDisplay, store.settings.displayMode).environment(\.locale, Localization.locale).onAppear { store.start() }
     }
     private func accountSections(_ rows: [TrayAccountRow]) -> some View {
         VStack(alignment: .leading, spacing: 26) {
             if rows.isEmpty {
-                Text(tr("Noch keine aktiven Konten. Verbinde einen Anbieter in der Übersicht."))
-                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(tr("Noch keine aktiven Konten. Füge unter Konten ein Abo oder einen API-Key hinzu."))
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button(tr("Konto hinzufügen")) { DashboardWindow.shared.show(store: store, page: .accounts) }
+                        .buttonStyle(JuiceButtonStyle(prominent: true))
+                }.padding(.vertical, 12)
             }
             ForEach(rows) { row in
-                TrayAccountView(row: row, now: store.now)
+                TrayAccountView(store: store, row: row, now: store.now)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,6 +144,7 @@ private struct TrayAccountRow: Identifiable {
 }
 
 private struct TrayAccountView: View {
+    let store: AppStore
     let row: TrayAccountRow
     let now: Date
     private var account: AccountConfiguration { row.account }
@@ -146,14 +154,17 @@ private struct TrayAccountView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 ProviderMark(kind: account.provider, size: 20)
-                Text(account.displayName).font(.system(size: 13, weight: .semibold))
+                Text(account.displayName).font(.body.weight(.semibold))
                 if let plan = snapshot?.plan, !plan.isEmpty {
-                    Text(plan.capitalized).font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(plan.capitalized).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
-                if snapshot != nil && stale {
-                    Text(tr("Letzter Stand")).font(.system(size: 10)).foregroundStyle(.secondary)
+                if let snapshot, stale {
+                    Text(lastValueText(snapshot.observedAt, now: now)).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            if let failure = row.failure {
+                AccountFailureView(store: store, account: account, failure: failure)
             }
             if let snapshot {
                 VStack(spacing: 14) {
@@ -165,8 +176,8 @@ private struct TrayAccountView: View {
                     HStack {
                         Text(metric.title).foregroundStyle(.secondary)
                         Spacer()
-                        Text(metric.currency == "Credits" ? "\(metric.amount.formatted(.number.precision(.fractionLength(0)))) Credits" : metric.amount.formatted(.currency(code: metric.currency)))
-                    }.font(.system(size: 11)).monospacedDigit()
+                        Text(moneyText(metric))
+                    }.font(.subheadline).monospacedDigit()
                 }
                 if let count = snapshot.benefitCount, count > 0 {
                     ResetAvailability(snapshot: snapshot, now: now)
@@ -175,10 +186,7 @@ private struct TrayAccountView: View {
                     Text(snapshot.notice ?? tr("Keine Kontingente verfügbar")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let failure = row.failure {
-                Label(failure, systemImage: "exclamationmark.circle")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            } else if snapshot == nil {
+            if row.failure == nil && snapshot == nil {
                 Text(tr("Verbindung wird hergestellt …")).font(.caption).foregroundStyle(.secondary)
             }
         }

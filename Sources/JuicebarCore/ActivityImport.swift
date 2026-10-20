@@ -113,7 +113,7 @@ public enum ActivityImport {
             catch {
                 if let previous {
                     warnings += previous.notices ?? []
-                    warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(date: .abbreviated, time: .shortened), error.localizedDescription))
+                    warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)), error.localizedDescription))
                     return (previous.events.events(since: since, through: now), nil)
                 }
                 warnings.append("\(label): \(error.localizedDescription)")
