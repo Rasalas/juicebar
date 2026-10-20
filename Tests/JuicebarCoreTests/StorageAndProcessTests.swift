@@ -158,15 +158,84 @@ final class StorageAndProcessTests: XCTestCase {
         XCTAssertEqual(try db.readCache(MonitorSettings.self, key: "local-usage-v2"), MonitorSettings())
     }
     func testHistoryIsCappedPerAccount() throws {
-        let db = try HistoryDatabase(path: ":memory:")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-cap-\(UUID()).sqlite")
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: file.path + suffix) } }
+        let db = try HistoryDatabase(path: file.path)
         let start = Date(timeIntervalSince1970: 1_000_000)
         for index in 0..<3 { try db.save(AccountSnapshot(configurationID: "quiet", identity: "q", observedAt: start.addingTimeInterval(Double(index)), source: "fixture")) }
-        for index in 0..<1500 { try db.save(AccountSnapshot(configurationID: "busy", identity: "b", observedAt: start.addingTimeInterval(Double(1000 + index)), source: "fixture")) }
-        let busy = try db.history(account: "busy", limit: 12000)
-        XCTAssertGreaterThanOrEqual(busy.count, HistoryDatabase.observationsPerAccount)
-        XCTAssertLessThan(busy.count, HistoryDatabase.observationsPerAccount + 100)
-        XCTAssertEqual(busy.last?.observedAt, start.addingTimeInterval(2499))
+        // Every poll changes, so thinning cannot help and only the row ceiling applies.
+        let cap = HistoryRetention.maximumRows
+        for index in 0..<(cap + 500) {
+            try db.save(AccountSnapshot(configurationID: "busy", identity: "b", observedAt: start.addingTimeInterval(Double(1000 + index)), source: "fixture",
+                                        windows: [QuotaWindow(id: "w", title: "W", usedPercent: Double(index % 100))]))
+        }
+        var connection: OpaquePointer?, count: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &connection), SQLITE_OK)
+        defer { sqlite3_close(connection) }
+        XCTAssertEqual(sqlite3_prepare_v2(connection, "SELECT count(*) FROM observations WHERE account='busy'", -1, &count, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_step(count), SQLITE_ROW)
+        let stored = Int(sqlite3_column_int(count, 0)); sqlite3_finalize(count)
+        XCTAssertGreaterThanOrEqual(stored, cap)
+        XCTAssertLessThan(stored, cap + 100)
+        let busy = try db.history(account: "busy", limit: cap)
+        XCTAssertEqual(busy.count, cap)
+        XCTAssertEqual(busy.last?.observedAt, start.addingTimeInterval(Double(1000 + cap + 499)))
         XCTAssertEqual(try db.history(account: "quiet").count, 3)
+    }
+    /// A light user at the default 300 s cadence: one 5 h session a day, the week moving 0.1 points per short point.
+    private func lightUseHistory(days: Int, end: Date) -> [AccountSnapshot] {
+        let origin = end.addingTimeInterval(-Double(days) * 86400)
+        return stride(from: 0.0, to: Double(days) * 86400, by: 300).map { offset in
+            let time = origin.addingTimeInterval(offset)
+            let day = (offset / 86400).rounded(.down), sessionStart = day * 86400 + 9 * 3600
+            let inSession = offset >= sessionStart && offset < sessionStart + 18000
+            let today = offset < sessionStart ? 0 : min(80, ((offset - sessionStart) / 14400 * 80).rounded(.down))
+            let short = inSession ? today : 0
+            let week = (offset / 604800).rounded(.down), weekDay = day - week * 7
+            let long = ((weekDay * 80 + today) * 0.1).rounded(.down)
+            return AccountSnapshot(configurationID: "claude", identity: "login", observedAt: time, source: "fixture", windows: [
+                QuotaWindow(id: "five_hour", title: "5 h", usedPercent: short, resetsAt: inSession ? origin.addingTimeInterval(sessionStart + 18000) : nil, duration: 18000),
+                QuotaWindow(id: "seven_day", title: "Woche", usedPercent: long, resetsAt: origin.addingTimeInterval((week + 1) * 604800), duration: 604800)])
+        }
+    }
+    func testRetentionKeepsWeeklyReachHistoryAndStaysSmall() throws {
+        let end = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = lightUseHistory(days: 40, end: end)
+        let db = try HistoryDatabase(path: ":memory:")
+        for sample in samples { try db.save(sample) }
+        let now = try XCTUnwrap(samples.last?.observedAt)
+        let stored = try db.history(account: "claude", limit: HistoryRetention.maximumRows)
+        let oldest = try XCTUnwrap(stored.first?.observedAt)
+        XCTAssertGreaterThanOrEqual(oldest, now.addingTimeInterval(-HistoryRetention.storedSpan - 100 * 300), "older rows are dropped")
+        XCTAssertLessThanOrEqual(oldest, now.addingTimeInterval(-28 * 86400), "a previous weekly cycle stays")
+        XCTAssertLessThan(stored.count, samples.count / 4, "unchanged runs collapse")
+        let lastDay = samples.filter { now.timeIntervalSince($0.observedAt) < HistoryRetention.completeSpan }
+        XCTAssertEqual(Array(stored.suffix(lastDay.count)), lastDay)
+
+        func ratio(_ history: [AccountSnapshot]) -> Double? {
+            WeeklyReach.ratio(shortID: "five_hour", longID: "seven_day", history: history, now: now, minimumLongPoints: 3)
+        }
+        let expected = try XCTUnwrap(ratio(samples))
+        XCTAssertEqual(expected, 0.1, accuracy: 0.01)
+        let loaded = try db.history(account: "claude", since: now.addingTimeInterval(-HistoryRetention.loadedSpan), limit: HistoryRetention.maximumRows)
+        XCTAssertEqual(ratio(loaded), expected)
+        let inMemory = samples.reduce(into: [AccountSnapshot]()) { history, sample in history = HistoryRetention.appending(sample, to: history) }
+        XCTAssertEqual(ratio(inMemory), expected)
+        XCTAssertLessThan(inMemory.count, loaded.count + 100)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(inMemory.first?.observedAt), now.addingTimeInterval(-HistoryRetention.loadedSpan))
+    }
+    func testThinningKeepsRunEndsAndPeriodChanges() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        func sample(_ minute: Double, _ used: Double, reset: Double = 1, identity: String = "a") -> AccountSnapshot {
+            AccountSnapshot(configurationID: "c", identity: identity, observedAt: start.addingTimeInterval(minute * 60), source: "fixture",
+                            windows: [QuotaWindow(id: "w", title: "W", usedPercent: used, resetsAt: start.addingTimeInterval(reset * 86400), duration: 18000)])
+        }
+        let history = [sample(0, 5), sample(1, 5), sample(2, 5), sample(3, 5), sample(4, 6), sample(5, 6, reset: 2), sample(6, 6, reset: 2),
+                        sample(7, 6, reset: 2, identity: "b"), sample(8, 6, reset: 2, identity: "b"), sample(9, 6, reset: 2, identity: "b")]
+        XCTAssertEqual(HistoryRetention.redundant(history, before: start.addingTimeInterval(3600)), [1, 2, 8])
+        XCTAssertEqual(HistoryRetention.redundant(history, before: start.addingTimeInterval(90)), [1])
+        XCTAssertEqual(HistoryRetention.redundant(history, from: start.addingTimeInterval(120), before: start.addingTimeInterval(3600)), [2, 8])
+        XCTAssertEqual(HistoryRetention.thinned(history, now: start.addingTimeInterval(86400 + 3600)).count, history.count - 3)
     }
     func testOpenCodeMigrationDeduplicatesAndNeverWritesDatabase() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-test-\(UUID()).db")
