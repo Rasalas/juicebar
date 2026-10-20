@@ -99,13 +99,9 @@ final class AppStore {
             if self.refreshingAccountIDs != ids { self.refreshingAccountIDs = ids }
         }
         if demo {
-            for snapshot in DemoData.snapshots() {
+            for snapshot in DemoData.snapshots(now: now) {
                 snapshots[snapshot.configurationID] = snapshot
-                history[snapshot.configurationID] = (0..<24).map { index in
-                    var past = snapshot; past.observedAt = now.addingTimeInterval(Double(index - 23) * 3600)
-                    past.windows = past.windows.map { window in var w = window; w.usedPercent *= Double(index + 2) / 25; return w }
-                    return past
-                }
+                history[snapshot.configurationID] = DemoData.history(for: snapshot, now: now)
             }
             lastChecked = now
             activity = DemoData.activity(now: now)
@@ -431,6 +427,14 @@ final class AppStore {
         }
         quotaHistoryCache[id] = value
         return value
+    }
+    /// Weekly reach for the account's visible windows; empty after a failed refresh.
+    func weeklyReach(for account: AccountConfiguration) -> [WeeklyReach] {
+        guard failures[account.id] == nil, var snapshot = snapshots[account.id] else { return [] }
+        snapshot.windows = QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)
+        let source: ActivitySource? = account.provider == .claude ? .claude : account.provider == .codex ? .codex : nil
+        let hours = UsableHours.resolve(activity: activity, source: source, settings: settings, now: now)
+        return WeeklyReach.assess(snapshot: snapshot, history: quotaHistory(for: account.id), hours: hours, now: now)
     }
     var trayMeters: [TrayMeter] {
         TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: Set(failures.keys), settings: settings, now: now)

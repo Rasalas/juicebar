@@ -153,9 +153,13 @@ struct DashboardView: View {
                         }.frame(maxWidth: .infinity, alignment: .top)
                     }
                 }
-                HStack(spacing: 7) {
-                    Image(systemName: "diamond.fill").font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
-                    Text(tr("Die Raute zeigt den Sollstand bei gleichmäßiger Nutzung. Jeder Balken gehört zu einem eigenen Limit."))
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "diamond.fill").font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
+                        Text(tr("Die Raute zeigt den Sollstand bei gleichmäßiger Nutzung. Jeder Balken gehört zu einem eigenen Limit."))
+                    }
+                    let reaches = overviewAccounts.flatMap { account in store.weeklyReach(for: account).filter(\.isRelevant) }
+                    if !reaches.isEmpty { WeeklyReachLegend(expiring: reaches.contains { $0.expiring >= 0.5 }) }
                 }.font(.subheadline).foregroundStyle(.secondary)
             }
             if !store.settings.notificationsEnabled {
@@ -198,11 +202,13 @@ struct AccountCard: View {
                     AccountFailureView(store: store, account: account, failure: failure)
                 }
                 if let snapshot = store.snapshots[account.id] {
+                    let reaches = store.weeklyReach(for: account)
                     ForEach(QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)) { window in
                         QuotaBar(window: window, color: Palette.provider(account.provider), now: store.now,
                                  status: QuotaStatus.assess(window: window, snapshot: snapshot,
                                                           history: store.history[account.id] ?? [], now: store.now,
-                                                          hasFailure: store.failures[account.id] != nil))
+                                                          hasFailure: store.failures[account.id] != nil),
+                                 reach: WeeklyReach.relevant(for: window.id, in: reaches))
                     }
                     ForEach(snapshot.money) { metric in
                         HStack {

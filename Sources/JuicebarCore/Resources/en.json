@@ -464,5 +464,19 @@
   "in {0} Std.": "in {0} hr",
   "in {0} T.": "in {0} d",
   "{0}: {1} Reset-Gutschriften verfügbar, aber nicht alle Ablaufdaten sind bekannt.": "{0}: {1} reset credits available, but some expiry dates are unknown.",
-  "Über Soll in {0} Min.": "Above target in {0} min"
+  "Über Soll in {0} Min.": "Above target in {0} min",
+  "Wochenziel": "Weekly target",
+  "Wochenziel: {0}": "Weekly target: {0}",
+  "voll nutzen": "use fully",
+  "≈ {0} % übrig": "≈ {0}% left",
+  "≈ {0} % verbraucht": "≈ {0}% used",
+  "≈ {0} % verfallen": "≈ {0}% will expire",
+  "≈ {0} %": "≈ {0}%",
+  "Braucht {0} von {1} Fenstern": "Needs {0} of {1} windows",
+  "Ein volles 5-Stunden-Fenster": "One full 5-hour window",
+  "≈ {0} % dieses Limits": "≈ {0}% of this limit",
+  "Nutzbare Fenster bis Reset": "Usable windows until reset",
+  "Benötigte Fenster": "Windows needed",
+  "Verfällt trotz voller Nutzung": "Expires even with full use",
+  "Das Wochenziel verteilt den Rest der Woche gleichmäßig auf die verbleibenden nutzbaren 5-Stunden-Fenster. Geschätzt aus deinem Verlauf und deinen üblichen Nutzungszeiten; wie viel der Woche ein Fenster ausmacht, hängt vom Modellmix ab.": "The weekly target spreads the rest of the week evenly across the remaining usable 5-hour windows. Estimated from your history and usual hours of use; how much of the week one window covers depends on the model mix."
 }

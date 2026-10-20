@@ -9,10 +9,12 @@ struct TrayView: View {
     private var rows: [TrayAccountRow] {
         QuotaOrder.accounts(store.accounts.filter(\.enabled)).map { account in
             let snapshot = store.snapshots[account.id], failure = store.failures[account.id]
+            let reaches = store.weeklyReach(for: account)
             let windows = snapshot.map { snapshot in
                 QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).map { window in
                     TrayWindowRow(window: window, status: QuotaStatus.assess(window: window, snapshot: snapshot, history: store.history[account.id] ?? [],
-                                                                             now: store.now, hasFailure: failure != nil))
+                                                                             now: store.now, hasFailure: failure != nil),
+                                  reach: WeeklyReach.relevant(for: window.id, in: reaches))
                 }
             } ?? []
             return TrayAccountRow(account: account, snapshot: snapshot, failure: failure, windows: windows)
@@ -20,6 +22,7 @@ struct TrayView: View {
     }
     var body: some View {
         let rows = self.rows, expiring = store.expiringCount
+        let reaches = rows.flatMap(\.windows).compactMap(\.reach)
         TrayLayout(maximumHeight: maximumHeight - 32) {
             HStack(spacing: 8) {
                 Button { DashboardWindow.shared.show(store: store) } label: {
@@ -56,6 +59,10 @@ struct TrayView: View {
                     Label(expiring == 1 ? tr("1 Reset-Gutschrift läuft in den nächsten 3 Tagen ab") : tr("{0} Reset-Gutschriften laufen in den nächsten 3 Tagen ab", expiring), systemImage: "hourglass")
                         .font(.caption).foregroundStyle(Palette.warning)
                 }
+                if !reaches.isEmpty {
+                    WeeklyReachLegend(expiring: reaches.contains { $0.expiring >= 0.5 })
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
                 HStack {
                     Label(tr("Soll = gleichmäßiger Verbrauch"), systemImage: "diamond.fill")
                     Spacer(minLength: 4)
@@ -85,6 +92,16 @@ struct TrayView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct WeeklyReachLegend: View {
+    var expiring: Bool
+    var body: some View {
+        HStack(spacing: 14) {
+            Label { Text(tr("Wochenziel")) } icon: { WeeklyTargetTick(height: 11) }
+            if expiring { Label { Text(tr("Verfällt trotz voller Nutzung")) } icon: { ExpiryPattern.swatch } }
+        }
     }
 }
 
@@ -132,6 +149,7 @@ private struct TrayLayout: Layout {
 private struct TrayWindowRow: Identifiable {
     let window: QuotaWindow
     let status: QuotaStatus
+    let reach: WeeklyReach?
     var id: String { window.id }
 }
 
@@ -169,7 +187,7 @@ private struct TrayAccountView: View {
             if let snapshot {
                 VStack(spacing: 14) {
                     ForEach(row.windows) { item in
-                        QuotaBar(window: item.window, color: Palette.provider(account.provider), now: now, compact: true, status: item.status)
+                        QuotaBar(window: item.window, color: Palette.provider(account.provider), now: now, compact: true, status: item.status, reach: item.reach)
                     }
                 }
                 ForEach(snapshot.money) { metric in

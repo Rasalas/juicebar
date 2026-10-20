@@ -32,3 +32,14 @@ Alias-Quellen:
 - https://openrouter.ai/unbiased/pareto
 
 Weitere Werkzeuge, Versionen und Speicherpfade stehen unter [Aktivitätsquellen](activity-history.md#weitere-werkzeuge).
+
+## Wochenreichweite
+
+Claude und Codex begrenzen Nutzung in 5-Stunden-Fenstern und pro Woche. Jedes 5-Stunden-Fenster deckt nur einen Teil der Woche ab. Kurz vor dem Wochenreset kann deshalb mehr Wochenrest übrig sein, als die verbleibenden Fenster noch verbrauchen können. `WeeklyReach.swift` schätzt das ohne Netzwerkzugriff:
+
+- Verhältnis: Wochenprozent je 5-Stunden-Prozent aus dem gespeicherten Verlauf desselben Kontos und derselben Anmeldung der letzten 14 Tage. Es zählen nur aufeinanderfolgende Messungen, bei denen beide Fenster im selben Zeitraum blieben. Summiert wird, nicht gemittelt, weil Anbieter ganze Prozent melden. Unter 60 Prozentpunkten im 5-Stunden-Fenster gibt es keine Schätzung. Modell- oder App-bezogene Wochenlimits bewegen sich nur mit einem Teil der Nutzung und brauchen mindestens 10 Wochenpunkte. Der Speicher hält höchstens 1.200 Messungen pro Konto, bei häufigen Abfragen also weniger als 14 Tage.
+- Nutzbare Stunden: Eine Stunde gilt als nutzbar, wenn die lokalen Logs desselben Anbieters an mindestens 20 % der aktiven Tage der letzten 28 Tage dort Aktivität zeigen. Bei weniger als sieben aktiven Tagen gelten die Ruhezeiten aus den Warnungen, ohne Ruhezeiten alle Stunden.
+- Fenster bis zum Wochenreset: der Rest des aktuellen Fensters, danach je ein volles Fenster ab der nächsten nutzbaren Stunde. Das letzte zählt anteilig bis zum Reset.
+- Reicht die Kapazität nicht, zeigt der Wochenbalken den Teil, der auch bei voller Nutzung verfällt. Braucht die Woche mindestens 70 % der Kapazität, zeigt der 5-Stunden-Balken das Wochenziel: wie weit dieses Fenster genutzt werden sollte, damit die Woche über alle nutzbaren Fenster gleichmäßig aufgeht.
+
+Alle Werte sind Näherungen („≈“). Wie viel Woche ein Fenster ausmacht, hängt vom Modellmix ab; wer das Modell wechselt, verschiebt das Verhältnis. Veraltete Messungen, fehlende Resetzeiten oder ein Abruffehler blenden die Schätzung aus. Warnungen gibt es dafür noch nicht.

@@ -25,6 +25,11 @@ import JuicebarCore
         try verifyQuotaColor()
         try verifyQuotaAccessibility()
         let store = AppStore(demo: true)
+        let reaches = store.accounts.map { store.weeklyReach(for: $0).filter(\.isRelevant) }
+        print("Weekly reach in demo: " + reaches.map { $0.map { "\($0.longWindowID) load \(String(format: "%.2f", $0.load)), expiring \(Int($0.expiring.rounded()))" }.joined(separator: ", ") }.joined(separator: " | "))
+        guard reaches[0].contains(where: { $0.expiring >= 1 }), reaches[1].contains(where: { $0.expiring < 0.5 }), reaches[2].isEmpty else {
+            throw ProviderFailure.unavailable("Demo must show one expiring and one tight weekly reach")
+        }
         let host = NSHostingView(rootView: TrayMinimumSize { TrayView(store: store, maximumHeight: 1000) })
         let size = host.fittingSize
         print("Tray minimum size: \(Int(size.width)) × \(Int(size.height)); demo accounts: \(store.accounts.count)")
@@ -197,6 +202,7 @@ import JuicebarCore
         try writeMenuImage(menuImage, to: directory.appendingPathComponent("menu-limits.png"))
         try renderMenuPopover(store: store, to: directory.appendingPathComponent("menu-popover-\(Localization.language).png"))
         try renderQuotaStates(to: directory)
+        try renderWeeklyReach(to: directory)
         print("Rendered previews: \(directory.path)")
     }
     private static func writeMenuImage(_ menuImage: NSImage, to url: URL) throws {
@@ -272,6 +278,22 @@ import JuicebarCore
         let empty = TrayView(store: store, maximumHeight: 1000).background(Color(nsColor: .windowBackgroundColor))
         try renderView(empty, size: NSHostingView(rootView: empty).fittingSize, appearance: NSAppearance(named: .aqua)!,
                        to: directory.appendingPathComponent("tray-empty-\(Localization.language).png"))
+    }
+    /// The demo's expiring (Codex) and tight (Claude) weeks in both display modes and appearances.
+    private static func renderWeeklyReach(to directory: URL) throws {
+        let store = AppStore(demo: true)
+        store.accounts = store.accounts.filter { $0.provider != .opencodeGo }
+        for mode in QuotaDisplay.allCases {
+            store.settings.quotaDisplay = mode
+            for dark in [false, true] {
+                let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
+                NSApp.appearance = appearance
+                let view = TrayView(store: store, maximumHeight: 1000)
+                    .environment(\.colorScheme, dark ? .dark : .light).background(Color(nsColor: .windowBackgroundColor))
+                try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: appearance,
+                               to: directory.appendingPathComponent("weekly-reach-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))
+            }
+        }
     }
     /// The shipping views with fixture data, staged without unrelated desktop apps.
     private static func renderMenuPopover(store: AppStore, to url: URL) throws {
