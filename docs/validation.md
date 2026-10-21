@@ -1,5 +1,17 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.14 release, 21 October
+
+Exhausted menu bar quotas keep a faint provider-colored track in their original slot. The red exhaustion outline and the extra warning badge are removed; approaching-limit forecasts retain their yellow outlines. Native light and dark previews were checked, and English and German screenshots were refreshed.
+
+The local Swift suite completed 157 tests with zero failures and seven optional benchmarks skipped. All 13 Python collector tests passed, as did English and German tray layout checks, the constrained-height and always-visible-scrollbar cases, and activity persistence. The signed release bundle also passed layout and persistence checks. The website loaded all images without horizontal overflow at 1280 and 390 CSS pixels. Offscreen SwiftUI still does not expose accessibility descendants on this Mac; live VoiceOver remains unverified.
+
+PR #17 merged as `771513e` after its macOS check passed. Version 0.1.14, build 16, was packaged from the clean tagged source. The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. The app passed signature verification both inside the mounted DMG and after copying it out. Both checksums passed, and all four files downloaded from the GitHub draft matched the local originals. The Sparkle ZIP signature verified against the bundled public key; a modified byte was rejected. Repeated archive signing completed unattended in 0.08 and 0.07 seconds.
+
+Before publication, installed 0.1.13 used a temporary loopback feed to test this exact signed archive. A missing ZIP produced a download error and retained 0.1.13. “Remind Me Later” dismissed the valid offer; a subsequent manual check offered it again. Sparkle downloaded, installed and relaunched 0.1.14, build 16. The installed app passed signature, notarization and Gatekeeper checks. The four stored configuration groups remained byte-identical, all 2,311 meaningful observations from the online SQLite backup survived, and both usage caches retained their 208 and 22 day entries. The test feed override was removed and the app restarted against the normal stable feed.
+
+The published stable feed serves build 16, and the public DMG matches the tested local release. Download links now target the public 0.1.14 assets.
+
 ## Juicebars 0.1.13 release, 20 October
 
 The weekly target uses the same neutral diamond symbol as the even-usage marker, clipped to one half with rounded cut corners. Both markers share their vertical center; the lower corner of the half diamond anchors its horizontal target. The extra target line under the five-hour bar is removed. The legend now says “Gleichmäßiger Verbrauch”, and quota details show the estimated usable weekly balance and explain how full windows are estimated from provider measurements, without asserting a model-mix conversion.
