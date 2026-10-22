@@ -12,12 +12,13 @@ Juicebars is open source. Direct downloads and updates are free. Mac App Store d
 
 - A colored menu bar line for each limit, in a stable provider order. Choose which limits appear. Click for remaining quota, reset times and the expected balance for steady usage.
 - A weekly reach estimate for Claude and Codex: when the remaining 5-hour windows can barely use up the week, the 5-hour bar shows a weekly target, and the week bar marks quota that will expire even with full use. The ratio is learned from your own history and is approximate; it shifts with the model mix ([details](docs/activity-and-costs.md#wochenreichweite)).
-- An optional work schedule per account. Choose working days and hours in the account editor; a green diamond marks the daily target or reserve, with short labels for the free-day buffer and estimated extra quota use outside working hours. Off by default.
+- An optional work schedule per account. Choose working days and hours in the account editor; a green diamond marks the daily target or reserve, with the daily allocation, free-day buffer and estimated extra quota use in the popover. Off by default.
 - Warnings at a configurable usage threshold, ahead of steady consumption, or when your current pace is likely to exhaust a limit soon. Optional sound, quiet hours and expiry reminders for banked resets.
 - Combined local Codex, Claude, OpenCode, Pi, Gemini CLI, Cline, Roo Code, Kilo and Qwen Code history, daily charts and an activity calendar. Imports run at startup and every five minutes after completion; cached results survive restarts.
 - Additional local log folders with a choice of supported formats, including compatible tools such as Tau. Duplicate entries count once across manual and automatic discovery.
 - Optional SSH sources using existing host aliases. The remote collector returns usage metadata, not conversations.
 - A theoretical API-cost equivalent based on model-specific token types and published standard prices. Confirmed alpha-model aliases are resolved retrospectively. Usage without a logged estimate or known model price stays unpriced.
+- Redeem a Codex reset credit from Reset credits, with confirmation before spending it.
 - Multiple accounts, provider error isolation, request timeouts and backoff. No analytics or advertising.
 
 The interface supports English and German, follows the system language and offers an override in Settings. Confirmed names and API prices update through a signed data catalog.

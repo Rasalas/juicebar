@@ -91,6 +91,10 @@ struct QuotaBar: View {
         return target == mode.value(used: ideal) ? mode == .used : target > mode.value(used: ideal)
     }
     private var barY: CGFloat { compact ? 7 : 12 }
+    /// The vertical centerline, shared by the full diamond's tips and the half diamond's cut edge.
+    private func markerX(used: Double, width: CGFloat) -> CGFloat {
+        width * mode.value(used: used) / 100 - 5
+    }
     var body: some View {
         Button { showingDetails.toggle() } label: {
             VStack(alignment: .leading, spacing: compact ? 4 : 10) {
@@ -142,18 +146,18 @@ struct QuotaBar: View {
                 if let weeklyTarget {
                     WeeklyTargetMarker(height: 10, pointsRight: weeklyTargetPointsRight)
                         // The lower corner anchors x; both diamonds share the same vertical center.
-                        .offset(x: proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 5,
+                        .offset(x: markerX(used: 100 - weeklyTarget.targetRemainingShort, width: proxy.size.width),
                                 y: barY - 5)
                 }
                 if let workRemaining {
                     WorkPlanMarker()
-                        .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: 100 - workRemaining) / 100 - 5)),
+                        .offset(x: markerX(used: 100 - workRemaining, width: proxy.size.width),
                                 y: barY + 1)
                 }
                 if !expired, let ideal = window.idealPercent(at: now) {
                     QuotaDiamond()
                         // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
-                        .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
+                        .offset(x: markerX(used: ideal, width: proxy.size.width), y: barY - 5)
                 }
             }
             .frame(height: barHeight, alignment: .topLeading)
@@ -197,14 +201,7 @@ struct QuotaBar: View {
         }
     }
     @ViewBuilder private var reachLabel: some View {
-        if workRemaining != nil {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(reachTitle).foregroundStyle(Palette.green)
-                if let additional = workWeek?.additionalWindows, additional >= 0.05 {
-                    Text(outsideWorkText(additional)).foregroundStyle(.secondary)
-                }
-            }
-        } else if weeklyReach != nil, !reachTitle.isEmpty {
+        if workRemaining == nil, weeklyReach != nil, !reachTitle.isEmpty {
             let expiring = (weeklyReach?.expiring ?? 0) >= 0.5
             HStack(spacing: 4) {
                 if expiring { ExpiryPattern.swatch }

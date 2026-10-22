@@ -503,5 +503,21 @@
   "Puffer": "Buffer",
   "Außerhalb der Arbeitszeit": "Outside working hours",
   "Zeit-Soll": "Time-based target",
-  "Startet bei Nutzung": "Starts when used"
+  "Startet bei Nutzung": "Starts when used",
+  "Codex unterstützt diese Aktion nicht. CLI-Version und Anmeldung prüfen.": "Codex does not support this action. Check the CLI version and sign-in.",
+  "Codex liefert eine unbekannte Antwort.": "Codex returned an unknown response.",
+  "Die Reset-Gutschrift konnte nicht zugeordnet werden.": "The reset credit could not be identified.",
+  "Die Codex-Anmeldung hat sich geändert. Kontostand aktualisieren.": "The Codex sign-in has changed. Refresh the account.",
+  "Einlösung nicht bestätigt. Bitte erneut versuchen.": "Redemption not confirmed. Please try again.",
+  "Einlösung läuft bereits.": "Redemption is already in progress.",
+  "Die Reset-Gutschrift ist nicht mehr verfügbar oder das Konto hat sich geändert. Kontostand aktualisieren.": "The reset credit is no longer available or the account has changed. Refresh the account.",
+  "Angesparte Reset-Gutschriften und befristete Angebote.": "Banked reset credits and limited-time offers.",
+  "Reset einlösen": "Redeem reset",
+  "Reset einlösen?": "Redeem reset?",
+  "Eine Reset-Gutschrift von {0} wird verbraucht.": "One reset credit from {0} will be consumed.",
+  "Reset eingelöst.": "Reset redeemed.",
+  "Dieser Reset wurde bereits eingelöst.": "This reset was already redeemed.",
+  "Aktuell gibt es kein Kontingent zurückzusetzen.": "There is currently no eligible quota to reset.",
+  "Die Reset-Gutschrift ist nicht mehr verfügbar.": "The reset credit is no longer available.",
+  "Der Kontostand wird beim nächsten Abruf aktualisiert.": "The account balance will update at the next refresh."
 }

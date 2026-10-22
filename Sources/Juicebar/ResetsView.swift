@@ -4,6 +4,8 @@ import JuicebarCore
 struct ResetsView: View {
     let store: AppStore
     @State private var adding = false
+    @State private var resetAlert: ResetAlert?
+    @State private var workingCreditID: String?
     private var entries: [(AccountConfiguration, ResetBenefit)] {
         store.accounts.flatMap { account in
             (store.snapshots[account.id]?.benefits ?? []).map { (account, $0) }
@@ -13,7 +15,7 @@ struct ResetsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
-                PageHeading(title: tr("Keinen Reset verschenken."), subtitle: tr("Angesparte Reset-Gutschriften und befristete Angebote. Einlösen kannst du sie direkt beim Anbieter."))
+                PageHeading(title: tr("Keinen Reset verschenken."), subtitle: tr("Angesparte Reset-Gutschriften und befristete Angebote."))
                 Spacer()
                 Button(tr("Frist ergänzen"), systemImage: "plus") { adding = true }.disabled(store.accounts.isEmpty)
             }
@@ -45,6 +47,7 @@ struct ResetsView: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 12) {
+                            redemptionButton(account: account, benefit: benefit)
                             Button(tr("Beim Anbieter öffnen")) { store.openAccount(account) }
                             if benefit.isManual { Button(tr("Entfernen"), role: .destructive) { store.removeReset(benefit.id) }.buttonStyle(JuiceButtonStyle()) }
                         }
@@ -53,9 +56,66 @@ struct ResetsView: View {
             }
             Text(tr("Juicebars löst keine Reset-Gutschriften automatisch ein.")).font(.caption).foregroundStyle(.secondary)
         }.sheet(isPresented: $adding) { AddResetView(store: store) }
+            .alert(item: $resetAlert, content: alert)
+    }
+    @ViewBuilder private func redemptionButton(account: AccountConfiguration, benefit: ResetBenefit) -> some View {
+        if account.provider == .codex, !benefit.isManual, benefit.status == .available, benefit.count > 0 {
+            HStack(spacing: 7) {
+                if workingCreditID == benefit.id { ProgressView().controlSize(.small) }
+                Button(tr("Reset einlösen")) {
+                    guard let snapshot = store.snapshots[account.id] else { return }
+                    resetAlert = .confirm(ResetConfirmation(account: account, benefit: benefit, identity: snapshot.identity))
+                }.buttonStyle(JuiceButtonStyle(prominent: true))
+                    .disabled(!store.canRedeemReset(benefit, for: account))
+                    .accessibilityIdentifier("redeem-reset-\(benefit.id)")
+            }
+        }
+    }
+    private func alert(_ value: ResetAlert) -> Alert {
+        switch value {
+        case .confirm(let request):
+            return Alert(title: Text(tr("Reset einlösen?")),
+                         message: Text(tr("Eine Reset-Gutschrift von {0} wird verbraucht.", request.account.displayName)),
+                         primaryButton: .destructive(Text(tr("Reset einlösen"))) { Task { await redeem(request) } },
+                         secondaryButton: .cancel(Text(tr("Abbrechen"))))
+        case .result(let message):
+            return Alert(title: Text(tr("Reset-Gutschrift")), message: Text(message), dismissButton: .default(Text(tr("OK"))))
+        }
+    }
+    private func redeem(_ request: ResetConfirmation) async {
+        workingCreditID = request.benefit.id
+        defer { workingCreditID = nil }
+        do {
+            let result = try await store.redeemReset(request.benefit, for: request.account, expectedIdentity: request.identity)
+            let message: String
+            switch result.outcome {
+            case .reset: message = tr("Reset eingelöst.")
+            case .alreadyRedeemed: message = tr("Dieser Reset wurde bereits eingelöst.")
+            case .nothingToReset: message = tr("Aktuell gibt es kein Kontingent zurückzusetzen.")
+            case .noCredit: message = tr("Die Reset-Gutschrift ist nicht mehr verfügbar.")
+            }
+            resetAlert = .result(message + (result.snapshot == nil ? "\n" + tr("Der Kontostand wird beim nächsten Abruf aktualisiert.") : ""))
+        } catch { resetAlert = .result(error.localizedDescription) }
     }
     private func status(_ status: BenefitStatus) -> String {
         switch status { case .available: return tr("Verfügbar"); case .used: return tr("Verbraucht"); case .expired: return tr("Abgelaufen"); case .paused: return tr("Derzeit nicht einlösbar"); case .unknown: return tr("Status unbekannt") }
+    }
+}
+
+private struct ResetConfirmation {
+    let account: AccountConfiguration
+    let benefit: ResetBenefit
+    let identity: String
+}
+
+private enum ResetAlert: Identifiable {
+    case confirm(ResetConfirmation)
+    case result(String)
+    var id: String {
+        switch self {
+        case .confirm(let value): return "confirm|\(value.account.id)|\(value.benefit.id)"
+        case .result(let message): return "result|\(message)"
+        }
     }
 }
 

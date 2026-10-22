@@ -26,6 +26,10 @@ final class AppStore {
     var history: [String: [AccountSnapshot]] = [:] { didSet { quotaHistoryCache = [:] } }
     var warnings: [WarningEvent] = []
     var manualResets: [ManualReset] = []
+    var redeemingResetAccounts: Set<String> = []
+    var resetAccountsAwaitingRefresh: Set<String> = []
+    @ObservationIgnored private let resetRedeemer: any CodexResetRedeeming
+    @ObservationIgnored private var resetRedemptionKeys: [String: String] = [:]
     var localUsage: LocalUsageReport?
     var localUsageError: String?
     var localUsageLoading = false
@@ -53,8 +57,11 @@ final class AppStore {
     @ObservationIgnored private var pendingWarningIDs: Set<String> = []
     @ObservationIgnored private var quotaHistoryCache: [String: [AccountSnapshot]] = [:]
 
-    init(demo: Bool = false, directory: URL? = nil) {
+    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil) {
         isDemo = demo
+        if let resetRedeemer { self.resetRedeemer = resetRedeemer }
+        else if demo { self.resetRedeemer = DemoCodexResetCredits() }
+        else { self.resetRedeemer = CodexResetCredits() }
         let fm = FileManager.default
         let directory = directory ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Juicebar", isDirectory: true)
         storageDirectory = directory
@@ -81,6 +88,7 @@ final class AppStore {
         accounts = demo ? DemoData.accounts : load([AccountConfiguration].self, key: "accounts", missing: CLISetupHelp.detectedDefaultAccounts(), unreadable: [])
         settings = load(MonitorSettings.self, key: "settings", missing: MonitorSettings(), unreadable: MonitorSettings())
         manualResets = load([ManualReset].self, key: "manual-resets", missing: [], unreadable: [])
+        resetRedemptionKeys = load([String: String].self, key: "reset-redemptions", missing: [:], unreadable: [:])
         localDatabasePath = load(String.self, key: "opencode-path", missing: "", unreadable: "")
         sshHosts = load([String].self, key: "ssh-hosts", missing: [], unreadable: [])
         activityRoots = load([ActivityLogs.Root].self, key: "activity-roots", missing: [], unreadable: [])
@@ -145,7 +153,7 @@ final class AppStore {
 
     func refresh(force: Bool = false, only accountID: String? = nil) {
         guard !isDemo, !isPaused else { return }
-        let selected = accounts.filter { $0.enabled && (accountID == nil || $0.id == accountID) }
+        let selected = accounts.filter { $0.enabled && !redeemingResetAccounts.contains($0.id) && (accountID == nil || $0.id == accountID) }
         let schedulingNow = Date()
         refreshPolicy.clamp(now: schedulingNow)
         refreshPolicy.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -169,6 +177,7 @@ final class AppStore {
                         snapshot.dailyUsage = previous.dailyUsage
                     }
                     snapshots[account.id] = snapshot; failures[account.id] = nil
+                    resetAccountsAwaitingRefresh.remove(account.id)
                     let previous = history[account.id]?.last
                     history[account.id] = HistoryRetention.appending(snapshot, to: history[account.id] ?? [])
                     do { try database.save(snapshot) } catch { storageError = error.localizedDescription }
@@ -296,6 +305,7 @@ final class AppStore {
     private func invalidateAccount(_ id: String) {
         scheduler.invalidate(id: id)
         failures[id] = nil
+        resetAccountsAwaitingRefresh.remove(id)
         refreshPolicy.remove(id: id)
     }
     func saveAccount(_ account: AccountConfiguration, secret: String) throws {
@@ -456,5 +466,52 @@ final class AppStore {
             let benefits = snapshots[account.id].map { withManualResets($0).benefits } ?? manualResets.filter { $0.accountID == account.id }.map(\.benefit)
             return total + benefits.filter { $0.status == .available && ($0.expiresAt.map { $0 > now && $0.timeIntervalSince(now) < 72 * 3600 } ?? false) }.count
         }
+    }
+}
+
+extension AppStore {
+    func canRedeemReset(_ benefit: ResetBenefit, for account: AccountConfiguration) -> Bool {
+        guard account.provider == .codex, account.enabled, accounts.contains(account), !benefit.isManual,
+              !redeemingResetAccounts.contains(account.id), !resetAccountsAwaitingRefresh.contains(account.id), failures[account.id] == nil,
+              let snapshot = snapshots[account.id], snapshot.isFresh(at: Date()),
+              snapshot.identity != AccountIdentity.fallback(for: account) else { return false }
+        return snapshot.benefits.contains {
+            $0.id == benefit.id && !$0.isManual && $0.status == .available && $0.count > 0 && ($0.expiresAt.map { $0 > Date() } ?? true)
+        }
+    }
+
+    func redeemReset(_ benefit: ResetBenefit, for account: AccountConfiguration, expectedIdentity: String) async throws -> CodexResetResult {
+        guard !redeemingResetAccounts.contains(account.id) else {
+            throw ProviderFailure.unavailable(tr("Einlösung läuft bereits."))
+        }
+        guard canRedeemReset(benefit, for: account), let snapshot = snapshots[account.id], snapshot.identity == expectedIdentity else {
+            throw ProviderFailure.unavailable(tr("Die Reset-Gutschrift ist nicht mehr verfügbar oder das Konto hat sich geändert. Kontostand aktualisieren."))
+        }
+        let requestID = stableID("reset|\(account.id)|\(snapshot.identity)|\(benefit.id)")
+        let key = resetRedemptionKeys[requestID] ?? UUID().uuidString
+        var keys = resetRedemptionKeys; keys[requestID] = key
+        // Persist before sending anything. An interrupted attempt keeps this key across retries and restarts.
+        try database.write(keys, key: "reset-redemptions")
+        resetRedemptionKeys = keys
+        redeemingResetAccounts.insert(account.id)
+        invalidateAccount(account.id)
+        defer { redeemingResetAccounts.remove(account.id) }
+        let result = try await resetRedeemer.redeem(configuration: account, expectedSnapshot: snapshot,
+                                                    creditID: benefit.id, idempotencyKey: key)
+        resetRedemptionKeys.removeValue(forKey: requestID)
+        do { try database.write(resetRedemptionKeys, key: "reset-redemptions") }
+        catch { storageError = error.localizedDescription }
+        if accounts.contains(account), snapshots[account.id]?.identity == expectedIdentity,
+           var fresh = result.snapshot, fresh.configurationID == account.id, fresh.identity == expectedIdentity {
+            fresh = QuotaPeriod.normalizing(fresh, previous: snapshots[account.id])
+            if fresh.dailyUsage.isEmpty { fresh.dailyUsage = snapshot.dailyUsage }
+            snapshots[account.id] = fresh; failures[account.id] = nil
+            history[account.id] = HistoryRetention.appending(fresh, to: history[account.id] ?? [])
+            do { try database.save(fresh) } catch { storageError = error.localizedDescription }
+            lastChecked = Date()
+        } else if accounts.contains(account), snapshots[account.id]?.identity == expectedIdentity {
+            resetAccountsAwaitingRefresh.insert(account.id)
+        }
+        return result
     }
 }
