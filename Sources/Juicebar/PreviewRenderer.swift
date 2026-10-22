@@ -338,7 +338,7 @@ import JuicebarCore
                     .background(Color(nsColor: .windowBackgroundColor))
                 try renderView(markers, size: NSHostingView(rootView: markers).fittingSize, appearance: appearance,
                                to: directory.appendingPathComponent("weekly-markers-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))
-                let reportedCard = AccountCard(store: reportedStore, account: reportedAccount, manage: {})
+                let reportedCard = AccountCard(store: reportedStore, account: reportedAccount, showResets: {}, manage: {})
                     .frame(width: 348).environment(\.quotaDisplay, mode).environment(\.colorScheme, dark ? .dark : .light)
                 try renderView(reportedCard, size: NSHostingView(rootView: reportedCard).fittingSize, appearance: appearance,
                                to: directory.appendingPathComponent("weekly-reported-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))

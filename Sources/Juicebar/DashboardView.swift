@@ -148,7 +148,7 @@ struct DashboardView: View {
                     ForEach(0..<min(2, overviewAccounts.count), id: \.self) { column in
                         VStack(spacing: 18) {
                             ForEach(Array(overviewAccounts.enumerated()).filter { $0.offset % 2 == column }.map(\.element)) { account in
-                                AccountCard(store: store, account: account) { page = .accounts }
+                                AccountCard(store: store, account: account, showResets: { page = .resets }) { page = .accounts }
                             }
                         }.frame(maxWidth: .infinity, alignment: .top)
                     }
@@ -180,6 +180,7 @@ struct DashboardView: View {
 struct AccountCard: View {
     let store: AppStore
     let account: AccountConfiguration
+    let showResets: () -> Void
     let manage: () -> Void
     var body: some View {
         Panel {
@@ -219,7 +220,7 @@ struct AccountCard: View {
                         }
                     }
                     if let count = snapshot.benefitCount, count > 0 {
-                        ResetAvailability(snapshot: snapshot, now: store.now)
+                        resetLink(snapshot)
                     }
                     if snapshot.windows.isEmpty && snapshot.money.isEmpty, let notice = snapshot.notice {
                         Text(notice).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -245,5 +246,10 @@ struct AccountCard: View {
                 }
             }
         }
+    }
+    private func resetLink(_ snapshot: AccountSnapshot) -> some View {
+        Button(action: showResets) {
+            ResetAvailability(snapshot: snapshot, now: store.now).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityIdentifier("show-resets-\(account.id)")
     }
 }
