@@ -94,64 +94,9 @@ struct QuotaBar: View {
     var body: some View {
         Button { showingDetails.toggle() } label: {
             VStack(alignment: .leading, spacing: compact ? 4 : 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(tr(window.title)).font((compact ? Font.callout : .body).weight(.medium))
-                    Spacer()
-                    Text(expired ? "—" : "\(Int(displayed.rounded()))")
-                        .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
-                    if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(compact ? .caption : .subheadline).foregroundStyle(.secondary) }
-                }
-                GeometryReader { proxy in
-                    ZStack(alignment: .topLeading) {
-                        Capsule().fill(color.opacity(0.12)).frame(height: 6).offset(y: compact ? 7 : 12)
-                        Capsule().fill(expired ? Color.secondary : color)
-                            .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
-                            .offset(y: compact ? 7 : 12)
-                        if !expired, let ideal = window.idealPercent(at: now), window.usedPercent - ideal > 1 {
-                            // Usage ahead of the even pace, between fill end and diamond in either display mode.
-                            let edges = [displayed, mode.value(used: ideal)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
-                            Hatch().stroke(Color.primary.opacity(0.5), lineWidth: 1).clipShape(Capsule())
-                                .frame(width: edges.max()! - edges.min()!, height: 6)
-                                .offset(x: edges.min()!, y: compact ? 7 : 12)
-                        }
-                        if let weeklyReach, weeklyReach.expiring >= 0.5 {
-                            // What stays unused at the reset: the start of the fill when remaining, the end of the track when used.
-                            let edges = [mode.value(used: 100), mode.value(used: 100 - weeklyReach.expiring)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
-                            ExpiryPattern(range: edges.min()!...edges.max()!).frame(width: proxy.size.width, height: 6)
-                                .clipShape(Capsule()).offset(y: barY)
-                        }
-                        if let weeklyTarget {
-                            WeeklyTargetMarker(height: 10, pointsRight: weeklyTargetPointsRight)
-                                // The lower corner anchors x; both diamonds share the same vertical center.
-                                .offset(x: proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 5,
-                                        y: barY - 5)
-                        }
-                        if let workRemaining {
-                            WorkPlanMarker()
-                                .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: 100 - workRemaining) / 100 - 5)),
-                                        y: barY + 1)
-                        }
-                        if !expired, let ideal = window.idealPercent(at: now) {
-                            QuotaDiamond()
-                                // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
-                                .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
-                        }
-                    }
-                    .frame(height: barHeight, alignment: .topLeading)
-                }.frame(height: barHeight)
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        resetLabel.fixedSize()
-                        Spacer(minLength: 0)
-                        statusLabel.fixedSize()
-                        reachLabel.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        resetLabel
-                        statusLabel
-                        reachLabel
-                    }
-                }.font(.subheadline)
+                titleRow
+                quotaTrack
+                captions
             }
             .contentShape(Rectangle())
         }
@@ -164,6 +109,70 @@ struct QuotaBar: View {
         .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : "")
                             + (reachTitle.isEmpty ? "" : ". \(reachTitle)"))
         .accessibilityValue(([statusTitle] + detailRows.map { "\($0.0): \($0.1)" } + [detailExplanation]).filter { !$0.isEmpty }.joined(separator: ". "))
+    }
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(tr(window.title)).font((compact ? Font.callout : .body).weight(.medium))
+            Spacer()
+            Text(expired ? "—" : "\(Int(displayed.rounded()))")
+                .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
+            if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(compact ? .caption : .subheadline).foregroundStyle(.secondary) }
+    }
+    }
+    private var quotaTrack: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(color.opacity(0.12)).frame(height: 6).offset(y: compact ? 7 : 12)
+                Capsule().fill(expired ? Color.secondary : color)
+                    .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
+                    .offset(y: compact ? 7 : 12)
+                if !expired, let ideal = window.idealPercent(at: now), window.usedPercent - ideal > 1 {
+                    // Usage ahead of the even pace, between fill end and diamond in either display mode.
+                    let edges = [displayed, mode.value(used: ideal)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
+                    Hatch().stroke(Color.primary.opacity(0.5), lineWidth: 1).clipShape(Capsule())
+                        .frame(width: edges.max()! - edges.min()!, height: 6)
+                        .offset(x: edges.min()!, y: compact ? 7 : 12)
+                }
+                if let weeklyReach, weeklyReach.expiring >= 0.5 {
+                    // What stays unused at the reset: the start of the fill when remaining, the end of the track when used.
+                    let edges = [mode.value(used: 100), mode.value(used: 100 - weeklyReach.expiring)].map { proxy.size.width * min(max($0, 0), 100) / 100 }
+                    ExpiryPattern(range: edges.min()!...edges.max()!).frame(width: proxy.size.width, height: 6)
+                        .clipShape(Capsule()).offset(y: barY)
+                }
+                if let weeklyTarget {
+                    WeeklyTargetMarker(height: 10, pointsRight: weeklyTargetPointsRight)
+                        // The lower corner anchors x; both diamonds share the same vertical center.
+                        .offset(x: proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 5,
+                                y: barY - 5)
+                }
+                if let workRemaining {
+                    WorkPlanMarker()
+                        .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: 100 - workRemaining) / 100 - 5)),
+                                y: barY + 1)
+                }
+                if !expired, let ideal = window.idealPercent(at: now) {
+                    QuotaDiamond()
+                        // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
+                        .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
+                }
+            }
+            .frame(height: barHeight, alignment: .topLeading)
+        }.frame(height: barHeight)
+    }
+    private var captions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                resetLabel.fixedSize()
+                Spacer(minLength: 0)
+                statusLabel.fixedSize()
+                reachLabel.fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                resetLabel
+                statusLabel
+                reachLabel
+            }
+        }.font(.subheadline)
     }
     private var resetLabel: some View {
         HStack(spacing: 4) {
