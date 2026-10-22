@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Juicebars · Arbeitswoche planen</title>
+<style>
+  body { margin:0; background:transparent; color:var(--foreground, light-dark(#262722,#eeeae5)); font-family:var(--font-sans, -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif); }
+  * { box-sizing:border-box; }
+  #work-plan { --ink:light-dark(#292824,#efede8); --sub:light-dark(#6a6861,#b4b1aa); --line:light-dark(#dedbd4,#41413b); --paper:light-dark(#fffefb,#292a27); --soft:light-dark(#f2f0e9,#34352f); --brand:light-dark(#b04a12,#ffa85c); --brand-soft:light-dark(#f6e8dd,#453529); --green:light-dark(#287a5b,#78c9a4); --green-soft:light-dark(#e8f1e9,#283e32); --amber:light-dark(#946900,#e9c065); --amber-soft:light-dark(#fbf1d7,#443c28); color:var(--ink); max-width:100%; }
+  #work-plan h1 { margin:0 0 8px; font-size:25px; font-weight:600; letter-spacing:-.7px; line-height:1.2; }
+  #work-plan h2 { margin:0; font-size:17px; font-weight:600; letter-spacing:-.25px; }
+  #work-plan p { margin:0; line-height:1.5; }
+  #work-plan button, #work-plan input { font:inherit; color:inherit; }
+  #work-plan button { cursor:pointer; }
+  #work-plan button:focus-visible, #work-plan input:focus-visible, #work-plan summary:focus-visible { outline:2px solid var(--brand); outline-offset:3px; }
+  #work-plan .muted { color:var(--sub); }
+  #work-plan .small { font-size:12px; line-height:1.45; }
+  #work-plan .eyebrow { font-size:12px; color:var(--sub); margin-bottom:10px; }
+  #work-plan .intro { max-width:610px; font-size:14px; }
+  #work-plan .top { margin-bottom:22px; padding-right:65px; }
+  #work-plan .segmented { display:flex; gap:3px; padding:4px; background:var(--soft); border-radius:9px; width:fit-content; margin:18px 0 10px; }
+  #work-plan .segmented button { border:0; background:transparent; padding:8px 13px; border-radius:6px; font-size:13px; }
+  #work-plan .segmented button[aria-pressed="true"] { background:var(--paper); box-shadow:0 1px 3px #00000016; font-weight:600; }
+  #work-plan .dates { font-size:12px; color:var(--sub); margin-bottom:22px; }
+  #work-plan .editor { padding:18px; border:1px solid var(--line); border-radius:12px; }
+  #work-plan .section-label { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:12px; font-size:13px; font-weight:500; }
+  #work-plan .days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
+  #work-plan .day { border:1px solid var(--line); background:transparent; border-radius:8px; padding:10px 0; font-size:13px; }
+  #work-plan .day[aria-pressed="true"] { background:var(--brand-soft); color:var(--brand); border-color:transparent; font-weight:600; }
+  #work-plan .times { display:flex; align-items:end; flex-wrap:wrap; gap:12px; margin-top:17px; }
+  #work-plan label.time { display:grid; gap:5px; font-size:12px; color:var(--sub); flex:1 1 110px; }
+  #work-plan select { border:1px solid var(--line); border-radius:6px; background:var(--paper); padding:8px; min-width:0; width:100%; font:inherit; font-size:14px; color:var(--ink); }
+  #work-plan .check { display:flex; align-items:flex-start; gap:8px; font-size:13px; line-height:1.5; }
+  #work-plan .check input { accent-color:var(--brand); flex-shrink:0; margin:4px 0 0; }
+  #work-plan .check + .check { margin-top:8px; }
+  #work-plan .checks { margin-top:15px; }
+  #work-plan .result { margin-top:26px; }
+  #work-plan .headline { font-size:24px; line-height:1.2; letter-spacing:-.65px; font-weight:600; margin:7px 0 9px; }
+  #work-plan .verdict { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--amber); }
+  #work-plan .verdict.good { color:var(--green); }
+  #work-plan .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor; }
+  #work-plan .summary { display:flex; flex-wrap:wrap; gap:7px 19px; font-size:13px; color:var(--sub); margin-bottom:17px; }
+  #work-plan .summary strong { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+  #work-plan .budget { height:15px; border-radius:5px; overflow:hidden; display:flex; background:var(--soft); }
+  #work-plan .budget > span { display:block; min-width:0; }
+  #work-plan .consumed { background:var(--sub); opacity:.45; }
+  #work-plan .reachable { background:var(--brand); }
+  #work-plan .expires { background:repeating-linear-gradient(125deg,var(--amber-soft) 0 5px,var(--amber) 5px 7px); }
+  #work-plan .legend { display:flex; flex-wrap:wrap; gap:10px 20px; margin-top:9px; font-size:12px; color:var(--sub); }
+  #work-plan .legend span { display:flex; align-items:center; gap:6px; }
+  #work-plan .swatch { display:inline-block; width:9px; height:9px; border-radius:2px; }
+  #work-plan .timeline { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:7px; margin-top:23px; }
+  #work-plan .date-col { border:0; border-radius:8px; padding:11px 5px 10px; background:var(--soft); text-align:center; min-width:0; }
+  #work-plan .date-col[aria-pressed="true"] { outline:2px solid var(--brand); outline-offset:2px; }
+  #work-plan .date-col.off { background:transparent; color:var(--sub); }
+  #work-plan .weekday { font-size:12px; font-weight:500; }
+  #work-plan .date { font-size:11px; color:var(--sub); margin-top:3px; }
+  #work-plan .slots { min-height:57px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:9px 0; }
+  #work-plan .slot { display:block; border-radius:4px; background:var(--brand-soft); color:var(--brand); padding:3px 5px; font-size:11px; font-variant-numeric:tabular-nums; }
+  #work-plan .slot.extra { background:var(--green-soft); color:var(--green); }
+  #work-plan .day-capacity { font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; }
+  #work-plan .date-col.off .day-capacity { font-weight:400; font-size:11px; }
+  #work-plan .selected { font-size:12px; color:var(--sub); padding-top:12px; min-height:38px; }
+  #work-plan .action-row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+  #work-plan .action { background:var(--ink); color:var(--paper); border:0; border-radius:7px; padding:10px 14px; font-size:13px; font-weight:500; }
+  #work-plan .action.secondary { background:var(--soft); color:var(--ink); }
+  #work-plan .action:disabled { cursor:default; opacity:.55; }
+  #work-plan .help { max-width:460px; font-size:12px; color:var(--sub); margin-top:11px; }
+  #work-plan details { margin-top:19px; font-size:12px; color:var(--sub); }
+  #work-plan summary { cursor:pointer; width:fit-content; }
+  #work-plan .assumptions { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding-top:14px; }
+  #work-plan .assumptions label { display:grid; gap:8px; }
+  #work-plan input[type="range"] { width:100%; accent-color:var(--brand); }
+  #work-plan .assumption-note { grid-column:1 / -1; }
+  #work-plan .error { color:light-dark(#af3434,#ff9d9d); margin-top:10px; }
+  #work-plan .app-example { margin-top:31px; padding-top:24px; border-top:1px solid var(--line); }
+  #work-plan .app-label { font-size:12px; color:var(--sub); margin-bottom:12px; }
+  #work-plan .app { border-radius:12px; overflow:hidden; background:var(--paper); border:1px solid var(--line); box-shadow:0 8px 30px #00000009; color:var(--ink); }
+  #work-plan .app-top { display:flex; align-items:center; gap:7px; padding:12px 16px; background:var(--soft); font-size:12px; }
+  #work-plan .traffic { display:flex; gap:5px; margin-right:7px; }
+  #work-plan .traffic i { width:8px; height:8px; border:1px solid var(--line); border-radius:50%; }
+  #work-plan .app-top b { font-weight:600; }
+  #work-plan .app-body { display:grid; grid-template-columns:125px minmax(0,1fr); }
+  #work-plan .sidebar { padding:22px 10px; background:var(--soft); font-size:12px; }
+  #work-plan .sidebar div { padding:9px 11px; margin-bottom:3px; border-radius:6px; }
+  #work-plan .sidebar .active { background:var(--brand-soft); color:var(--brand); font-weight:600; }
+  #work-plan .account { padding:22px; min-width:0; }
+  #work-plan .account-head { display:flex; gap:11px; align-items:center; margin-bottom:21px; }
+  #work-plan .provider { width:31px; height:31px; object-fit:contain; }
+  #work-plan .account-head b { font-size:15px; font-weight:600; }
+  #work-plan .account-head small { display:block; color:var(--sub); margin-top:3px; font-size:12px; }
+  #work-plan .app-amount { display:flex; justify-content:space-between; align-items:baseline; font-size:13px; margin-bottom:9px; }
+  #work-plan .app-amount strong { font-size:22px; font-weight:500; letter-spacing:-.5px; }
+  #work-plan .app-amount small { font-size:12px; font-weight:400; color:var(--sub); margin-left:4px; }
+  #work-plan .app-meter { height:6px; display:flex; border-radius:6px; overflow:hidden; background:var(--soft); }
+  #work-plan .app-foot { display:flex; justify-content:space-between; gap:8px; margin-top:8px; font-size:11px; color:var(--sub); }
+  #work-plan .app-plan { margin-top:22px; border-top:1px solid var(--line); padding-top:17px; }
+  #work-plan .app-plan-head { display:flex; justify-content:space-between; gap:10px; align-items:baseline; font-size:13px; font-weight:600; }
+  #work-plan .app-plan-head button { border:0; padding:2px 0; background:transparent; font-size:12px; font-weight:400; color:var(--brand); }
+  #work-plan .app-status { margin-top:9px; color:var(--amber); font-size:13px; font-weight:500; }
+  #work-plan .app-status.good { color:var(--green); }
+  #work-plan .app-plan p { font-size:12px; color:var(--sub); margin-top:6px; }
+  #work-plan .mini-days { display:flex; gap:5px; margin-top:13px; flex-wrap:wrap; }
+  #work-plan .mini-day { font-size:11px; padding:4px 6px; border-radius:4px; background:var(--soft); color:var(--sub); }
+  #work-plan .mini-day.on { background:var(--brand-soft); color:var(--brand); }
+  #work-plan .prototype-note { font-size:11px; color:var(--sub); margin-top:10px; }
+  @media(max-width:560px) {
+    #work-plan .top { padding-right:25px; }
+    #work-plan h1 { font-size:23px; }
+    #work-plan .editor { padding:14px; }
+    #work-plan .timeline { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+    #work-plan .slots { min-height:52px; }
+    #work-plan .headline { font-size:22px; }
+    #work-plan .app-body { grid-template-columns:1fr; }
+    #work-plan .sidebar { display:none; }
+    #work-plan .account { padding:18px; }
+    #work-plan .assumptions { grid-template-columns:1fr; }
+    #work-plan .assumption-note { grid-column:1; }
+    #work-plan .times { gap:10px; }
+  }
+  @media(pointer:coarse) { #work-plan button { min-height:44px; } #work-plan .check { padding-block:5px; } }
+</style>
+</head>
+<body>
+<main id="work-plan">
+  <header class="top">
+    <div class="eyebrow">Claude Team · Verbrauchsplan</div>
+    <h1>Passt das Wochenbudget in deine Arbeitszeit?</h1>
+    <p class="intro muted">Spiele deine 20-Stunden-Woche durch. Die Vorschau zählt, wann du neue 5h-Kontingente nutzen kannst und wie viel vom Wochenbudget damit erreichbar ist.</p>
+  </header>
+  <div class="segmented" role="group" aria-label="Planungszeitraum">
+    <button id="whole-mode" type="button" aria-pressed="true">Volle Woche</button>
+    <button id="current-mode" type="button" aria-pressed="false">Ab jetzt · 48 % übrig</button>
+  </div>
+  <div id="period" class="dates"></div>
+  <section class="editor" aria-label="Arbeitszeiten einstellen" id="schedule-editor">
+    <div class="section-label"><span>Deine Arbeitstage</span><span id="work-hours" class="muted"></span></div>
+    <div class="days" id="weekdays"></div>
+    <div class="times">
+      <label class="time">Arbeitsbeginn<select id="start-time" aria-label="Arbeitsbeginn"></select></label>
+      <label class="time">Feierabend<select id="end-time" aria-label="Feierabend"></select></label>
+    </div>
+    <div class="checks">
+      <label class="check"><input id="lunch" type="checkbox" checked><span>30 Minuten Pause von 12:00 bis 12:30</span></label>
+      <label class="check"><input id="continue" type="checkbox" checked><span>Agenten dürfen in Pausen und nach Feierabend selbstständig weiterlaufen</span></label>
+    </div>
+    <p class="error small" id="error" role="alert" hidden></p>
+  </section>
+  <section class="result" aria-label="Ergebnis deiner Planung">
+    <div class="verdict" id="verdict"><span class="dot"></span><span id="verdict-label"></span></div>
+    <div class="headline" id="headline" aria-live="polite"></div>
+    <div class="summary" id="summary"></div>
+    <div class="budget" id="budget" role="img"></div>
+    <div class="legend" id="legend"></div>
+    <div class="timeline" id="timeline" role="group" aria-label="Startmöglichkeiten bis zum Wochenreset"></div>
+    <div class="selected" id="selected-detail" aria-live="polite"></div>
+    <div class="action-row">
+      <button class="action" id="extra-button" type="button"></button>
+      <span class="small muted" id="extra-summary"></span>
+    </div>
+    <p class="help" id="guidance"></p>
+    <details>
+      <summary>Womit rechnet die Vorschau?</summary>
+      <div class="assumptions">
+        <label><span>Volles Kontingent ≈ <b id="quota-label">10 %</b> der Woche</span><input id="quota" type="range" min="5" max="20" step="0.5" value="10"></label>
+        <label><span>Agentenlast: ein Kontingent in <b id="burn-label">40 Min.</b></span><input id="burn" type="range" min="10" max="300" step="10" value="40"></label>
+        <p class="assumption-note">Schätzwerte aus deinen Team-Läufen. Ein Start öffnet ein 5-Stunden-Fenster; das Kontingent kann schon nach etwa 40 Minuten verbraucht sein. Starts liegen mindestens fünf Stunden auseinander. Der Wochenreset und Arbeitszeiten werden in Europe/Berlin gerechnet. Für den Beginn wird ein volles 5h-Kontingent angenommen.</p>
+      </div>
+    </details>
+  </section>
+  <section class="app-example" aria-label="Beispiel für die App">
+    <div class="app-label">So könnte es in Juicebars aussehen</div>
+    <div class="app">
+      <div class="app-top"><span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span><b>juicebars</b><span class="muted">/ Übersicht</span></div>
+      <div class="app-body">
+        <nav class="sidebar" aria-label="App-Beispiel"><div class="active">Übersicht</div><div>Nutzung</div><div>Gutschriften</div><div>Konten</div></nav>
+        <div class="account">
+          <div class="account-head"><img class="provider" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNTYiIGhlaWdodD0iMjU3IiBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJ4TWlkWU1pZCIgdmlld0JveD0iMCAwIDI1NiAyNTciPjxwYXRoIGZpbGw9IiNEOTc3NTciIGQ9Im01MC4yMjggMTcwLjMyMSA1MC4zNTctMjguMjU3Ljg0My0yLjQ2My0uODQzLTEuMzYxaC0yLjQ2MmwtOC40MjYtLjUxOC0yOC43NzUtLjc3OC0yNC45NTItMS4wMzctMjQuMTc1LTEuMjk2LTYuMDkyLTEuMjk3TDAgMTI1Ljc5NmwuNTgzLTMuNzU5IDUuMTItMy40MzQgNy4zMjQuNjQ4IDE2LjIwMiAxLjEwMSAyNC4zMDQgMS42ODUgMTcuNjI5IDEuMDM3IDI2LjExOCAyLjcyMmg0LjE0OGwuNTgzLTEuNjg1LTEuNDI2LTEuMDM3LTEuMTAxLTEuMDM3LTI1LjE0Ny0xNy4wNDUtMjcuMjItMTguMDE3LTE0LjI1OC0xMC4zNy03LjcxMy01LjI1LTMuODg4LTQuOTI1LTEuNjg1LTEwLjc1OCA3LTcuNzEzIDkuMzk3LjY0OSAyLjM5OC42NDggOS41MjcgNy4zMjMgMjAuMzUgMTUuNzVMOTQuODE3IDkxLjlsMy44ODkgMy4yNCAxLjU1NS0xLjEwMi4xOTUtLjc3Ny0xLjc1LTIuOTE3LTE0LjQ1My0yNi4xMTgtMTUuNDI1LTI2LjU3Mi02Ljg3LTExLjAxOC0xLjgxNC02LjYxYy0uNjQ4LTIuNzIzLTEuMTAyLTQuOTkxLTEuMTAyLTcuNzc4bDcuOTcyLTEwLjgyM0w3MS40MiAwIDgyLjA1IDEuNDI2bDQuNDcyIDMuODg4IDYuNjEgMTUuMTAxIDEwLjY5NCAyMy43ODYgMTYuNTkxIDMyLjM0IDQuODYxIDkuNTkyIDIuNTkyIDguODc5Ljk3MyAyLjcyMmgxLjY4NXYtMS41NTZsMS4zNi0xOC4yMTEgMi41MjgtMjIuMzYgMi40NjMtMjguNzc2Ljg0My04LjEgNC4wMTgtOS43MjIgNy45NzEtNS4yNSA2LjIyMiAyLjk4MSA1LjEyIDcuMzI0LS43MTMgNC43My0zLjA0NiAxOS43NjgtNS45NjIgMzAuOTgtMy44ODkgMjAuNzM5aDIuMjY4bDIuNTkzLTIuNTkzIDEwLjQ5OS0xMy45MzQgMTcuNjI4LTIyLjAzNiA3Ljc3OC04Ljc0OSA5LjA3My05LjY1NyA1LjgzMy00LjYwMWgxMS4wMThsOC4xIDEyLjA1NS0zLjYyOCAxMi40NDMtMTEuMzQyIDE0LjM4OC05LjM5OCAxMi4xODQtMTMuNDggMTguMTQ3LTguNDI2IDE0LjUxOC43NzggMS4xNjYgMi4wMS0uMTk0IDMwLjQ2LTYuNDgxIDE2LjQ2Mi0yLjk4MiAxOS42MzctMy4zNyA4Ljg4IDQuMTQ4Ljk3MSA0LjIxMy0zLjUgOC42Mi0yMC45OTggNS4xODQtMjQuNjI4IDQuOTI2LTM2LjY4MiA4LjY4NS0uNDU0LjMyNC41MTkuNjQ4IDE2LjUyNiAxLjU1NSA3LjA2NS4zODloMTcuMzA0bDMyLjIxIDIuMzk4IDguNDI2IDUuNTc0IDUuMDU1IDYuODA1LS44NDMgNS4xODQtMTIuOTYyIDYuNjExLTE3LjQ5OC00LjE0OC00MC44My05LjcyMS0xNC0zLjVoLTEuOTQ0djEuMTY3bDExLjY2NiAxMS40MDYgMjEuMzg3IDE5LjMxNCAyNi43NjcgMjQuODg3IDEuMzYgNi4xNTctMy40MzQgNC44Ni0zLjYzLS41MTgtMjMuNTI2LTE3LjY5My05LjA3My03Ljk3Mi0yMC41NDUtMTcuMzA0aC0xLjM2djEuODE0bDQuNzMgNi45MzUgMjUuMDE3IDM3LjU5IDEuMjk2IDExLjUzNi0xLjgxNCAzLjc2LTYuNDgxIDIuMjY4LTcuMTMtMS4yOTctMTQuNjQ3LTIwLjU0NC0xNS4xLTIzLjEzOC0xMi4xODUtMjAuNzM5LTEuNDkuODQzLTcuMTk0IDc3LjQ0OC0zLjM3IDMuOTUzLTcuNzc4IDIuOTgxLTYuNDgtNC45MjUtMy40MzYtNy45NzIgMy40MzUtMTUuNzQ5IDQuMTQ4LTIwLjU0NCAzLjM3LTE2LjMzMyAzLjA0Ni0yMC4yODUgMS44MTUtNi43NC0uMTMtLjQ1NC0xLjQ5LjE5NC0xNS4yOTUgMjAuOTk5LTIzLjI2NyAzMS40MzMtMTguNDA2IDE5LjcwMi00LjQwNyAxLjc1LTcuNjQ4LTMuOTU0LjcxMy03LjA2NCA0LjI3Ny02LjI4NiAyNS40Ny0zMi40MDUgMTUuMzYtMjAuMDkyIDkuOTE3LTExLjYtLjA2NS0xLjY4NmgtLjU4M0w0NC4wNyAxOTguMTI1bC0xMi4wNTUgMS41NTUtNS4xODUtNC44Ni42NDgtNy45NzIgMi40NjMtMi41OTMgMjAuMzUtMTMuOTk5LS4wNjQuMDY1WiI+PC9wYXRoPjwvc3ZnPg==" alt=""><div><b>Claude · Arbeit</b><small>Team · 5×</small></div></div>
+          <div class="app-amount"><span>Woche</span><span><strong id="app-remaining">100</strong><small>% übrig</small></span></div>
+          <div class="app-meter" id="app-meter"></div>
+          <div class="app-foot"><span id="app-reset"></span><span>Geschätzt</span></div>
+          <div class="app-plan">
+            <div class="app-plan-head"><span>Dein Arbeitsplan</span><button id="app-edit" type="button">Bearbeiten</button></div>
+            <div class="app-status" id="app-status"></div>
+            <p id="app-plan-detail"></p>
+            <div class="mini-days" id="app-days"></div>
+            <p id="app-advice"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="prototype-note">Interaktiver Entwurf · Einstellungen gelten nur hier. „Ab jetzt“ verwendet den gespeicherten Stand vom 22.10.2026, 19:34 Uhr; keine Live-Abfrage.</p>
+  </section>
+</main>
+<script id="planning-logic">
+// PROTOTYPE. Pure planning functions; no DOM, storage, requests or production integration.
+const Planner = (() => {
+  const MIN=60000, FIVE=300*MIN, names=['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const parts=t=>Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(t)).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+  function at(date, minutes) {
+    const [y,m,d]=date.split('-').map(Number),h=Math.floor(minutes/60),mi=minutes%60;
+    const wanted=Date.UTC(y,m-1,d,h,mi); let t=wanted;
+    for(let i=0;i<3;i++){const p=parts(t),shown=Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute);t+=wanted-shown;}
+    return t;
+  }
+  function dates(from,to) {
+    const a=parts(from),b=parts(to),end=`${b.year}-${b.month}-${b.day}`;
+    let date=`${a.year}-${a.month}-${a.day}`,out=[];
+    for(let i=0;i<10;i++) {out.push(date);if(date===end)break; const d=new Date(Date.UTC(+date.slice(0,4),+date.slice(5,7)-1,+date.slice(8,10)+1));date=d.toISOString().slice(0,10);}
+    return out;
+  }
+  const weekday=date=>new Date(date+'T12:00:00Z').getUTCDay();
+  function context(state) {
+    return state.mode==='current'?{from:Date.parse('2026-10-22T19:34:02+02:00'),until:Date.parse('2026-10-28T13:00:00+01:00'),remaining:48}:{from:Date.parse('2026-10-28T13:00:00+01:00'),until:Date.parse('2026-11-04T13:00:00+01:00'),remaining:100};
+  }
+  function intervals(state,c,extras=[]) {
+    const out=[];
+    for(const date of dates(c.from,c.until)) {
+      if(!state.days.includes(weekday(date)))continue;
+      const raw=state.lunch?[[state.start,Math.min(state.end,720)],[Math.max(state.start,750),state.end]]:[[state.start,state.end]];
+      for(const [a,b] of raw)if(b>a){const from=Math.max(c.from,at(date,a)),until=Math.min(c.until,at(date,b));if(until>from)out.push({from,until,date,extra:false});}
+    }
+    for(const e of extras)if(e.until>c.from&&e.from<c.until)out.push({...e,from:Math.max(e.from,c.from),until:Math.min(e.until,c.until),extra:true});
+    return out.sort((a,b)=>a.from-b.from);
+  }
+  function simulate(state,c,windows) {
+    let cursor=c.from;const slots=[];
+    for(let i=0;i<100;i++) {
+      const iv=windows.find(w=>w.until>cursor);if(!iv)break;
+      const start=Math.max(cursor,iv.from);if(start>=c.until)break;
+      const end=Math.min(c.until,start+FIVE);
+      const active=state.continue?end-start:windows.reduce((sum,w)=>sum+Math.max(0,Math.min(end,w.until)-Math.max(start,w.from)),0);
+      const share=Math.min(1,active/(state.burn*MIN));
+      slots.push({start,end,share,date:iv.date,extra:iv.extra});cursor=start+FIVE;
+    }
+    return slots;
+  }
+  function extraIntervals(state,c,baseSlots,gap) {
+    const need=Math.ceil(Math.max(0,gap)/state.quota-1e-8),all=dates(c.from,c.until),candidates=[];
+    for(const date of all){
+      const daySlots=baseSlots.filter(s=>s.date===date);
+      const earliest=daySlots.length?daySlots[daySlots.length-1].start+FIVE:at(date,state.end);
+      const from=Math.max(c.from,earliest,at(date,state.end));
+      if(from+state.burn*MIN>c.until||from>=at(date,22*60))continue;
+      const rank=state.days.includes(weekday(date))?0:10;
+      const pref={5:0,2:1,4:2,1:3,3:4,6:5,0:6}[weekday(date)];
+      candidates.push({from,until:from+state.burn*MIN,date,rank:rank+pref});
+    }
+    return candidates.sort((a,b)=>a.rank-b.rank||a.from-b.from).slice(0,need).sort((a,b)=>a.from-b.from);
+  }
+  function plan(state) {
+    const c=context(state),base=simulate(state,c,intervals(state,c));
+    const baseCapacity=base.reduce((n,s)=>n+s.share*state.quota,0),gap=Math.max(0,c.remaining-baseCapacity);
+    const proposed=extraIntervals(state,c,base,gap),extra=state.extras?proposed:[];
+    const slots=state.extras?simulate(state,c,intervals(state,c,extra)):base;
+    const units=slots.reduce((n,s)=>n+s.share,0),capacity=units*state.quota;
+    const reachable=Math.min(c.remaining,capacity),expiring=Math.max(0,c.remaining-capacity);
+    const nominalDays=state.days.length, lunchMinutes=state.lunch?Math.max(0,Math.min(state.end,750)-Math.max(state.start,720)):0;
+    return {c,slots,base,proposed,extra,units,capacity,reachable,expiring,needed:c.remaining/state.quota,load:capacity?c.remaining/capacity:Infinity,weeklyHours:nominalDays*Math.max(0,state.end-state.start-lunchMinutes)/60,dayDates:dates(c.from,c.until)};
+  }
+  return {plan,at,weekday,names,parts};
+})();
+</script>
+<script>
+(() => {
+  const root=document.getElementById('work-plan'),$=id=>root.querySelector('#'+id);
+  function syncTheme() {
+    const background=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
+    let dark=matchMedia('(prefers-color-scheme: dark)').matches;
+    if(background){const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');ctx.fillStyle=background;ctx.fillRect(0,0,1,1);const [r,g,b]=ctx.getImageData(0,0,1,1).data;dark=(r*.2126+g*.7152+b*.0722)<128;}
+    root.style.colorScheme=dark?'dark':'light';
+  }
+  syncTheme();
+  new MutationObserver(syncTheme).observe(document.documentElement,{attributes:true,attributeFilter:['style','class','data-theme']});
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',syncTheme);
+  const state={mode:'whole',days:[1,2,4,5],start:480,end:810,lunch:true,continue:true,burn:40,quota:10,extras:false,selected:null};
+  const fmt=x=>new Intl.NumberFormat('de-DE',{maximumFractionDigits:1}).format(Math.abs(x)<1e-8?0:x);
+  const clock=t=>new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit'}).format(new Date(t));
+  const date=t=>new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',day:'numeric',month:'numeric'}).format(new Date(t));
+  const shortDate=d=>new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',day:'numeric',month:'numeric'}).format(new Date(d+'T12:00:00Z'));
+  const mins=s=>{const [h,m]=s.split(':').map(Number);return h*60+m;};
+  const timeValue=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  const options=Array.from({length:96},(_,i)=>`<option value="${timeValue(i*15)}">${timeValue(i*15)} Uhr</option>`).join('');
+  $('start-time').innerHTML=options;$('end-time').innerHTML=options;
+  const dayName=d=>Planner.names[Planner.weekday(d)];
+  function render() {
+    $('start-time').value=timeValue(state.start);$('end-time').value=timeValue(state.end);$('lunch').checked=state.lunch;$('continue').checked=state.continue;
+    $('whole-mode').setAttribute('aria-pressed',state.mode==='whole');$('current-mode').setAttribute('aria-pressed',state.mode==='current');
+    const valid=Number.isFinite(state.start)&&Number.isFinite(state.end)&&state.end>state.start;
+    $('error').hidden=valid;$('error').textContent=valid?'':'Der Feierabend muss nach dem Arbeitsbeginn liegen.';
+    if(!valid)return;
+    const p=Planner.plan(state),loss=p.expiring>.05,consumed=100-p.c.remaining;
+    $('weekdays').innerHTML=[1,2,3,4,5,6,0].map(d=>`<button type="button" class="day" data-day="${d}" aria-label="${['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'][d]}" aria-pressed="${state.days.includes(d)}">${Planner.names[d]}</button>`).join('');
+    $('work-hours').textContent=`${fmt(p.weeklyHours)} h / Woche`;
+    $('period').textContent=state.mode==='whole'?`Beispiel einer vollen Kontingentwoche · Mi ${date(p.c.from)} bis Mi ${date(p.c.until)}, ${clock(p.c.until)} Uhr`:`Gespeicherter Stand Do 22.10., 19:34 · Reset Mi ${date(p.c.until)}, ${clock(p.c.until)} Uhr · Europe/Berlin`;
+    $('verdict').classList.toggle('good',!loss);$('verdict-label').textContent=loss?'Deine Arbeitszeiten begrenzen die nutzbare Kapazität':'Das restliche Budget passt in deinen Plan';
+    $('headline').textContent=loss?`Etwa ${fmt(p.expiring)} % bleiben außerhalb deines Plans.`:state.extras?'Mit den Zusatzstarts ist das Budget erreichbar.':'Du brauchst keine zusätzlichen Zeitfenster.';
+    const available=p.slots.length;
+    $('summary').innerHTML=`<span><strong>${available}</strong> mögliche Starts</span><span><strong>${fmt(p.needed)}</strong> volle Kontingente benötigt</span><span><strong>${fmt(p.units)}</strong> Kontingente maximal nutzbar</span>`;
+    $('budget').innerHTML=`<span class="consumed" style="width:${consumed}%"></span><span class="reachable" style="width:${p.reachable}%"></span><span class="expires" style="width:${p.expiring}%"></span>`;
+    $('budget').setAttribute('aria-label',`${fmt(consumed)} Prozent verbraucht, ${fmt(p.reachable)} Prozent im Plan erreichbar, ${fmt(p.expiring)} Prozent verbleiben beim Reset.`);
+    $('legend').innerHTML=(consumed?`<span><i class="swatch consumed"></i>${fmt(consumed)} % verbraucht</span>`:'')+`<span><i class="swatch reachable"></i>${fmt(p.reachable)} % im Plan erreichbar</span>`+(loss?`<span><i class="swatch expires"></i>${fmt(p.expiring)} % bleiben übrig</span>`:'');
+    if(!state.selected||!p.dayDates.includes(state.selected))state.selected=p.slots[0]?.date||p.dayDates[0];
+    $('timeline').innerHTML=p.dayDates.map(d=>{
+      const slots=p.slots.filter(s=>s.date===d),cap=slots.reduce((sum,s)=>sum+s.share*state.quota,0);
+      const chips=slots.map(s=>`<span class="slot${s.extra?' extra':''}">${s.extra?'+ ':''}${clock(s.start)}</span>`).join('');
+      return `<button type="button" class="date-col${slots.length?'':' off'}" data-date="${d}" aria-pressed="${state.selected===d}" aria-label="${dayName(d)} ${shortDate(d)}: ${slots.length} Starts, ${fmt(cap)} Prozent Wochenkapazität"><div class="weekday">${dayName(d)}</div><div class="date">${shortDate(d)}</div><div class="slots">${chips||'<span class="small">—</span>'}</div><div class="day-capacity">${slots.length?`bis ${fmt(cap)} %`:'kein Start'}</div></button>`;
+    }).join('');
+    const selected=p.slots.filter(s=>s.date===state.selected);
+    $('selected-detail').textContent=selected.length?`${dayName(state.selected)} ${shortDate(state.selected)} · ${selected.map(s=>`${clock(s.start)} Uhr${s.share<.999?` · ${fmt(s.share*100)} % eines Kontingents`:''}${s.extra?' zusätzlich':''}`).join(' / ')}${state.continue?' · Läufe dürfen nach Feierabend enden.':' · Verbrauch nur während deiner Arbeitszeiten.'}`:`${dayName(state.selected)} ${shortDate(state.selected)} · Hier ist kein nutzbarer Start eingeplant.`;
+    const extras=p.proposed.length;
+    $('extra-button').disabled=!state.extras&&!loss;
+    $('extra-button').classList.toggle('secondary',state.extras||!loss);
+    $('extra-button').textContent=state.extras?'Zusatzstarts entfernen':loss?`${extras} Zusatzstart${extras===1?'':'s'} ausprobieren`:'Keine Zusatzstarts nötig';
+    $('extra-summary').textContent=(state.extras||loss)&&extras?p.proposed.map(e=>`${dayName(e.date)} ${shortDate(e.date)} ${clock(e.from)}`).join(' · '):'';
+    const regularDays=new Set(p.slots.filter(s=>!s.extra).map(s=>s.date)).size;
+    $('guidance').textContent=!available?'Wähle mindestens einen Arbeitstag mit einer Startzeit.':loss?`${fmt(p.expiring/state.quota)} weitere volle Kontingente fehlen. Die Vorschläge ergänzen Starts bevorzugt an deinen Arbeitstagen.`:`Für den Wochenrest reichen im Mittel ${fmt(Math.min(100,p.load*100))} % je verfügbarem Kontingent${regularDays?` an ${regularDays} Arbeitstagen`:''}.`;
+    $('quota-label').textContent=`${fmt(state.quota)} %`;$('burn-label').textContent=`${state.burn} Min.`;
+    $('app-remaining').textContent=fmt(p.c.remaining);$('app-reset').textContent=`Reset Mi ${date(p.c.until)}, ${clock(p.c.until)}`;
+    $('app-meter').innerHTML=`<span class="reachable" style="width:${p.reachable}%"></span><span class="expires" style="width:${p.expiring}%"></span>`;
+    $('app-status').classList.toggle('good',!loss);$('app-status').textContent=loss?`${fmt(p.expiring)} % außerhalb deines Arbeitsplans`:'Wochenrest in deinen Arbeitszeiten erreichbar';
+    if(state.extras&&!loss)$('app-status').textContent='Wochenrest mit Zusatzstarts erreichbar';
+    $('app-plan-detail').textContent=`${p.slots.length} Starts bis zum Reset · ca. ${fmt(p.reachable)} % zusätzlich nutzbar`;
+    $('app-days').innerHTML=[1,2,3,4,5,6,0].map(d=>`<span class="mini-day${state.days.includes(d)?' on':''}">${Planner.names[d]}</span>`).join('');
+    $('app-advice').textContent=loss?`${extras} Zusatzstarts würden die Lücke verkleinern${extras?`, z.B. ${p.proposed.map(e=>`${dayName(e.date)} ${clock(e.from)}`).join(' und ')}`:'.'}`:`${timeValue(state.start)}–${timeValue(state.end)} Uhr${state.lunch?' · 30 Min. Pause':''}${state.extras?' · Zusatzstarts aktiv':''}`;
+    window.workPlanPreview={state:{...state},result:p,Planner};
+  }
+  function change(fn){fn();state.extras=false;render();}
+  $('weekdays').addEventListener('click',e=>{const b=e.target.closest('[data-day]');if(!b)return;const d=+b.dataset.day;change(()=>state.days=state.days.includes(d)?state.days.filter(x=>x!==d):[...state.days,d]);});
+  $('timeline').addEventListener('click',e=>{const b=e.target.closest('[data-date]');if(b){state.selected=b.dataset.date;render();}});
+  $('start-time').addEventListener('change',e=>change(()=>state.start=mins(e.target.value)));
+  $('end-time').addEventListener('change',e=>change(()=>state.end=mins(e.target.value)));
+  $('lunch').addEventListener('change',e=>change(()=>state.lunch=e.target.checked));
+  $('continue').addEventListener('change',e=>change(()=>state.continue=e.target.checked));
+  $('quota').addEventListener('input',e=>change(()=>state.quota=+e.target.value));
+  $('burn').addEventListener('input',e=>change(()=>state.burn=+e.target.value));
+  $('whole-mode').addEventListener('click',()=>change(()=>{state.mode='whole';state.selected=null;}));
+  $('current-mode').addEventListener('click',()=>change(()=>{state.mode='current';state.selected=null;}));
+  $('extra-button').addEventListener('click',()=>{state.extras=!state.extras;render();});
+  $('app-edit').addEventListener('click',()=>{$('schedule-editor').scrollIntoView({behavior:'smooth',block:'center'});$('start-time').focus({preventScroll:true});});
+  render();
+  console.log('Planning preview ready',JSON.stringify({hours:window.workPlanPreview.result.weeklyHours,capacity:window.workPlanPreview.result.capacity,expiring:window.workPlanPreview.result.expiring,slots:window.workPlanPreview.result.slots.length}));
+})();
+</script>
+</body>
+</html>

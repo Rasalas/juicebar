@@ -57,12 +57,14 @@ public struct AccountConfiguration: Identifiable, Codable, Equatable, Sendable {
     public var profileDirectory: String
     public var monthlyBudget: Double?
     public var useLocalCredentials: Bool
+    public var workSchedule: WorkSchedule?
     public init(id: String = UUID().uuidString, provider: ProviderKind, label: String = "", enabled: Bool = true,
                 executablePath: String = "", profileDirectory: String = "", monthlyBudget: Double? = nil,
-                useLocalCredentials: Bool = true) {
+                useLocalCredentials: Bool = true, workSchedule: WorkSchedule? = nil) {
         self.id = id; self.provider = provider; self.label = label; self.enabled = enabled
         self.executablePath = executablePath; self.profileDirectory = profileDirectory
         self.monthlyBudget = monthlyBudget; self.useLocalCredentials = useLocalCredentials
+        self.workSchedule = workSchedule
     }
     public var displayName: String { label.isEmpty ? provider.name : label }
 }

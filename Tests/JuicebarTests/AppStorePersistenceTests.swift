@@ -5,6 +5,25 @@ import CSQLite
 
 @MainActor
 final class AppStorePersistenceTests: XCTestCase {
+    func testWorkScheduleIsOptInAndOnlyChangesTheSelectedAccount() throws {
+        let store = AppStore(demo: true)
+        var account = try XCTUnwrap(store.accounts.first { $0.provider == .claude })
+        let original = store.snapshots[account.id]
+        XCTAssertTrue(store.workPlan(for: account).isEmpty)
+        XCTAssertFalse(store.weeklyReach(for: account).isEmpty)
+        account.workSchedule = WorkSchedule(isEnabled: true)
+        try store.saveAccount(account, secret: "")
+        XCTAssertEqual(store.accounts.first { $0.id == account.id }?.workSchedule, account.workSchedule)
+        XCTAssertEqual(store.snapshots[account.id], original)
+        XCTAssertFalse(store.workPlan(for: account).isEmpty)
+        XCTAssertTrue(store.weeklyReach(for: account).isEmpty)
+        XCTAssertTrue(store.accounts.filter { $0.id != account.id }.allSatisfy { $0.workSchedule == nil })
+        account.workSchedule?.isEnabled = false
+        try store.saveAccount(account, secret: "")
+        XCTAssertTrue(store.workPlan(for: account).isEmpty)
+        XCTAssertFalse(store.weeklyReach(for: account).isEmpty)
+    }
+
     func testCorruptAccountsStayEmptyAndCannotOverwriteOriginalUntilExplicitRecovery() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-store-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
