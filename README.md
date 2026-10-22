@@ -18,6 +18,7 @@ Juicebars is open source. Direct downloads and updates are free. Mac App Store d
 - Additional local log folders with a choice of supported formats, including compatible tools such as Tau. Duplicate entries count once across manual and automatic discovery.
 - Optional SSH sources using existing host aliases. The remote collector returns usage metadata, not conversations.
 - A theoretical API-cost equivalent based on model-specific token types and published standard prices. Confirmed alpha-model aliases are resolved retrospectively. Usage without a logged estimate or known model price stays unpriced.
+- Redeem a Codex reset credit from Reset credits, with confirmation before spending it.
 - Multiple accounts, provider error isolation, request timeouts and backoff. No analytics or advertising.
 
 The interface supports English and German, follows the system language and offers an override in Settings. Confirmed names and API prices update through a signed data catalog.

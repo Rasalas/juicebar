@@ -19,28 +19,12 @@ public struct CodexProvider: UsageProvider {
     public init() {}
     public func read(configuration: AccountConfiguration, includeHistory: Bool) async throws -> AccountSnapshot {
         let task = Task.detached(priority: .utility) {
-            var env: [String: String] = [:]
-            if !configuration.profileDirectory.isEmpty { env["CODEX_HOME"] = NSString(string: configuration.profileDirectory).expandingTildeInPath }
-            let client = try ProcessClient(executable: ProcessClient.executable("codex", custom: configuration.executablePath),
-                                           arguments: ["app-server", "--stdio"], environment: env, timeout: 18)
+            let client = try CodexControlSession(configuration: configuration)
             defer { client.close() }
-            func request(_ id: Int, _ method: String, _ params: [String: Any]? = nil) throws -> [String: Any] {
-                var object: [String: Any] = ["id": id, "method": method]; if let params { object["params"] = params }
-                try client.send(object)
-                let reply = try client.receive { ($0["id"] as? Int) == id }
-                if let error = reply["error"] as? [String: Any] {
-                    let message = (error["message"] as? String ?? "").lowercased()
-                    if message.contains("auth") || message.contains("login") || message.contains("sign in") { throw ProviderFailure.authentication }
-                    throw ProviderFailure.unsupported(tr("Codex unterstützt diese Abfrage nicht. CLI-Version und Anmeldung prüfen."))
-                }
-                return reply["result"] as? [String: Any] ?? [:]
-            }
-            _ = try request(1, "initialize", ["clientInfo": ["name": "juicebar", "version": "0.1.0"], "capabilities": ["experimentalApi": true]])
-            try client.send(["method": "initialized"])
-            let account = try request(2, "account/read", ["refreshToken": false])
-            let limits = try request(3, "account/rateLimits/read")
+            let account = try client.request(2, "account/read", ["refreshToken": false])
+            let limits = try client.request(3, "account/rateLimits/read")
             var snapshot = try ProviderParsing.codex(limits, configuration: configuration, account: account)
-            if includeHistory, let history = try? request(4, "account/usage/read"), let days = history["dailyUsageBuckets"] as? [[String: Any]] {
+            if includeHistory, let history = try? client.request(4, "account/usage/read"), let days = history["dailyUsageBuckets"] as? [[String: Any]] {
                 let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "yyyy-MM-dd"
                 snapshot.dailyUsage = days.compactMap { raw in
                     guard let day = raw["startDate"] as? String, let date = formatter.date(from: day), let tokens = JSONValue.number(raw["tokens"]) else { return nil }
