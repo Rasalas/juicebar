@@ -1,5 +1,17 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.16 release, 22 October
+
+Work-plan information now stays in the quota popover, with only the green diamond on the bar. All markers share the exact percentage centerline, including the endpoints. The overview reset count opens Reset credits. Available Codex credits have a “Reset einlösen” action with native confirmation, fresh account-identity checks and a persisted idempotency key for interrupted attempts. Regular polling never redeems a credit.
+
+The Swift suite completed 190 tests with seven optional benchmarks skipped and no failures. All 13 Python collector tests passed, as did English/German tray layout, constrained-height and forced-scrollbar cases, and activity persistence. Thirteen new tests cover the redemption protocol and app state using synthetic CLI responses and injected services, including retries across restarts, changed identities, expired credits, concurrent attempts and missing follow-up reads. No reset was redeemed on a real account. Native previews confirm the concise markers and redemption layout; English/German screenshots were refreshed. Both macOS checks passed for source `fe4cdd3`; PR #21 merged as `a41b57d`.
+
+Version 0.1.16, build 20, was packaged from clean tagged source `fe4cdd3`. The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. Copying the app out of the DMG preserved its signature. Both checksum entries passed, and all four downloaded draft assets matched their local originals. The Sparkle archive signature verified against the bundled public key; a changed byte was rejected. Layout and activity persistence also passed in the signed bundle.
+
+The exact build 20 archive was installed through Sparkle using a temporary loopback feed. The installed app passed signature, notarization and Gatekeeper checks. All four account/settings/SSH/path configuration groups remained byte-identical, all 2,569 meaningful observations survived, and the two usage caches retained their 210 and 22 day entries. No real-account redemption request was created. The feed override was removed and the app relaunched against the regular stable feed.
+
+The published stable feed serves build 20, and the public DMG matches the tested local artifact. Website download links target the public 0.1.16 assets.
+
 ## Juicebars 0.1.15 release, 22 October
 
 The account editor adds an optional work schedule, disabled by default, with weekdays and working hours. A green diamond on the existing quota bars marks the daily target or the reserve for upcoming workdays. Compact labels show today's remaining allocation, free-day buffer and estimated extra five-hour windows outside working hours. The conversion uses the account's measured consumption ratio and reported reset. Missing measurements do not produce a claimed five-hour capacity. Both overview and tray have one shared legend at the bottom.
