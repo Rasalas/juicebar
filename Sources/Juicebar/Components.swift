@@ -117,7 +117,7 @@ struct QuotaBar: View {
             Text(expired ? "—" : "\(Int(displayed.rounded()))")
                 .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
             if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(compact ? .caption : .subheadline).foregroundStyle(.secondary) }
-    }
+        }
     }
     private var quotaTrack: some View {
         GeometryReader { proxy in

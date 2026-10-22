@@ -1,5 +1,17 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.15 release, 22 October
+
+The account editor adds an optional work schedule, disabled by default, with weekdays and working hours. A green diamond on the existing quota bars marks the daily target or the reserve for upcoming workdays. Compact labels show today's remaining allocation, free-day buffer and estimated extra five-hour windows outside working hours. The conversion uses the account's measured consumption ratio and reported reset. Missing measurements do not produce a claimed five-hour capacity. Both overview and tray have one shared legend at the bottom.
+
+The local Swift suite completed 177 tests with seven optional benchmarks skipped and no failures. All 13 Python collector tests passed, as did English/German tray layout, forced system scrollbars and activity persistence. Native light/dark previews cover workdays, free days with a buffer and fully reserved weeks in both display modes. English/German screenshots were refreshed; website images loaded without overflow at 1280 and 390 CSS pixels. The CI compiler initially timed out on the quota bar's large SwiftUI expression; extracting its title, track and captions resolved it. PR #19 passed macOS CI and merged as `1e159a4`.
+
+Version 0.1.15, build 17, was packaged from clean tagged source `1498161`. The app and DMG passed Developer ID signing, Apple notarization, stapling and Gatekeeper assessment. The app's signature survived mounting the DMG and copying the app out. Both checksum entries passed. All four files downloaded from the GitHub draft matched their local originals. The Sparkle archive signature verified against the bundled public key; a changed byte was rejected. Repeated signing completed unattended in 0.19 and 0.07 seconds. Native layout and activity persistence also passed in the signed bundle.
+
+Installed 0.1.14 tested the exact signed archive through a temporary loopback feed. A missing ZIP produced a download error and retained 0.1.14. “Remind Me Later” dismissed the valid offer, which appeared again on manual checking. Sparkle downloaded, installed and relaunched 0.1.15, build 17. The installed app passed signature, notarization and Gatekeeper checks. Immediately after installation, all four stored account/settings/SSH/path configuration groups were byte-identical. All 2,542 meaningful observations from the online SQLite backup survived; normal retention removed 77 unchanged older polls. Both usage caches remained, with 210 and 22 activity-day entries. The test feed override was removed and the app restarted with its regular stable feed.
+
+Main macOS CI passed for `1e159a4`. The published stable feed serves build 17, and the public DMG matches the tested local artifact. Download links target the public 0.1.15 assets.
+
 ## Juicebars 0.1.14 release, 21 October
 
 Exhausted menu bar quotas keep a faint provider-colored track in their original slot. The red exhaustion outline and the extra warning badge are removed; approaching-limit forecasts retain their yellow outlines. Native light and dark previews were checked, and English and German screenshots were refreshed.
