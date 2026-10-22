@@ -66,6 +66,9 @@ struct AccountEditor: View {
                     .disabled(store.accounts.contains(where: { $0.id == configuration.id }))
                 TextField(tr("Name"), text: $configuration.label, prompt: Text(configuration.provider.name))
                 Toggle(tr("Verbrauch abrufen"), isOn: $configuration.enabled)
+                if configuration.provider == .codex || configuration.provider == .claude || configuration.provider == .opencodeGo {
+                    WorkScheduleEditor(schedule: $configuration.workSchedule)
+                }
                 if configuration.provider == .codex || configuration.provider == .claude {
                     CLISetupHelp(configuration: configuration)
                     DisclosureGroup(tr("Erweiterte Einrichtung")) {
@@ -106,10 +109,14 @@ struct AccountEditor: View {
                     do { try store.saveAccount(configuration, secret: secret.trimmingCharacters(in: .whitespacesAndNewlines)); dismiss() }
                     catch { self.error = error.localizedDescription }
                 }.buttonStyle(JuiceButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
+                    .disabled(configuration.workSchedule.map { $0.isEnabled && !$0.isValid } ?? false)
             }
         }.padding(28).frame(width: 600).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear {
             budget = configuration.monthlyBudget.map { String($0) } ?? ""
             hasStoredKey = !store.isDemo && store.accounts.contains { $0.id == configuration.id } && SecretStore.contains(account: configuration.id)
+        }
+        .onChange(of: configuration.provider) { _, provider in
+            if provider != .codex && provider != .claude && provider != .opencodeGo { configuration.workSchedule = nil }
         }
     }
 }

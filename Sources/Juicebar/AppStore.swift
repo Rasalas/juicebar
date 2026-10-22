@@ -300,6 +300,9 @@ final class AppStore {
     }
     func saveAccount(_ account: AccountConfiguration, secret: String) throws {
         try database.requireWritablePreference("accounts")
+        if let schedule = account.workSchedule, schedule.isEnabled, !schedule.isValid {
+            throw ProviderFailure.invalidData(tr("Arbeitstage und Arbeitszeit prüfen."))
+        }
         if let old = accounts.first(where: { $0.id == account.id }), old.provider != account.provider {
             throw ProviderFailure.unavailable(tr("Für einen anderen Anbieter bitte ein neues Konto hinzufügen."))
         }
@@ -433,11 +436,17 @@ final class AppStore {
     }
     /// Weekly reach for the account's visible windows; empty after a failed refresh.
     func weeklyReach(for account: AccountConfiguration) -> [WeeklyReach] {
-        guard failures[account.id] == nil, var snapshot = snapshots[account.id] else { return [] }
+        guard account.workSchedule?.isEnabled != true, failures[account.id] == nil, var snapshot = snapshots[account.id] else { return [] }
         snapshot.windows = QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)
         let source: ActivitySource? = account.provider == .claude ? .claude : account.provider == .codex ? .codex : nil
         let hours = UsableHours.resolve(activity: activity, source: source, settings: settings, now: now)
         return WeeklyReach.assess(snapshot: snapshot, history: quotaHistory(for: account.id), hours: hours, now: now)
+    }
+    func workPlan(for account: AccountConfiguration) -> [WorkPlanTarget] {
+        guard let schedule = account.workSchedule, schedule.isEnabled,
+              failures[account.id] == nil, var snapshot = snapshots[account.id] else { return [] }
+        snapshot.windows = QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)
+        return WorkPlanTarget.assess(snapshot: snapshot, history: quotaHistory(for: account.id), schedule: schedule, now: now)
     }
     var trayMeters: [TrayMeter] {
         TraySelection.meters(accounts: accounts, snapshots: snapshots, failures: Set(failures.keys), settings: settings, now: now)

@@ -153,14 +153,6 @@ struct DashboardView: View {
                         }.frame(maxWidth: .infinity, alignment: .top)
                     }
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 7) {
-                        Image(systemName: "diamond.fill").font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
-                        Text(tr("Die Raute zeigt den Stand bei gleichmäßigem Verbrauch. Jeder Balken gehört zu einem eigenen Limit."))
-                    }
-                    let reaches = overviewAccounts.flatMap { account in store.weeklyReach(for: account).filter(\.isRelevant) }
-                    if !reaches.isEmpty { WeeklyReachLegend(expiring: reaches.contains { $0.expiring >= 0.5 }) }
-                }.font(.subheadline).foregroundStyle(.secondary)
             }
             if !store.settings.notificationsEnabled {
                 Panel {
@@ -174,6 +166,12 @@ struct DashboardView: View {
                         Button(tr("Einrichten")) { page = .alerts }.buttonStyle(JuiceButtonStyle())
                     }
                 }
+            }
+            if !store.accounts.filter(\.enabled).isEmpty {
+                let reaches = overviewAccounts.flatMap { account in store.weeklyReach(for: account).filter(\.isRelevant) }
+                let plans = overviewAccounts.flatMap { store.workPlan(for: $0) }
+                QuotaLegend(weekly: !reaches.isEmpty, expiring: reaches.contains { $0.expiring >= 0.5 }, workPlan: !plans.isEmpty)
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
         }
     }
@@ -203,12 +201,14 @@ struct AccountCard: View {
                 }
                 if let snapshot = store.snapshots[account.id] {
                     let reaches = store.weeklyReach(for: account)
+                    let plans = store.workPlan(for: account)
                     ForEach(QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)) { window in
                         QuotaBar(window: window, color: Palette.provider(account.provider), now: store.now,
                                  status: QuotaStatus.assess(window: window, snapshot: snapshot,
                                                           history: store.history[account.id] ?? [], now: store.now,
                                                           hasFailure: store.failures[account.id] != nil),
-                                 reach: WeeklyReach.relevant(for: window.id, in: reaches))
+                                 reach: WeeklyReach.relevant(for: window.id, in: reaches),
+                                 workPlan: WorkPlanTarget.relevant(for: window.id, in: plans))
                     }
                     ForEach(snapshot.money) { metric in
                         HStack {

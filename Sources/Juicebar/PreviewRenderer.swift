@@ -203,6 +203,7 @@ import JuicebarCore
         try renderMenuPopover(store: store, to: directory.appendingPathComponent("menu-popover-\(Localization.language).png"))
         try renderQuotaStates(to: directory)
         try renderWeeklyReach(to: directory)
+        try renderWorkSchedule(to: directory)
         print("Rendered previews: \(directory.path)")
     }
     private static func writeMenuImage(_ menuImage: NSImage, to url: URL) throws {
@@ -344,6 +345,52 @@ import JuicebarCore
             }
         }
     }
+    /// Workday target and free-day reserve in the shipping views, without changing any saved account.
+    private static func renderWorkSchedule(to directory: URL) throws {
+        let store = AppStore(demo: true), calendar = Calendar.current
+        func date(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+        }
+        var account = AccountConfiguration(id: "work-preview", provider: .claude, label: "Claude Team",
+                                           workSchedule: WorkSchedule(isEnabled: true))
+        let reset = calendar.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 13))!
+        func snapshot(_ time: Date, short: Double, shortReset: Date?, used: Double, weeklyReset: Date? = nil) -> AccountSnapshot {
+            AccountSnapshot(configurationID: account.id, identity: account.id, plan: "Team", observedAt: time, source: "fixture", windows: [
+                QuotaWindow(id: "five_hour", title: tr("5 Stunden"), usedPercent: short, resetsAt: shortReset, duration: 18000),
+                QuotaWindow(id: "seven_day", title: tr("Woche"), usedPercent: used, resetsAt: weeklyReset ?? reset, duration: 604800)
+            ])
+        }
+        let training = [snapshot(date(27, 9), short: 0, shortReset: date(27, 14), used: 30, weeklyReset: date(28, 13)),
+                        snapshot(date(27, 10), short: 100, shortReset: date(27, 14), used: 40, weeklyReset: date(28, 13))]
+        store.accounts = [account]; store.activity = nil
+        for (name, current, samples) in [
+            ("workday", snapshot(date(29, 11), short: 80, shortReset: date(29, 13), used: 18),
+             training + [snapshot(date(29, 7, 59), short: 0, shortReset: nil, used: 10)]),
+            ("free", snapshot(date(28, 14), short: 0, shortReset: nil, used: 0), training),
+            ("reserved", snapshot(date(28, 23), short: 0, shortReset: nil, used: 20), training)
+        ] {
+            store.now = current.observedAt; store.snapshots = [account.id: current]; store.history = [account.id: samples + [current]]
+            for dark in [false, true] {
+                let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
+                NSApp.appearance = appearance
+                for mode in QuotaDisplay.allCases {
+                    store.settings.quotaDisplay = mode
+                    let view = TrayView(store: store, maximumHeight: 1000).environment(\.colorScheme, dark ? .dark : .light)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                    try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: appearance,
+                                   to: directory.appendingPathComponent("work-plan-\(name)-\(mode.rawValue)-\(dark ? "dark" : "light")-\(Localization.language).png"))
+                }
+            }
+        }
+        NSApp.appearance = NSAppearance(named: .aqua)
+        for enabled in [false, true] {
+            account.workSchedule?.isEnabled = enabled
+            try renderView(AccountEditor(store: store, configuration: account).background(Color(nsColor: .windowBackgroundColor)),
+                           size: NSSize(width: 600, height: enabled ? 780 : 660), appearance: NSAppearance(named: .aqua)!,
+                           to: directory.appendingPathComponent("work-plan-editor-\(enabled ? "on" : "off")-\(Localization.language).png"))
+        }
+    }
+
     /// The shipping views with fixture data, staged without unrelated desktop apps.
     private static func renderMenuPopover(store: AppStore, to url: URL) throws {
         let appearance = NSAppearance(named: .darkAqua)!

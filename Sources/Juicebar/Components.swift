@@ -71,6 +71,7 @@ struct QuotaBar: View {
     var compact = false
     var status: QuotaStatus = .unavailable
     var reach: WeeklyReach?
+    var workPlan: WorkPlanTarget?
     @State private var showingDetails = false
     @FocusState private var detailsFocused: Bool
     @Environment(\.quotaDisplay) private var mode
@@ -78,6 +79,12 @@ struct QuotaBar: View {
     private var expired: Bool { window.resetsAt.map { $0 <= now } ?? false }
     private var weeklyTarget: WeeklyReach? { reach.flatMap { !expired && $0.shortWindowID == window.id ? $0 : nil } }
     private var weeklyReach: WeeklyReach? { reach.flatMap { !expired && $0.longWindowID == window.id ? $0 : nil } }
+    private var workRemaining: Double? {
+        guard !expired, let workPlan else { return nil }
+        return workPlan.longWindowID == window.id ? workPlan.targetRemainingLong : workPlan.targetRemainingShort
+    }
+    private var workWeek: WorkPlanTarget? { workPlan.flatMap { !expired && $0.longWindowID == window.id ? $0 : nil } }
+    private var barHeight: CGFloat { workRemaining == nil ? (compact ? 13 : 18) : (compact ? 18 : 23) }
     private var weeklyTargetPointsRight: Bool {
         guard let weeklyTarget, let ideal = window.idealPercent(at: now) else { return mode == .used }
         let target = mode.value(used: 100 - weeklyTarget.targetRemainingShort)
@@ -119,14 +126,19 @@ struct QuotaBar: View {
                                 .offset(x: proxy.size.width * mode.value(used: 100 - weeklyTarget.targetRemainingShort) / 100 - 5,
                                         y: barY - 5)
                         }
+                        if let workRemaining {
+                            WorkPlanMarker()
+                                .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: 100 - workRemaining) / 100 - 5)),
+                                        y: barY + 1)
+                        }
                         if !expired, let ideal = window.idealPercent(at: now) {
                             QuotaDiamond()
                                 // Half of the diamond overlaps the bar: center at its upper edge, y = 12.
                                 .offset(x: max(0, min(proxy.size.width - 10, proxy.size.width * mode.value(used: ideal) / 100 - 5)), y: compact ? 2 : 7)
                         }
                     }
-                    .frame(height: compact ? 13 : 18, alignment: .topLeading)
-                }.frame(height: compact ? 13 : 18)
+                    .frame(height: barHeight, alignment: .topLeading)
+                }.frame(height: barHeight)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         resetLabel.fixedSize()
@@ -159,6 +171,8 @@ struct QuotaBar: View {
                 Image(systemName: "arrow.clockwise").font(.caption2).foregroundStyle(.secondary)
                 Text(expired ? tr("Reset erreicht · warte auf neuen Stand") : tr("Reset {0}", relativeTime(reset, now: now)))
                     .foregroundStyle(expired ? .secondary : .primary)
+            } else if window.duration.map({ abs($0 - 18000) <= 1800 }) == true, window.usedPercent == 0 {
+                Text(tr("Startet bei Nutzung")).foregroundStyle(.secondary)
             } else { Text(tr("Resetzeit nicht verfügbar")).foregroundStyle(.secondary) }
         }
     }
@@ -174,7 +188,14 @@ struct QuotaBar: View {
         }
     }
     @ViewBuilder private var reachLabel: some View {
-        if weeklyReach != nil, !reachTitle.isEmpty {
+        if workRemaining != nil {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(reachTitle).foregroundStyle(Palette.green)
+                if let additional = workWeek?.additionalWindows, additional >= 0.05 {
+                    Text(outsideWorkText(additional)).foregroundStyle(.secondary)
+                }
+            }
+        } else if weeklyReach != nil, !reachTitle.isEmpty {
             let expiring = (weeklyReach?.expiring ?? 0) >= 0.5
             HStack(spacing: 4) {
                 if expiring { ExpiryPattern.swatch }
@@ -191,6 +212,17 @@ struct QuotaBar: View {
         return mode == .remaining ? tr("≈ {0} % übrig", left) : tr("≈ {0} % verbraucht", 100 - left)
     }
     private var reachTitle: String {
+        if let plan = workWeek {
+            let amount = Int(plan.todayRemaining.rounded())
+            return plan.isWorkday ? tr("Heute noch ≈ {0} %", amount) : tr("Puffer: ≈ {0} %", amount)
+        }
+        if let workRemaining {
+            if workPlan?.isWorkday == false {
+                return tr("Puffer: ≈ {0} %", Int(max(0, 100 - window.usedPercent - workRemaining).rounded()))
+            }
+            let value = Int(mode.value(used: 100 - workRemaining).rounded())
+            return mode == .remaining ? tr("Tagesziel: ≈ {0} % übrig", value) : tr("Tagesziel: ≈ {0} % verbraucht", value)
+        }
         if weeklyTarget != nil { return tr("Wochenziel: {0}", targetValue) }
         guard let reach = weeklyReach else { return "" }
         let expiring = Int(reach.expiring.rounded())
@@ -199,6 +231,10 @@ struct QuotaBar: View {
     }
     private func windowCount(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(1)).locale(Localization.locale))
+    }
+    private func outsideWorkText(_ value: Double) -> String {
+        let count = value.formatted(.number.precision(.fractionLength(0...1)).locale(Localization.locale))
+        return (value * 10).rounded() == 10 ? tr("≈ 1 Kontingent außerhalb der Arbeitszeit") : tr("≈ {0} Kontingente außerhalb der Arbeitszeit", count)
     }
     private var detailRows: [(String, String)] {
         var rows: [(String, String)] = []
@@ -211,6 +247,13 @@ struct QuotaBar: View {
             }
         }
         if weeklyTarget != nil { rows.append((tr("Wochenziel"), targetValue)) }
+        if let workRemaining {
+            rows.append((tr("Arbeitsplan"), mode == .remaining ? tr("≈ {0} % übrig", Int(workRemaining.rounded())) : tr("≈ {0} % verbraucht", Int((100 - workRemaining).rounded()))))
+            if let plan = workWeek {
+                rows.append((plan.isWorkday ? tr("Heute noch") : tr("Puffer"), tr("≈ {0} %", Int(plan.todayRemaining.rounded()))))
+                if let additional = plan.additionalWindows, additional >= 0.05 { rows.append((tr("Außerhalb der Arbeitszeit"), outsideWorkText(additional))) }
+            }
+        }
         if let reach = weeklyReach {
             let share = (100 * reach.ratio).formatted(.number.precision(.fractionLength(0...1)).locale(Localization.locale))
             rows.append((tr("Ein volles 5-Stunden-Fenster"), tr("≈ {0} % dieses Limits", share)))
@@ -300,6 +343,31 @@ struct QuotaDiamond: View {
         Image(systemName: "diamond.fill")
             .font(.system(size: size, weight: .semibold)).foregroundStyle(.primary)
             .frame(width: size, height: size).accessibilityHidden(true)
+    }
+}
+
+struct WorkPlanMarker: View {
+    var body: some View {
+        Image(systemName: "diamond.fill").font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Palette.green).frame(width: 10, height: 10).accessibilityHidden(true)
+    }
+}
+
+struct QuotaLegend: View {
+    var weekly: Bool = false
+    var expiring: Bool = false
+    var workPlan: Bool = false
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) { entries }
+            VStack(alignment: .leading, spacing: 6) { entries }
+        }
+    }
+    @ViewBuilder private var entries: some View {
+        Label { Text(tr("Zeit-Soll")) } icon: { QuotaDiamond(size: 9) }
+        if weekly { Label { Text(tr("Wochenziel")) } icon: { WeeklyTargetMarker(height: 11) } }
+        if workPlan { Label { Text(tr("Arbeitsplan")) } icon: { WorkPlanMarker() } }
+        if expiring { Label { Text(tr("Verfällt trotz voller Nutzung")) } icon: { ExpiryPattern.swatch } }
     }
 }
 
