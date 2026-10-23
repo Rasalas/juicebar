@@ -62,6 +62,25 @@ final class WorkScheduleTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.targetRemainingShort), 100)
         XCTAssertEqual(try XCTUnwrap(result.additionalWindows), 0)
     }
+    func testPartlyUsedShortWindowDoesNotLookOnTargetWhenWeeklyReserveWasExceeded() throws {
+        let current = snapshot(date("2026-10-30T19:55:00Z"), short: 50,
+                               shortReset: date("2026-10-30T23:09:00Z"), week: 79)
+        let result = try target(current)
+        XCTAssertFalse(result.isWorkday)
+        XCTAssertGreaterThan(result.targetRemainingLong, result.remainingLong)
+        XCTAssertEqual(result.todayRemaining, 0)
+        // The weekly reserve allows no use of this window, even though it is already half spent.
+        XCTAssertEqual(try XCTUnwrap(result.targetRemainingShort), 100)
+    }
+    func testShortMarkerKeepsTheSameAllowanceWhenUsageCrossesTheWeeklyReserve() throws {
+        let shortReset = date("2026-10-30T23:09:00Z")
+        let before = try target(snapshot(date("2026-10-30T19:54:00Z"), short: 0, shortReset: shortReset, week: 56))
+        let after = try target(snapshot(date("2026-10-30T19:55:00Z"), short: 50, shortReset: shortReset, week: 61))
+        XCTAssertEqual(before.targetRemainingLong, after.targetRemainingLong)
+        XCTAssertEqual(try XCTUnwrap(before.targetRemainingShort), 60, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(after.targetRemainingShort), 60, accuracy: 1e-9)
+        XCTAssertGreaterThan(try XCTUnwrap(after.targetRemainingShort), 50)
+    }
     func testRemainingWeekNeedsNoAdditionalTimeAfterEarlierUsage() throws {
         let current = snapshot(date("2026-10-29T19:00:00Z"), week: 52)
         let result = try target(current)
