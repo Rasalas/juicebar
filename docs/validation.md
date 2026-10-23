@@ -1,5 +1,19 @@
 # Validation status · 25 September 2026
 
+## Juicebars 0.1.17 release, 23 October
+
+A negative weekly allowance was clamped to zero before conversion into the five-hour work-plan target. Once the weekly reserve was exceeded, that made the short marker follow the actual remaining balance and falsely appear on target. The conversion now retains the signed difference and clamps only the final percentage. The reported 50% short/21% weekly state reaches a 100% short target, while smaller overruns preserve the previous short-window allowance.
+
+The regression first failed with `50.0 is not equal to 100.0` and then passed after the correction. All 192 Swift tests completed with seven optional tests skipped and no failures; all 13 Python collector tests passed. Tray layout, constrained height, forced scrollbars and persistence passed. Native fixtures were inspected in remaining/dark and used/light modes, and English/German screenshots were refreshed. Both macOS checks passed for tagged source `d06efb3`; PR #23 merged as `a82ab90`.
+
+Version 0.1.17, build 21, passed Developer ID signing, Apple notarization, stapling, Gatekeeper assessment and DMG copy verification. Both checksums passed, all four downloaded draft assets matched their originals, and the Sparkle signature verified while a modified byte was rejected. Layout and persistence also passed in the signed bundle.
+
+The installed 0.1.16 exercised a temporary candidate feed. A missing archive produced the expected error, and postponing the valid offer allowed it to appear again. Sparkle then installed build 21. The installed app passed signature and notarization checks. All four configuration groups stayed byte-identical, all 2,765 meaningful observations survived, and the cached activity report retained 212 day entries. The real account's five-hour work target now reports 100% remaining while the week retains its 42% reserve. No reset credit was redeemed. The feed override was removed, the server stopped and the app relaunched against the regular stable feed.
+
+The deliberate error dialog interrupted the user. AGENTS.md now requires isolated failure tests; the release procedure limits their repetition to updater or packaging changes. The installed user app is reserved for successful updates from valid candidates.
+
+The public stable feed serves build 21; the public DMG matches the tested artifact. Website download links target 0.1.17.
+
 ## Juicebars 0.1.16 release, 22 October
 
 Work-plan information now stays in the quota popover, with only the green diamond on the bar. All markers share the exact percentage centerline, including the endpoints. The overview reset count opens Reset credits. Available Codex credits have a “Reset einlösen” action with native confirmation, fresh account-identity checks and a persisted idempotency key for interrupted attempts. Regular polling never redeems a credit.
