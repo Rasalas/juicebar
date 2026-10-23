@@ -145,7 +145,9 @@ public struct WorkPlanTarget: Equatable, Sendable {
             target = min(100, capacity ?? remaining)
         }
         let shortRemaining = short.map { max(0, min(100, 100 - $0.usedPercent)) }
-        let shortTarget = ratio.flatMap { r in shortRemaining.map { max(0, $0 - max(0, remaining - target) / r) } }
+        // Preserve overspending as well as available budget. Clamping the weekly difference to zero
+        // would pin the short marker to the current fill whenever the weekly reserve is exceeded.
+        let shortTarget = ratio.flatMap { r in shortRemaining.map { min(100, max(0, $0 - (remaining - target) / r)) } }
         return WorkPlanTarget(longWindowID: long.id, shortWindowID: shortTarget == nil ? nil : short?.id,
                               targetRemainingLong: target, targetRemainingShort: shortTarget,
                               remainingLong: remaining, isWorkday: workday != nil, additionalWindows: additional)

@@ -367,7 +367,8 @@ import JuicebarCore
             ("workday", snapshot(date(29, 11), short: 80, shortReset: date(29, 13), used: 18),
              training + [snapshot(date(29, 7, 59), short: 0, shortReset: nil, used: 10)]),
             ("free", snapshot(date(28, 14), short: 0, shortReset: nil, used: 0), training),
-            ("reserved", snapshot(date(28, 23), short: 0, shortReset: nil, used: 20), training)
+            ("reserved", snapshot(date(28, 23), short: 0, shortReset: nil, used: 20), training),
+            ("overspent", snapshot(date(30, 19, 55), short: 50, shortReset: date(30, 23, 9), used: 79), training)
         ] {
             store.now = current.observedAt; store.snapshots = [account.id: current]; store.history = [account.id: samples + [current]]
             for dark in [false, true] {
