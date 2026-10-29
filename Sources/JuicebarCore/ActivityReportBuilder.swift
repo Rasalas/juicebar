@@ -1,7 +1,7 @@
 import Foundation
 
 extension ActivityReport {
-    /// Folds events into a report while they are read. Keeps one 80-byte record per (source, ID) instead of the events,
+    /// Folds events into a report while they are read. Keeps one compact record per (source, ID) instead of the events,
     /// so an import never holds its whole event list. Adding events in the order of a list gives that list's report.
     struct Builder {
         private typealias Digest = (UInt64, UInt64, UInt64, UInt64)
@@ -17,13 +17,14 @@ extension ActivityReport {
             var label: UInt32
             var source: ActivitySource
             var flags: UInt8
-            var preference: (tokens: Double, hasUsage: Bool, session: Date?) {
-                (tokens, flags & Builder.hasUsage != 0, flags & Builder.hasSession != 0 ? Date(timeIntervalSinceReferenceDate: session) : nil)
+            var completeness: UInt8
+            var preference: ActivityEvent.Preference {
+                .init(tokens: tokens, completeness: completeness, session: flags & Builder.hasSession != 0 ? Date(timeIntervalSinceReferenceDate: session) : nil)
             }
         }
         private struct ModelKey: Hashable { var model: String; var provider: String }
-        private struct Model { var key: ModelKey; var rate: CatalogDocument.Rate?; var alias: String? }
-        private static let hasUsage: UInt8 = 1, priced: UInt8 = 2, hasSession: UInt8 = 4, textID: UInt8 = 8
+        private struct Model { var key: ModelKey; var rate: CatalogDocument.Rate?; var alias: String?; var completeness: UInt8 }
+        private static let priced: UInt8 = 2, hasSession: UInt8 = 4, textID: UInt8 = 8
         private static let chunkSize = 16384
         private let now: Date, calendar: Calendar, catalog = ModelCatalog.shared.snapshot
         // Fixed-size chunks and a slot table of record numbers: growing never copies the records,
@@ -37,6 +38,8 @@ extension ActivityReport {
 
         mutating func add(_ event: ActivityEvent) {
             guard event.date <= now, event.tokens.isFinite, event.tokens > 0 else { return }
+            let label = label(for: event)
+            let preference = event.preference(labelCompleteness: models[Int(label)].completeness)
             let digest = CompactEvents.digest(event.id), text = digest == nil ? Text(id: event.id, source: event.source) : nil
             var slot = 0
             let existing: Int?
@@ -44,12 +47,12 @@ extension ActivityReport {
             // Streaming blocks may repeat a message with an updated output count.
             if let existing {
                 let record = chunks[existing / Self.chunkSize][existing % Self.chunkSize]
-                guard !ActivityEvent.keepsFirst(source: event.source, record.preference, (event.tokens, event.usage != nil, event.sessionStartedAt)) else { return }
-                chunks[existing / Self.chunkSize][existing % Self.chunkSize] = self.record(event, digest: digest)
+                guard !ActivityEvent.keepsFirst(source: event.source, record.preference, preference) else { return }
+                chunks[existing / Self.chunkSize][existing % Self.chunkSize] = self.record(event, digest: digest, label: label, preference: preference)
                 return
             }
             if count % Self.chunkSize == 0 { chunks.append([]); chunks[chunks.count - 1].reserveCapacity(Self.chunkSize) }
-            chunks[chunks.count - 1].append(record(event, digest: digest))
+            chunks[chunks.count - 1].append(record(event, digest: digest, label: label, preference: preference))
             count += 1
             if let text { texts[text] = count - 1; return }
             slots[slot] = UInt32(count)
@@ -77,17 +80,19 @@ extension ActivityReport {
             }
         }
 
-        private mutating func record(_ event: ActivityEvent, digest: Digest?) -> Record {
+        private mutating func label(for event: ActivityEvent) -> UInt32 {
             let key = ModelKey(model: event.model, provider: event.provider)
-            let label: UInt32
-            if let id = modelIDs[key] { label = id }
-            else {
-                let alias = catalog.resolve(model: event.model, provider: event.provider)
-                label = UInt32(models.count); modelIDs[key] = label
-                models.append(Model(key: key, rate: APICost.rate(model: event.model, provider: event.provider, catalog: catalog),
-                                    alias: alias.map { "\(event.model) → \($0.displayName)" }))
-            }
-            var flags: UInt8 = (event.usage == nil ? 0 : Self.hasUsage) | (digest == nil ? Self.textID : 0), cost = 0.0
+            if let id = modelIDs[key] { return id }
+            let alias = catalog.resolve(model: event.model, provider: event.provider)
+            let label = UInt32(models.count); modelIDs[key] = label
+            models.append(Model(key: key, rate: APICost.rate(model: event.model, provider: event.provider, catalog: catalog),
+                                alias: alias.map { "\(event.model) → \($0.displayName)" },
+                                completeness: ActivityEvent.labelCompleteness(model: event.model, provider: event.provider)))
+            return label
+        }
+
+        private func record(_ event: ActivityEvent, digest: Digest?, label: UInt32, preference: ActivityEvent.Preference) -> Record {
+            var flags: UInt8 = digest == nil ? Self.textID : 0, cost = 0.0
             if let reported = event.reportedCost, reported.isFinite, reported >= 0 {
                 cost = reported; flags |= Self.priced
             } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let rate = models[Int(label)].rate,
@@ -97,7 +102,7 @@ extension ActivityReport {
             if event.sessionStartedAt != nil { flags |= Self.hasSession }
             return Record(digest: digest ?? (0, 0, 0, 0), date: event.date.timeIntervalSinceReferenceDate, tokens: event.tokens, cost: cost,
                           session: event.sessionStartedAt?.timeIntervalSinceReferenceDate ?? 0, responses: event.responseCount ?? 1,
-                          label: label, source: event.source, flags: flags)
+                          label: label, source: event.source, flags: flags, completeness: preference.completeness)
         }
 
         func report(notices: [String] = [], warnings: [String] = []) -> ActivityReport {

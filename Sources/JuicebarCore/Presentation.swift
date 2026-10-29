@@ -145,14 +145,35 @@ public struct ActivityEvent: Codable, Sendable, Identifiable {
         self.id = id; self.source = source; self.date = date; self.model = model; self.provider = provider; self.tokens = tokens; self.usage = usage
         self.responseCount = responseCount; self.reportedCost = reportedCost; self.sessionStartedAt = sessionStartedAt
     }
-    /// Independent of directory, host and cache traversal order: Pi originals win over forks.
+    /// Duplicates are observations, not additional responses. Pi's earliest known session wins over forks,
+    /// then the largest streaming total wins, then completeness (valid split, logged cost, model, provider,
+    /// explicit response count, in that order). Those preferences are independent of traversal order.
+    /// Equally complete conflicts use the later input observation, including lower/zero cost corrections.
+    /// This is an ordered conflict policy, not a claim of log revision time: peer copies have no such field.
+    /// Archives therefore pass retained observations first and reread source observations second.
     static func preferred(_ first: Self, _ second: Self) -> Self {
-        keepsFirst(source: first.source, (first.tokens, first.usage != nil, first.sessionStartedAt), (second.tokens, second.usage != nil, second.sessionStartedAt)) ? first : second
+        keepsFirst(source: first.source, first.preference, second.preference) ? first : second
     }
     /// The fields `preferred` decides on; the report builder keeps only these.
-    static func keepsFirst(source: ActivitySource, _ first: (tokens: Double, hasUsage: Bool, session: Date?), _ second: (tokens: Double, hasUsage: Bool, session: Date?)) -> Bool {
+    struct Preference {
+        var tokens: Double
+        var completeness: UInt8
+        var session: Date?
+    }
+    static func labelCompleteness(model: String, provider: String) -> UInt8 {
+        func known(_ text: String) -> Bool { !["", "unknown", "unbekannt"].contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+        return (known(model) ? 4 : 0) | (known(provider) ? 2 : 0)
+    }
+    var preference: Preference { preference(labelCompleteness: Self.labelCompleteness(model: model, provider: provider)) }
+    func preference(labelCompleteness: UInt8) -> Preference {
+        let validUsage = usage.map { $0.isValid && abs($0.total - tokens) < 0.5 } ?? false
+        let validCost = reportedCost.map { $0.isFinite && $0 >= 0 } ?? false
+        let completeness: UInt8 = (validUsage ? 16 : 0) | (validCost ? 8 : 0) | labelCompleteness | (responseCount != nil ? 1 : 0)
+        return Preference(tokens: tokens, completeness: completeness, session: sessionStartedAt)
+    }
+    static func keepsFirst(source: ActivitySource, _ first: Preference, _ second: Preference) -> Bool {
         if source == .pi, first.session != second.session { return (first.session ?? .distantFuture) < (second.session ?? .distantFuture) }
-        return first.tokens > second.tokens || (first.tokens == second.tokens && first.hasUsage)
+        return first.tokens > second.tokens || (first.tokens == second.tokens && first.completeness > second.completeness)
     }
 }
 public struct ActivityDay: Codable, Identifiable, Sendable {
