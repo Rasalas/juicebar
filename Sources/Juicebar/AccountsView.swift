@@ -152,23 +152,22 @@ struct OpenCodeSetupHelp: View {
 struct CLISetupHelp: View {
     let configuration: AccountConfiguration
     @State private var copied = false
-    static func loginCommand(for provider: ProviderKind) -> String? {
-        switch provider { case .codex: return "codex login"; case .claude: return "claude auth login"; default: return nil }
-    }
     static func loginCommand(for configuration: AccountConfiguration) -> String? {
-        guard let defaults = loginCommand(for: configuration.provider) else { return nil }
+        let defaults: (executable: String, arguments: String, variable: String)
+        switch configuration.provider {
+        case .codex: defaults = ("codex", " login", "CODEX_HOME")
+        case .claude: defaults = ("claude", " auth login", "CLAUDE_CONFIG_DIR")
+        default: return nil
+        }
         let executable = configuration.executablePath.isEmpty
-            ? (configuration.provider == .codex ? "codex" : "claude")
+            ? defaults.executable
             : NSString(string: configuration.executablePath).expandingTildeInPath
-        let arguments = configuration.provider == .codex ? " login" : " auth login"
         let prefix: String
         if configuration.profileDirectory.isEmpty { prefix = "" }
         else {
-            let variable = configuration.provider == .codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"
-            prefix = variable + "=" + shellWord(NSString(string: configuration.profileDirectory).expandingTildeInPath) + " "
+            prefix = defaults.variable + "=" + shellWord(NSString(string: configuration.profileDirectory).expandingTildeInPath) + " "
         }
-        if configuration.executablePath.isEmpty && prefix.isEmpty { return defaults }
-        return prefix + shellWord(executable) + arguments
+        return prefix + shellWord(executable) + defaults.arguments
     }
     /// Quote literal paths, expanding only the same leading tilde as the provider process.
     /// Shell substitutions, quotes and newlines in a configured path must stay data.
