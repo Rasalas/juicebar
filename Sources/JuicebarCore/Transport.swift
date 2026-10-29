@@ -2,6 +2,22 @@ import Foundation
 import Security
 import LocalAuthentication
 
+/// Mutations either succeed completely or throw without changing the saved credential.
+public protocol CredentialStore {
+    func read(account: String) throws -> String?
+    func contains(account: String) -> Bool
+    func save(_ secret: String, account: String) throws
+    func remove(account: String) throws
+}
+
+public struct KeychainCredentialStore: CredentialStore {
+    public init() {}
+    public func read(account: String) throws -> String? { try SecretStore.readForMutation(account: account) }
+    public func contains(account: String) -> Bool { SecretStore.contains(account: account) }
+    public func save(_ secret: String, account: String) throws { try SecretStore.save(secret, account: account) }
+    public func remove(account: String) throws { try SecretStore.remove(account: account) }
+}
+
 public enum SecretStore {
     private static let service = "app.juicebar.credentials"
     public static func read(account: String) -> String? { read(service: service, account: account) }
@@ -29,7 +45,10 @@ public enum SecretStore {
         return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
     }
     public static func save(_ secret: String, account: String) throws {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        SecKeychainSetUserInteractionAllowed(false)
+        let context = LAContext(); context.interactionNotAllowed = true
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                   kSecAttrAccount as String: account, kSecUseAuthenticationContext as String: context]
         let attributes: [String: Any] = [kSecValueData as String: Data(secret.utf8)]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
@@ -38,8 +57,30 @@ public enum SecretStore {
             guard SecItemAdd(new as CFDictionary, nil) == errSecSuccess else { throw ProviderFailure.unavailable(tr("Schlüssel konnte nicht im Schlüsselbund gespeichert werden.")) }
         } else if status != errSecSuccess { throw ProviderFailure.unavailable(tr("Schlüsselbund ist nicht verfügbar.")) }
     }
-    public static func remove(account: String) {
-        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account] as CFDictionary)
+    /// A failed read must not be mistaken for an absent key during compensation.
+    public static func readForMutation(account: String) throws -> String? {
+        SecKeychainSetUserInteractionAllowed(false)
+        let context = LAContext(); context.interactionNotAllowed = true
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecAttrAccount as String: account, kSecReturnData as String: true,
+                                    kSecMatchLimit as String: kSecMatchLimitOne, kSecUseAuthenticationContext as String: context]
+        var value: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &value)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = value as? Data, let secret = String(data: data, encoding: .utf8) else {
+            throw ProviderFailure.unavailable(tr("Schlüsselbund ist nicht verfügbar."))
+        }
+        return secret
+    }
+    public static func remove(account: String) throws {
+        SecKeychainSetUserInteractionAllowed(false)
+        let context = LAContext(); context.interactionNotAllowed = true
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecAttrAccount as String: account, kSecUseAuthenticationContext as String: context]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ProviderFailure.unavailable(tr("Schlüssel konnte nicht aus dem Schlüsselbund entfernt werden."))
+        }
     }
 }
 

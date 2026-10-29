@@ -1,4 +1,9 @@
 {
+  "Gespeicherten Key entfernen": "Remove saved key",
+  "Konto und Verlauf bleiben erhalten. Ohne eigenen Key kann OpenCode Go wieder den lokalen Key verwenden.": "Your account and history are kept. Without a saved key, OpenCode Go can use the local key again.",
+  "Der Schlüssel konnte nach einem Speicherfehler nicht wiederhergestellt werden. Bitte die Kontoaktion erneut versuchen. Bis dahin wird dieses Konto nicht abgerufen.": "The key could not be restored after a storage error. Please retry the account action. Refresh for this account is paused until then.",
+  "Schlüssel konnte nicht aus dem Schlüsselbund entfernt werden.": "Could not remove the key from Keychain.",
+  "Die OpenCode-Datenbank konnte nicht vollständig gelesen werden.": "Could not read the complete OpenCode database.",
   "Die beschädigten Originaldaten bleiben gesichert. Nur betroffene Einstellungen werden zurückgesetzt.": "The damaged original data remains backed up. Only affected settings will be reset.",
   "Beschädigte Einstellungen zurücksetzen": "Reset damaged settings",
   "Einstellung konnte nicht gelesen werden: {0}": "Could not read setting: {0}",

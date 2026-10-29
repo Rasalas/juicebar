@@ -88,6 +88,15 @@ struct AccountEditor: View {
                     }
                     SecureField(tr("API-Key"), text: $secret, prompt: Text(hasStoredKey ? tr("Leer lassen, um gespeicherten Key zu behalten") : tr("Key einfügen")))
                     Text(configuration.provider.keyHelp).font(.caption).foregroundStyle(.secondary)
+                    if hasStoredKey {
+                        Button(tr("Gespeicherten Key entfernen"), role: .destructive) {
+                            do {
+                                try store.removeSavedKey(for: configuration)
+                                secret = ""; hasStoredKey = false; error = nil
+                            } catch { self.error = error.localizedDescription }
+                        }
+                        Text(tr("Konto und Verlauf bleiben erhalten. Ohne eigenen Key kann OpenCode Go wieder den lokalen Key verwenden.")).font(.caption).foregroundStyle(.secondary)
+                    }
                 } else {
                     Text(tr("Zen-Aktivität ist über die lokale OpenCode-Datenbank verfügbar. Ein Guthabenabruf wird derzeit nicht angeboten.")).font(.callout).foregroundStyle(.secondary)
                 }
@@ -113,7 +122,7 @@ struct AccountEditor: View {
             }
         }.padding(28).frame(width: 600).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear {
             budget = configuration.monthlyBudget.map { String($0) } ?? ""
-            hasStoredKey = !store.isDemo && store.accounts.contains { $0.id == configuration.id } && SecretStore.contains(account: configuration.id)
+            hasStoredKey = store.hasSavedKey(for: configuration)
         }
         .onChange(of: configuration.provider) { _, provider in
             if provider != .codex && provider != .claude && provider != .opencodeGo { configuration.workSchedule = nil }
