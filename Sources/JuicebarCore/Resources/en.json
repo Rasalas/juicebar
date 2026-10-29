@@ -318,6 +318,7 @@
   "Lokale OpenCode-Nutzung": "Local OpenCode usage",
   "Zen bietet hier noch keine verifizierte Guthabenquelle. Tokens und geschätzte Kosten stehen unter Nutzung.": "Zen has no verified balance source here yet. Tokens and estimated costs are available under Usage.",
   "OpenRouter liefert ein unbekanntes Guthabenformat.": "OpenRouter returned an unknown balance format.",
+  "Unbekanntes Budget- oder Kostenformat.": "Unknown budget or cost format.",
   "Der Anbieter liefert ein unbekanntes Kostenformat.": "The provider returned an unknown cost format.",
   "Kostenbericht ist zu groß oder unvollständig.": "The cost report is too large or incomplete.",
   "Eigenes Monatsbudget": "Personal monthly budget",

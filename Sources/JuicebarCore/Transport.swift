@@ -175,15 +175,15 @@ public enum JSONValue {
     }
     public static func amount(_ value: Any?) -> Double? { number(value) ?? (value as? String).flatMap(Double.init).flatMap { $0.isFinite ? $0 : nil } }
     public static func date(_ value: Any?) -> Date? {
-        if let seconds = number(value), seconds > 0 { return Date(timeIntervalSince1970: seconds) }
+        if let seconds = number(value), seconds >= 1 { return QuotaNumbers.date(Date(timeIntervalSince1970: seconds)) }
         guard let text = value as? String else { return nil }
         let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: text) { return date }
+        if let date = formatter.date(from: text) { return QuotaNumbers.date(date) }
         formatter.formatOptions.insert(.withFractionalSeconds)
-        return formatter.date(from: text)
+        return QuotaNumbers.date(formatter.date(from: text))
     }
     public static func title(duration: TimeInterval?, fallback: String) -> String {
-        guard let duration, duration > 0 else { return fallback }
+        guard let duration = QuotaNumbers.duration(duration) else { return fallback }
         if duration == 604800 { return tr("Woche") }
         if duration >= 86400 { return tr("{0} Tage", Int(duration / 86400)) }
         if duration >= 3600 { return tr("{0} Stunden", Int(duration / 3600)) }
