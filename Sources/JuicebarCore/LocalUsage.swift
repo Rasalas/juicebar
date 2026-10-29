@@ -97,13 +97,27 @@ public enum OpenCodeHistory {
         for table in ["message", "session_message"] {
             var stmt: OpaquePointer?
             let sql = "SELECT id,data,time_created FROM \(table) WHERE time_created >= ? ORDER BY time_created DESC LIMIT 100001"
-            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
+            // Missing legacy tables are expected. Busy, corrupt or incompatible tables are not.
+            var exists: OpaquePointer?
+            guard sqlite3_prepare_v2(database, "SELECT 1 FROM sqlite_master WHERE name='\(table)' AND type IN ('table','view')", -1, &exists, nil) == SQLITE_OK else {
+                throw ProviderFailure.unavailable(tr("Die OpenCode-Datenbank ist nicht lesbar."))
+            }
+            let existenceStatus = sqlite3_step(exists)
+            sqlite3_finalize(exists)
+            if existenceStatus == SQLITE_DONE { continue }
+            guard existenceStatus == SQLITE_ROW,
+                  sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else {
+                sqlite3_finalize(stmt)
+                throw ProviderFailure.unavailable(tr("Die OpenCode-Datenbank ist nicht lesbar."))
+            }
             defer { sqlite3_finalize(stmt) }
             supported = true; sqlite3_bind_double(stmt, 1, since)
             var count = 0
-            while sqlite3_step(stmt) == SQLITE_ROW {
+            var status = sqlite3_step(stmt)
+            while status == SQLITE_ROW {
+                defer { status = sqlite3_step(stmt) }
                 count += 1
-                if count > 100000 { limited = true; break }
+                if count > 100000 { limited = true; continue }
                 try Task.checkCancellation()
                 guard sqlite3_column_bytes(stmt, 1) <= 2_000_000,
                       let rawID = sqlite3_column_text(stmt, 0), let rawJSON = sqlite3_column_text(stmt, 1) else { continue }
@@ -128,6 +142,9 @@ public enum OpenCodeHistory {
                 guard date.timeIntervalSince1970 * 1000 >= since else { continue }
                 let day = Calendar.current.startOfDay(for: date)
                 rows[id] = (day, date, total, cost, provider, name, TokenBreakdown.opencode(tokens))
+            }
+            guard status == SQLITE_DONE else {
+                throw ProviderFailure.unavailable(tr("Die OpenCode-Datenbank konnte nicht vollständig gelesen werden."))
             }
         }
         guard supported else { throw ProviderFailure.unsupported(tr("Dieses OpenCode-Datenbankschema wird noch nicht unterstützt.")) }

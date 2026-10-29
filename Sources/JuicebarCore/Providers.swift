@@ -5,8 +5,10 @@ public protocol UsageProvider: Sendable {
 }
 
 public struct ProviderRegistry: Sendable {
-    public init() {}
+    private let overrides: [ProviderKind: any UsageProvider]
+    public init(overrides: [ProviderKind: any UsageProvider] = [:]) { self.overrides = overrides }
     public func provider(for kind: ProviderKind) -> any UsageProvider {
+        if let provider = overrides[kind] { return provider }
         switch kind {
         case .codex: return CodexProvider()
         case .claude: return ClaudeProvider()
