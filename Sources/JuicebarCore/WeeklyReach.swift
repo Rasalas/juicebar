@@ -67,7 +67,7 @@ public struct WeeklyReach: Equatable, Sendable {
     public static func assess(snapshot: AccountSnapshot, history: [AccountSnapshot], hours: UsableHours, now: Date,
                               calendar: Calendar = .current) -> [WeeklyReach] {
         guard snapshot.isFresh(at: now) else { return [] }
-        let paced = snapshot.windows.filter { $0.supportsPace && $0.resetsAt.map { $0 > now } == true }
+        let paced = snapshot.windows.filter { $0.hasValidUsage && $0.supportsPace && QuotaNumbers.date($0.resetsAt).map { $0 > now } == true }
         guard let short = paced.first(where: { isShort($0) }), let shortReset = short.resetsAt, let duration = short.duration else { return [] }
         let history = history.filter { $0.configurationID == snapshot.configurationID && $0.identity == snapshot.identity }
         return paced.filter(isLong).compactMap { long in
@@ -76,8 +76,10 @@ public struct WeeklyReach: Equatable, Sendable {
                                     minimumLongPoints: isScoped(long) ? 10 : 3) else { return nil }
             let remainingShort = min(100, max(0, 100 - short.usedPercent))
             let future = futureWindows(from: shortReset, until: longReset, duration: duration, hours: hours, calendar: calendar)
-            return WeeklyReach(shortWindowID: short.id, longWindowID: long.id, ratio: ratio, remainingShort: remainingShort,
+            let reach = WeeklyReach(shortWindowID: short.id, longWindowID: long.id, ratio: ratio, remainingShort: remainingShort,
                                remainingLong: 100 - max(0, long.usedPercent), windowsAvailable: remainingShort / 100 + future)
+            guard reach.capacity.isFinite, reach.windowsNeeded.isFinite else { return nil }
+            return reach
         }
     }
     /// The most demanding relevant weekly target, shown on the short bar.
@@ -89,11 +91,11 @@ public struct WeeklyReach: Equatable, Sendable {
         return reaches.first { $0.longWindowID == windowID && $0.isRelevant }
     }
 
-    static func isShort(_ window: QuotaWindow) -> Bool { window.duration.map { abs($0 - 18000) <= 1800 } ?? false }
-    static func isLong(_ window: QuotaWindow) -> Bool { window.duration.map { abs($0 - 604800) <= 3600 } ?? false }
-    /// Model- or app-scoped weeks only move with part of the usage, so their ratio needs more evidence.
+    static func isShort(_ window: QuotaWindow) -> Bool { QuotaNumbers.duration(window.duration).map { abs($0 - 18000) <= 1800 } ?? false }
+    static func isLong(_ window: QuotaWindow) -> Bool { QuotaNumbers.duration(window.duration).map { abs($0 - 604800) <= 3600 } ?? false }
+    /// Model/app weeks need more evidence. Unknown scopes keep that conservative threshold.
     static func isScoped(_ window: QuotaWindow) -> Bool {
-        window.title.contains(" · ") || window.id.hasPrefix("model.") || window.id.hasPrefix("seven_day_")
+        window.scope != .account
     }
 
     /// Sums rather than per-pair ratios, because providers report whole percentages.
@@ -111,8 +113,10 @@ public struct WeeklyReach: Equatable, Sendable {
             guard short >= 0, long >= 0 else { continue }
             shortPoints += short; longPoints += long
         }
-        guard shortPoints >= minimumShortPoints, longPoints >= minimumLongPoints else { return nil }
-        return longPoints / shortPoints
+        guard shortPoints.isFinite, longPoints.isFinite, shortPoints >= minimumShortPoints, longPoints >= minimumLongPoints else { return nil }
+        let ratio = longPoints / shortPoints
+        guard ratio.isFinite, ratio > 0, (100 * ratio).isFinite else { return nil }
+        return ratio
     }
 
     /// A window starts at the next usable hour and the next one when it ends; the last one counts until the long reset.

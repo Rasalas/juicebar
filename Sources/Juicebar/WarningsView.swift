@@ -37,15 +37,15 @@ struct WarningsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle(tr("Bei Erreichen einer Verbrauchsschwelle"), isOn: $store.settings.thresholdEnabled)
                         HStack {
-                            Slider(value: $store.settings.threshold, in: 10...95, step: 5).accessibilityValue(tr("{0} % verbraucht", Int(store.settings.threshold)))
-                            Text(tr("bei {0} % verbraucht", Int(store.settings.threshold))).monospacedDigit().frame(minWidth: 130, alignment: .trailing)
+                            Slider(value: $store.settings.threshold, in: 10...95, step: 5).accessibilityValue(tr("{0} % verbraucht", QuotaNumbers.integerText(store.settings.threshold)))
+                            Text(tr("bei {0} % verbraucht", QuotaNumbers.integerText(store.settings.threshold))).monospacedDigit().frame(minWidth: 130, alignment: .trailing)
                         }.disabled(!store.settings.thresholdEnabled)
                         Text(tr("Die Schwelle zählt immer den Verbrauch, auch wenn Balken den verbleibenden Rest zeigen.")).font(.caption).foregroundStyle(.secondary)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle(tr("Bei zu hohem Verbrauch für den bisherigen Zeitraum"), isOn: $store.settings.paceEnabled)
-                        Stepper(tr("Toleranz: {0} Prozentpunkte", Int(store.settings.paceBuffer)), value: $store.settings.paceBuffer, in: 0...40, step: 5).disabled(!store.settings.paceEnabled)
+                        Stepper(tr("Toleranz: {0} Prozentpunkte", QuotaNumbers.integerText(store.settings.paceBuffer)), value: $store.settings.paceBuffer, in: 0...40, step: 5).disabled(!store.settings.paceEnabled)
                         Text(tr("Beispiel: Nach der halben Woche wären 50 % gleichmäßig. Mit 10 Punkten Toleranz warnt Juicebars oberhalb von 60 %.")).font(.caption).foregroundStyle(.secondary)
                     }
                     Divider()

@@ -69,6 +69,32 @@ public struct AccountConfiguration: Identifiable, Codable, Equatable, Sendable {
     public var displayName: String { label.isEmpty ? provider.name : label }
 }
 
+public enum QuotaLimitKind: String, Codable, Sendable {
+    case short, weekly, monthly, unknown
+
+    static func legacy(id: String, duration: TimeInterval?) -> Self {
+        if id == "budget" || id == "monthly" { return .monthly }
+        if id == "rolling" || id == "five_hour" || id == "claude.five_hour" { return .short }
+        if id == "weekly" || id == "seven_day" || id.hasPrefix("seven_day_") || id == "claude.seven_day" || id.hasPrefix("model.") { return .weekly }
+        if let duration = QuotaNumbers.duration(duration) {
+            if abs(duration - 604800) <= 3600 { return .weekly }
+            if duration < 86400 { return .short }
+        }
+        return .unknown
+    }
+}
+public enum QuotaScope: String, Codable, Sendable {
+    case account, model, app, unknown
+
+    static func legacy(id: String) -> Self {
+        if id.hasPrefix("model.") || ["seven_day_opus", "seven_day_sonnet"].contains(id) { return .model }
+        if id == "seven_day_oauth_apps" { return .app }
+        if ["short", "week", "five_hour", "seven_day", "claude.five_hour", "claude.seven_day", "rolling", "weekly", "monthly", "budget"].contains(id)
+            || id.hasSuffix(".primary") || id.hasSuffix(".secondary") { return .account }
+        return .unknown
+    }
+}
+
 public struct QuotaWindow: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var title: String
@@ -79,13 +105,36 @@ public struct QuotaWindow: Identifiable, Codable, Equatable, Sendable {
     public var legacyWarningPeriod: String?
     public var duration: TimeInterval?
     public var supportsPace: Bool
+    public var kind: QuotaLimitKind
+    public var scope: QuotaScope
     public init(id: String, title: String, usedPercent: Double, resetsAt: Date? = nil,
-                duration: TimeInterval? = nil, supportsPace: Bool = true) {
+                duration: TimeInterval? = nil, supportsPace: Bool = true, kind: QuotaLimitKind? = nil, scope: QuotaScope? = nil) {
         self.id = id; self.title = title; self.usedPercent = usedPercent
-        self.resetsAt = resetsAt; self.periodAnchor = nil; self.legacyWarningPeriod = nil; self.duration = duration; self.supportsPace = supportsPace
+        self.resetsAt = QuotaNumbers.date(resetsAt); self.periodAnchor = nil; self.legacyWarningPeriod = nil
+        self.duration = QuotaNumbers.duration(duration); self.supportsPace = supportsPace
+        self.kind = kind ?? .legacy(id: id, duration: self.duration); self.scope = scope ?? .legacy(id: id)
     }
+    enum CodingKeys: String, CodingKey {
+        case id, title, usedPercent, resetsAt, periodAnchor, legacyWarningPeriod, duration, supportsPace, kind, scope
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let used = try values.decode(Double.self, forKey: .usedPercent)
+        guard QuotaNumbers.isPercent(used) else {
+            throw DecodingError.dataCorruptedError(forKey: .usedPercent, in: values, debugDescription: "Invalid quota percentage")
+        }
+        self.init(id: try values.decode(String.self, forKey: .id), title: try values.decode(String.self, forKey: .title),
+                  usedPercent: used, resetsAt: try values.decodeIfPresent(Date.self, forKey: .resetsAt),
+                  duration: try values.decodeIfPresent(Double.self, forKey: .duration),
+                  supportsPace: try values.decode(Bool.self, forKey: .supportsPace),
+                  kind: try values.decodeIfPresent(QuotaLimitKind.self, forKey: .kind),
+                  scope: try values.decodeIfPresent(QuotaScope.self, forKey: .scope))
+        periodAnchor = QuotaNumbers.date(try values.decodeIfPresent(Date.self, forKey: .periodAnchor))
+        legacyWarningPeriod = try values.decodeIfPresent(String.self, forKey: .legacyWarningPeriod)
+    }
+    public var hasValidUsage: Bool { QuotaNumbers.isPercent(usedPercent) }
     public func idealPercent(at date: Date) -> Double? {
-        guard supportsPace, let duration, duration > 0, let resetsAt, resetsAt > date else { return nil }
+        guard hasValidUsage, supportsPace, let duration = QuotaNumbers.duration(duration), let resetsAt = QuotaNumbers.date(resetsAt), resetsAt > date else { return nil }
         return min(100, max(0, 100 * (1 - resetsAt.timeIntervalSince(date) / duration)))
     }
     /// When the even-pace target catches up with usage that is ahead of it, assuming no further use.
@@ -101,6 +150,7 @@ public enum QuotaPeriod {
                                otherWindow: QuotaWindow, otherSnapshot: AccountSnapshot) -> Bool {
         guard snapshot.configurationID == otherSnapshot.configurationID,
               snapshot.identity == otherSnapshot.identity, window.id == otherWindow.id,
+              window.hasValidUsage, otherWindow.hasValidUsage, window.kind == otherWindow.kind, window.scope == otherWindow.scope,
               window.duration == otherWindow.duration else { return false }
         switch (window.resetsAt, otherWindow.resetsAt) {
         case let (reset?, otherReset?):
@@ -133,7 +183,7 @@ public enum QuotaPeriod {
                 result.windows[index].periodAnchor = oldWindow.periodAnchor ?? oldWindow.resetsAt
                 result.windows[index].legacyWarningPeriod = oldWindow.legacyWarningPeriod
                 if oldWindow.periodAnchor == nil {
-                    result.windows[index].legacyWarningPeriod = oldWindow.resetsAt.map { String(Int(($0.timeIntervalSince1970 / 60).rounded())) } ?? "unknown-period"
+                    result.windows[index].legacyWarningPeriod = oldWindow.resetsAt.map { QuotaNumbers.integerText(($0.timeIntervalSince1970 / 60).rounded()) } ?? "unknown-period"
                 }
             } else {
                 result.windows[index].periodAnchor = window.periodAnchor ?? window.resetsAt

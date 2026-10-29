@@ -3,11 +3,15 @@ import Foundation
 public enum QuotaDisplay: String, Codable, CaseIterable, Sendable {
     case remaining, used
     public var label: String { self == .remaining ? tr("Verbleibend") : tr("Verbraucht") }
-    public func value(used: Double) -> Double { self == .remaining ? max(0, 100 - used) : max(0, used) }
+    public func value(used: Double) -> Double {
+        guard QuotaNumbers.isPercent(used) else { return .nan }
+        return self == .remaining ? max(0, 100 - used) : used
+    }
 }
 /// One wording for every remaining time: zero units are dropped, and from a week on only days are shown.
 public func durationText(_ seconds: TimeInterval) -> String {
-    let minutes = max(1, Int(seconds / 60))
+    guard seconds.isFinite, seconds >= 0, let wholeMinutes = Int(exactly: (seconds / 60).rounded(.towardZero)) else { return tr("unbekannt") }
+    let minutes = max(1, wholeMinutes)
     if minutes < 60 { return tr("{0} Min.", minutes) }
     let hours = minutes / 60
     if hours < 24 { return minutes % 60 == 0 ? tr("{0} Std.", hours) : tr("{0} Std. {1} Min.", hours, minutes % 60) }
@@ -42,11 +46,13 @@ public enum QuotaOrder {
     }
     public static func windows(_ windows: [QuotaWindow]) -> [QuotaWindow] {
         func rank(_ w: QuotaWindow) -> Int {
-            if w.title.contains(" · ") || w.id.hasPrefix("model.") { return 3 }
-            if ["5 Stunden", "5 hours"].contains(w.title) || (w.duration.map { $0 < 86400 } ?? false) { return 0 }
-            if w.duration == 604800 || ["Woche", "Week"].contains(w.title) { return 1 }
-            if ["Monat", "Month"].contains(w.title) || w.id == "budget" { return 2 }
-            return 3
+            guard w.scope == .account else { return 3 }
+            switch w.kind {
+            case .short: return 0
+            case .weekly: return 1
+            case .monthly: return 2
+            case .unknown: return 3
+            }
         }
         return windows.sorted { rank($0) == rank($1) ? $0.id < $1.id : rank($0) < rank($1) }
     }
@@ -59,14 +65,11 @@ public struct TrayMeter: Identifiable {
     public var id: String { "\(account.id):\(window?.id ?? "unknown")" }
     public var windowLabel: String {
         guard let window else { return "" }
-        if let duration = window.duration {
-            if duration == 604800 { return "W" }
-            if duration == 18000 { return "5h" }
-            if duration < 86400 { return "\(Int(duration / 3600))h" }
-        }
-        if ["woche", "week"].contains(where: { window.title.lowercased().contains($0) }) { return "W" }
-        if ["monat", "month"].contains(where: { window.title.lowercased().contains($0) }) { return "M" }
-        return ["5 Stunden", "5 hours"].contains(window.title) ? "5h" : String(window.title.prefix(5))
+        if window.kind == .weekly { return "W" }
+        if window.kind == .monthly { return "M" }
+        if let duration = QuotaNumbers.duration(window.duration), duration < 86400 { return "\(QuotaNumbers.integerText(duration / 3600))h" }
+        if ["rolling", "five_hour", "claude.five_hour"].contains(window.id) { return "5h" }
+        return String(window.title.prefix(5))
     }
 }
 public enum TraySelection {

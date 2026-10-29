@@ -40,7 +40,7 @@ public struct WarningEvent: Identifiable, Codable, Equatable, Sendable {
 
 public enum WarningEngine {
     public static func projection(window: QuotaWindow, snapshot: AccountSnapshot, history: [AccountSnapshot], now: Date) -> UsageProjection? {
-        guard snapshot.isFresh(at: now), window.supportsPace, let reset = window.resetsAt, reset > now, window.usedPercent < 100 else { return nil }
+        guard window.hasValidUsage, snapshot.isFresh(at: now), window.supportsPace, let reset = window.resetsAt, reset > now, window.usedPercent < 100 else { return nil }
         var points: [(Date, Double)] = history.compactMap { sample in
             guard sample.identity == snapshot.identity, sample.configurationID == snapshot.configurationID,
                   now.timeIntervalSince(sample.observedAt) <= 3600, sample.observedAt <= snapshot.observedAt,
@@ -97,19 +97,19 @@ public enum WarningEngine {
             }.max { $0.observedAt < $1.observedAt }
             let normalized = QuotaPeriod.normalizing(snapshot, previous: previous)
             for window in normalized.windows {
-                guard window.resetsAt.map({ $0 > now }) ?? true else { continue }
+                guard window.hasValidUsage, window.resetsAt.map({ $0 > now }) ?? true else { continue }
                 let key = QuotaPeriod.key(window: window, snapshot: snapshot)
                 // Only migrate a minute-rounded warning when a prior poll proves it
                 // belongs to this period. A nearby genuine reset must still warn.
                 let legacyKey = window.legacyWarningPeriod.map { "\(window.id)|\($0)" }
                 if settings.thresholdEnabled && window.usedPercent >= settings.threshold {
                     append("\(key)|threshold|\(settings.threshold)", .threshold,
-                           tr("{0}: {1} % verbraucht.", window.title, Int(window.usedPercent)), legacyKey: legacyKey.map { "\($0)|threshold|\(settings.threshold)" })
+                           tr("{0}: {1} % verbraucht.", window.title, QuotaNumbers.integerText(window.usedPercent)), legacyKey: legacyKey.map { "\($0)|threshold|\(settings.threshold)" })
                 }
                 if settings.paceEnabled, let ideal = window.idealPercent(at: now), ideal >= 5,
                    window.usedPercent > ideal + settings.paceBuffer {
                     append("\(key)|pace", .pace,
-                           tr("{0}: {1} % verbraucht, gleichmäßig wären es {2} %.", window.title, Int(window.usedPercent), Int(ideal)), legacyKey: legacyKey.map { "\($0)|pace" })
+                           tr("{0}: {1} % verbraucht, gleichmäßig wären es {2} %.", window.title, QuotaNumbers.integerText(window.usedPercent), QuotaNumbers.integerText(ideal)), legacyKey: legacyKey.map { "\($0)|pace" })
                 }
                 if settings.forecastEnabled,
                    let forecast = projection(window: window, snapshot: snapshot, history: history, now: now),
@@ -122,7 +122,7 @@ public enum WarningEngine {
         if settings.expiryEnabled {
             for benefit in snapshot.benefits where benefit.status == .available && benefit.count > 0 {
                 guard benefit.isManual || (snapshot.benefitsChecked && snapshot.isFresh(at: now)),
-                      let expiry = benefit.expiresAt, expiry > now else { continue }
+                      let expiry = QuotaNumbers.date(benefit.expiresAt), expiry > now else { continue }
                 let hours = expiry.timeIntervalSince(now) / 3600
                 guard let stage = settings.expiryHours.filter({ $0 > 0 && hours <= $0 }).min() else { continue }
                 let when = expiry.formatted(.dateTime.day().month().hour().minute().locale(Localization.locale))
