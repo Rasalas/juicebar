@@ -4,7 +4,7 @@ Source publication is independent of the paid store edition. The first direct do
 
 ## Source and CI
 
-Normal builds have no Sparkle dependency and no automatic update checks. The macOS workflow runs Swift and Python tests, persistence and tray checks, builds a development artifact, and separately compiles the direct-download variant. A CI artifact is ad-hoc signed.
+Normal builds have no Sparkle dependency and no automatic update checks. The macOS workflow runs Swift and Python tests, bounded release-mode performance regressions, persistence and tray checks, packages the source app, and separately compiles the direct-download variant. Archives are uploaded only on main pushes or manual runs. A CI artifact is ad-hoc signed. The [validation contract](validation.md#ci-validation-contract-29-october-2026) distinguishes deployment-target checks from macOS 14 runtime coverage, and an unavailable AX tree from verified semantics. Neither compilation nor an offscreen render proves VoiceOver interaction.
 
 `JUICEBAR_DISTRIBUTION=direct` includes the pinned Sparkle dependency. `Package.resolved` records the resolved revision. The packaging script copies Sparkle into the app, signs nested components before the outer bundle, and includes third-party notices. Unknown distribution flavors fail rather than pretending to be store-ready.
 

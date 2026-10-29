@@ -1,29 +1,54 @@
 name: macOS
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
+    # macOS 14 runners retire on 2026-11-02. See docs/validation.md#ci-validation-contract-29-october-2026.
     runs-on: macos-15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Test
         run: swift test
       - name: SSH collector privacy tests
         run: python3 Tests/ssh_usage_test.py
+      - name: Validation script tests
+        run: python3 -m unittest discover -s Tests -p '*_validation_test.py'
+      - name: Bounded release performance regressions
+        run: bash scripts/check-performance.sh
+      - name: macOS 14 deployment target (compile only)
+        run: python3 scripts/check-deployment-target.py .build/release/Juicebar
       - name: Menu bar layout regression
         run: |
-          swift run Juicebar --verify-tray-layout
-          swift run Juicebar --verify-tray-layout -AppleShowScrollBars Always
+          for language in en de; do
+            .build/release/Juicebar --verify-tray-layout -appLanguage "$language"
+            .build/release/Juicebar --verify-tray-layout -appLanguage "$language" -AppleShowScrollBars Always
+          done
+      - name: Quota AX probe (availability reported separately)
+        run: bash scripts/check-accessibility.sh
       - name: Usage survives restart
-        run: swift run Juicebar --verify-activity-persistence
+        run: .build/release/Juicebar --verify-activity-persistence
       - name: Build app
         run: bash scripts/build-app.sh
+      - name: Packaged macOS 14 deployment target (compile only)
+        run: python3 scripts/check-deployment-target.py dist/Juicebar.app/Contents/MacOS/Juicebar --info-plist dist/Juicebar.app/Contents/Info.plist
       - name: Archive
+        if: github.event_name != 'pull_request'
         run: ditto -c -k --keepParent dist/Juicebar.app dist/Juicebar.zip
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: Juicebar-macOS
           path: dist/Juicebar.zip
       - name: Direct-download updater compiles
         run: JUICEBAR_DISTRIBUTION=direct swift build
+      - name: Direct-download macOS 14 deployment target (compile only)
+        run: python3 scripts/check-deployment-target.py .build/debug/Juicebar

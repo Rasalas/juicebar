@@ -1,5 +1,44 @@
 # Validation status · 25 September 2026
 
+## CI validation contract, 29 October 2026
+
+The `macOS / test` job validates pull requests, pushes to main and manual runs. Feature-branch pushes no longer duplicate the PR job. A newer run cancels the superseded run for the same PR or ref. Swift tests, Python collector tests, source app packaging, tray layout, restart persistence and the direct-download Sparkle compile remain required steps. Only main pushes and manual runs archive and upload the ad-hoc development app. No workflow publishes or installs a release.
+
+### Performance
+
+Run `bash scripts/check-performance.sh` for the same release-mode profile as CI. It explicitly selects three existing benchmarks with `JUICEBAR_BENCHMARK=1 JUICEBAR_BENCHMARK_PROFILE=ci`:
+
+| Case | Bounded synthetic fixture | Regression gate |
+| --- | --- | --- |
+| Unchanged import | 64 Claude logs with 50 responses each, 20,000 OpenCode rows; cold and two unchanged imports | Metadata cache identities and hashes stay unchanged; final unchanged CPU is below half the cold CPU plus 20 ms |
+| Append | 6,000 responses in an approximately 24 MiB Claude log; three appends of ten responses | Final append CPU is below half the cold parse CPU plus 20 ms; response counts include each append |
+| Date parsing | 10,000 distinct canonical timestamps | Exact equality with the legacy ISO parser; fast-parser CPU below half the legacy CPU plus 20 ms |
+
+The gates use process user plus system CPU, which excludes time descheduled by runner contention, and compare against a baseline in the same process on the same machine. The 20 ms allowance covers small measurement overhead. Wall time and peak RSS are diagnostic output, without pass/fail thresholds. These checks catch loss of cache/resume/fast-parser behavior; they do not promise latency on a user's hardware. The regular debug suite still skips seven optional benchmarks. The release step runs the three selected cases, without skips. The large archive, peak-memory, repeated-import and aggregation stress workloads remain opt-in with `JUICEBAR_BENCHMARK=1 swift test -c release --filter ActivityPerformanceTests`.
+
+### Minimum OS
+
+Availability checked against GitHub's [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) and [macOS 14 retirement notice](https://github.com/actions/runner-images/issues/13518) on 29 October 2026. macOS 14 is still listed, but is deprecated, has brownouts on October 29 and 30, and retires November 2. It is not a sustainable required CI runner. CI retains `macos-15`, with the app minimum unchanged at macOS 14.
+
+`python3 scripts/check-deployment-target.py .build/release/Juicebar` checks the package declaration, `LSMinimumSystemVersion` and every linked executable architecture's `LC_BUILD_VERSION` for macOS 14.0. CI also checks the packaged source executable/plist and the direct-download debug executable. Swift compilation catches unguarded use of newer APIs. This provides compile/deployment evidence only. It does **not** execute macOS 14 code paths or validate weak linking, SwiftUI/AppKit behavior, Sparkle operation or packaging at runtime on macOS 14. Minimum-OS runtime validation remains open and requires an actual macOS 14 host with synthetic data before claiming that evidence for a release. A newer host never counts as macOS 14 runtime coverage.
+
+### Accessibility
+
+Tray verification checks native view structure, fitting height, overflow scrolling, hidden indicators and quota rendering, in English and German with default and always-visible scrollbar settings. It no longer bundles an optional AX probe into a layout success.
+
+After building, run the synthetic quota probe directly:
+
+```sh
+.build/release/Juicebar --verify-quota-accessibility
+.build/release/Juicebar --verify-quota-accessibility --strict
+```
+
+The default probe stays offscreen. Exit `0` means an exposed AX button contained its quota label, percentage, exact reset and pace; exit `1` means exposed semantics failed; exit `2` means no quota AX button was available. `--strict` turns unavailable into exit `1`. There is no success fallback for an unavailable tree. The CI adapter `bash scripts/check-accessibility.sh` handles only exit `2` as an explicit warning and job-summary entry saying validation was **not performed**. Semantic failures still fail the job. Tests exercise all three outcomes and the adapter's exit handling using synthetic records/processes, without requiring an AX tree.
+
+For strict foreground AX execution in an existing interactive macOS session, use `.build/release/Juicebar --verify-quota-accessibility --interactive --strict`. This briefly presents only the synthetic quota fixture, retries the AX adapters for at most one second, then closes it. It exits before ordinary app startup. It never opens the installed app, reads providers, requests notification permission, prompts for Accessibility permission or changes OS privacy settings. This command is for a human-run interactive validation session; automated local verification stays offscreen.
+
+Even a successful AX semantics probe does not prove VoiceOver focus order, keyboard navigation or spoken interaction. Those require separate human VoiceOver validation on the supported OS versions. This work does not claim that evidence.
+
 ## Juicebars 0.1.17 release, 23 October
 
 A negative weekly allowance was clamped to zero before conversion into the five-hour work-plan target. Once the weekly reserve was exceeded, that made the short marker follow the actual remaining balance and falsely appear on target. The conversion now retains the signed difference and clamps only the final percentage. The reported 50% short/21% weekly state reaches a 100% short target, while smaller overruns preserve the previous short-window allowance.
