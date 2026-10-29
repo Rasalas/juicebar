@@ -34,38 +34,10 @@ struct ActivityCalendar: View {
     @FocusState private var focused: Bool
     private var totals: [Date: Double] { groupedDays.mapValues { $0.reduce(0) { $0 + (metric.plottedValue($1) ?? 0) } } }
     var body: some View {
-        let dates = cells, counts = totals
+        let counts = totals
         let maximum = counts.values.max().flatMap { $0 > 0 ? $0 : nil } ?? 1
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 5) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(" ").frame(height: 16)
-                    ForEach(0..<7) { row in Text(row == 0 ? tr("Mo") : row == 2 ? tr("Mi") : row == 4 ? tr("Fr") : " ").font(.caption2).foregroundStyle(.secondary).frame(height: 21) }
-                }.fixedSize()
-                ForEach(0..<(dates.count / 7), id: \.self) { week in
-                    let first = dates[week * 7]
-                    VStack(spacing: 5) {
-                        Text(week == 0 || calendar.component(.day, from: first) <= 7 ? first.formatted(.dateTime.month(.abbreviated).locale(Localization.locale)) : " ")
-                            .font(.caption2).foregroundStyle(.secondary).frame(height: 16)
-                        ForEach(0..<7) { row in
-                            let date = dates[week * 7 + row], count = counts[date] ?? 0
-                            let valid = date <= now && date >= firstDay
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(valid ? color(count, maximum: maximum) : Color.clear)
-                                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected == date ? Palette.accent : Color.primary.opacity(valid ? 0.06 : 0), lineWidth: selected == date ? 2 : 1))
-                                .overlay {
-                                    if valid, let values = groupedDays[date], !values.isEmpty, values.allSatisfy({ metric.plottedValue($0) == nil }) {
-                                        Text("?").font(.caption2).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .frame(height: 21).contentShape(Rectangle())
-                                .onTapGesture { if valid { selection = date; focused = true } }
-                                .onContinuousHover { phase in if valid, case .active = phase { selection = date } }
-                                .help(labels[date] ?? "")
-                        }
-                    }.frame(maxWidth: .infinity)
-                }
-            }
+            grid(counts: counts, maximum: maximum, selectedDate: selected)
             // One focus stop and one accessibility element instead of a button per day.
             .focusable().focused($focused).focusEffectDisabled()
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Palette.accent : .clear, lineWidth: 2).padding(-4))
@@ -83,16 +55,66 @@ struct ActivityCalendar: View {
             .accessibilityValue(selected.flatMap { labels[$0] } ?? tr(metric.rawValue))
             .accessibilityHint(tr("Mit den Pfeiltasten einen Tag wählen."))
             .accessibilityAdjustableAction { direction in move(by: direction == .increment ? 1 : -1) }
-            HStack(spacing: 4) {
-                Text(selected.map { date in
-                    date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)) + ": " + ActivityMetricDetails(groupedDays[date] ?? []).label(metric)
-                } ?? tr("Mit den Pfeiltasten einen Tag wählen."))
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                Text(tr("Wenig")).font(.caption2).foregroundStyle(.secondary)
-                ForEach(0..<5) { index in RoundedRectangle(cornerRadius: 2).fill(index == 0 ? Color.primary.opacity(0.05) : Palette.green.opacity(Double(index) / 4)).frame(width: 9, height: 9) }
-                Text(tr("Viel")).font(.caption2).foregroundStyle(.secondary)
+            footer
+        }
+    }
+    private func grid(counts: [Date: Double], maximum: Double, selectedDate: Date?) -> some View {
+        HStack(alignment: .top, spacing: 5) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(" ").frame(height: 16)
+                ForEach(0..<7) { row in
+                    Text(row == 0 ? tr("Mo") : row == 2 ? tr("Mi") : row == 4 ? tr("Fr") : " ")
+                        .font(.caption2).foregroundStyle(.secondary).frame(height: 21)
+                }
+            }.fixedSize()
+            ForEach(0..<(cells.count / 7), id: \.self) { week in
+                weekColumn(week, counts: counts, maximum: maximum, selectedDate: selectedDate)
             }
+        }
+    }
+    private func weekColumn(_ week: Int, counts: [Date: Double], maximum: Double, selectedDate: Date?) -> some View {
+        let first = cells[week * 7]
+        let showMonth = week == 0 || calendar.component(.day, from: first) <= 7
+        return VStack(spacing: 5) {
+            Text(showMonth ? first.formatted(.dateTime.month(.abbreviated).locale(Localization.locale)) : " ")
+                .font(.caption2).foregroundStyle(.secondary).frame(height: 16)
+            ForEach(0..<7) { row in
+                let date = cells[week * 7 + row]
+                dayCell(date, count: counts[date] ?? 0, maximum: maximum, selected: selectedDate == date)
+            }
+        }.frame(maxWidth: .infinity)
+    }
+    private func dayCell(_ date: Date, count: Double, maximum: Double, selected: Bool) -> some View {
+        let valid = date <= now && date >= firstDay
+        let values = groupedDays[date] ?? []
+        let unknown = valid && !values.isEmpty && values.allSatisfy { metric.plottedValue($0) == nil }
+        let border = selected ? Palette.accent : Color.primary.opacity(valid ? 0.06 : 0)
+        return RoundedRectangle(cornerRadius: 4)
+            .fill(valid ? color(count, maximum: maximum) : Color.clear)
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(border, lineWidth: selected ? 2 : 1))
+            .overlay {
+                if unknown { Text("?").font(.caption2).foregroundStyle(.secondary) }
+            }
+            .frame(height: 21).contentShape(Rectangle())
+            .onTapGesture { if valid { selection = date; focused = true } }
+            .onContinuousHover { phase in if valid, case .active = phase { selection = date } }
+            .help(labels[date] ?? "")
+    }
+    private var footer: some View {
+        let detail = selected.map { date in
+            date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale))
+                + ": " + ActivityMetricDetails(groupedDays[date] ?? []).label(metric)
+        } ?? tr("Mit den Pfeiltasten einen Tag wählen.")
+        return HStack(spacing: 4) {
+            Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Text(tr("Wenig")).font(.caption2).foregroundStyle(.secondary)
+            ForEach(0..<5) { index in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(index == 0 ? Color.primary.opacity(0.05) : Palette.green.opacity(Double(index) / 4))
+                    .frame(width: 9, height: 9)
+            }
+            Text(tr("Viel")).font(.caption2).foregroundStyle(.secondary)
         }
     }
     private func move(by days: Int) {
