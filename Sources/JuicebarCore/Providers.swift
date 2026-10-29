@@ -105,7 +105,7 @@ public struct APIProvider: UsageProvider {
         if configuration.provider == .openrouter {
             let payload = try await HTTPTransport.get(URL(string: "https://openrouter.ai/api/v1/credits")!, headers: headers)
             guard let data = payload["data"] as? [String: Any], let credits = JSONValue.number(data["total_credits"]),
-                  let used = JSONValue.number(data["total_usage"]) else { throw ProviderFailure.invalidData(tr("OpenRouter liefert ein unbekanntes Guthabenformat.")) }
+                  let used = JSONValue.number(data["total_usage"]), credits >= 0, used >= 0 else { throw ProviderFailure.invalidData(tr("OpenRouter liefert ein unbekanntes Guthabenformat.")) }
             return AccountSnapshot(configurationID: configuration.id, identity: identity, source: "OpenRouter Credits",
                                    money: [MoneyMetric(id: "balance", title: tr("Guthaben"), amount: credits - used), MoneyMetric(id: "lifetime", title: tr("Gesamtausgaben"), amount: used)])
         }
@@ -138,7 +138,7 @@ public struct APIProvider: UsageProvider {
             guard let buckets = payload["data"] as? [[String: Any]] else { throw ProviderFailure.invalidData(tr("Der Anbieter liefert ein unbekanntes Kostenformat.")) }
             for bucket in buckets {
                 let cost = try ProviderParsing.costBucket(bucket, provider: configuration.provider)
-                total += cost
+                total = try ProviderParsing.addingCost(cost, to: total)
                 if let day = JSONValue.date(bucket["start_time"] ?? bucket["starting_at"]) { daily.append(UsageDay(day: day, tokens: 0, cost: cost)) }
             }
             if payload["has_more"] as? Bool != true { break }
@@ -146,8 +146,8 @@ public struct APIProvider: UsageProvider {
             guard page != nil, index < 9 else { throw ProviderFailure.invalidData(tr("Kostenbericht ist zu groß oder unvollständig.")) }
         }
         var windows: [QuotaWindow] = []
-        if let budget = configuration.monthlyBudget, budget > 0 {
-            windows.append(QuotaWindow(id: "budget", title: tr("Eigenes Monatsbudget"), usedPercent: total / budget * 100, resetsAt: end, duration: end.timeIntervalSince(start)))
+        if let budget = configuration.monthlyBudget {
+            windows.append(QuotaWindow(id: "budget", title: tr("Eigenes Monatsbudget"), usedPercent: try QuotaNumbers.budgetPercent(spend: total, budget: budget), resetsAt: end, duration: end.timeIntervalSince(start), kind: .monthly, scope: .account))
         }
         return AccountSnapshot(configurationID: configuration.id, identity: identity, plan: tr("API · Organisation"), source: tr("Abrechnung des Anbieters"), windows: windows,
                                money: [MoneyMetric(id: "month", title: tr("Dieser Monat"), amount: total)], dailyUsage: daily, notice: tr("Abrechnungsdaten können zeitverzögert eintreffen. Monat nach UTC."))

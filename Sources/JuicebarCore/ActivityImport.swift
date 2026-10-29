@@ -62,7 +62,9 @@ public enum ActivityImport {
         old.count != new.count || new.contains { key, event in
             guard let before = old[key] else { return true }
             return before.date != event.date || before.tokens != event.tokens || before.model != event.model || before.provider != event.provider
-                || before.usage?.total != event.usage?.total || before.reportedCost != event.reportedCost
+                || before.usage?.input != event.usage?.input || before.usage?.output != event.usage?.output
+                || before.usage?.cacheRead != event.usage?.cacheRead || before.usage?.cacheWrite != event.usage?.cacheWrite
+                || before.usage?.cacheWriteHour != event.usage?.cacheWriteHour || before.reportedCost != event.reportedCost
                 || before.responseCount != event.responseCount || before.sessionStartedAt != event.sessionStartedAt
         }
     }
@@ -97,6 +99,7 @@ public enum ActivityImport {
                 let result = try read()
                 let retained = Dictionary((previous?.events.events(since: since, through: now) ?? []).map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
                 var unique = retained
+                // Retained data comes first: an equally complete reread may correct any metadata, even at equal totals.
                 for event in result.events {
                     let key = "\(event.source.rawValue)|\(event.id)"
                     unique[key] = unique[key].map { ActivityEvent.preferred($0, event) } ?? event
@@ -107,7 +110,8 @@ public enum ActivityImport {
                 let events = Array(unique.values)
                 let archive = Archive(events: CompactEvents(events), observedAt: now, fingerprint: stamp, notices: result.notices, retainedSource: retainedSource, summary: summary)
                 // Re-reading an unchanged source must not rewrite a large archive.
-                if let previous, previous.notices ?? [] == result.notices, (previous.summary == nil) == (summary == nil), !changed(retained, unique) {
+                if let previous, previous.notices ?? [] == result.notices, previous.summary?.models == summary?.models,
+                   previous.summary?.notice == summary?.notice, previous.summary?.messageCount == summary?.messageCount, !changed(retained, unique) {
                     decoded.remember(archive, for: url)
                 } else { try decoded.save(archive, to: url) }
                 warnings += result.notices

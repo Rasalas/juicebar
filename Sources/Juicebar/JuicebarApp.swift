@@ -51,7 +51,7 @@ enum JuicebarEntry {
                 do {
                     let snapshot = try await registry.provider(for: kind).read(configuration: AccountConfiguration(id: "diagnostic-\(kind.rawValue)", provider: kind), includeHistory: true)
                     print("\(kind.name): OK · \(snapshot.windows.count) Limits · Resetdaten \(snapshot.benefitsChecked ? tr("verfügbar") : tr("unbekannt"))")
-                    for window in snapshot.windows { print("  \(window.title): \(Int(window.usedPercent)) % · Reset \(window.resetsAt == nil ? tr("unbekannt") : "vorhanden")") }
+                    for window in snapshot.windows { print("  \(window.title): \(QuotaNumbers.integerText(window.usedPercent)) % · Reset \(window.resetsAt == nil ? tr("unbekannt") : "vorhanden")") }
                 } catch { print("\(kind.name): \(error.localizedDescription)") }
                 fflush(stdout)
             }
@@ -128,7 +128,7 @@ struct TrayLabel: View {
             guard let window = meter.window else { return tr("{0}: kein aktuelles Limit verfügbar", meter.account.displayName) }
             if meter.expired { return tr("{0} · {1}: Reset erreicht, neuer Stand ausstehend", meter.account.displayName, window.title) }
             let alert = status.title(now: store.now)
-            return tr("{0} · {1}: {2} % {3}{4}", meter.account.displayName, window.title, Int(store.settings.displayMode.value(used: window.usedPercent).rounded()), store.settings.displayMode.label.lowercased(), meter.fresh ? "" : tr(" · letzter Stand"))
+            return tr("{0} · {1}: {2} % {3}{4}", meter.account.displayName, window.title, QuotaNumbers.integerText(store.settings.displayMode.value(used: window.usedPercent).rounded()), store.settings.displayMode.label.lowercased(), meter.fresh ? "" : tr(" · letzter Stand"))
                 + (alert.isEmpty ? "" : " · \(alert)")
         }
         return (values.isEmpty ? tr("Juicebars · Keine Limits für die Menüleiste ausgewählt") : values.joined(separator: "\n")) + (store.expiringCount > 0 ? tr("\nReset-Gutschrift läuft bald ab") : "")

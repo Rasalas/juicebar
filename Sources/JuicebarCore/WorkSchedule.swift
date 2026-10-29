@@ -65,8 +65,8 @@ public struct WorkPlanTarget: Equatable, Sendable {
         guard schedule.isEnabled, schedule.isValid, snapshot.isFresh(at: now) else { return [] }
         let recent = history.filter { $0.configurationID == snapshot.configurationID && $0.identity == snapshot.identity && $0.observedAt <= now }
             .sorted { $0.observedAt < $1.observedAt }
-        let short = snapshot.windows.first { WeeklyReach.isShort($0) && $0.supportsPace && $0.usedPercent.isFinite }
-        return snapshot.windows.filter { WeeklyReach.isLong($0) && $0.supportsPace && $0.usedPercent.isFinite && $0.resetsAt.map { $0 > now } == true }
+        let short = snapshot.windows.first { WeeklyReach.isShort($0) && $0.supportsPace && $0.hasValidUsage }
+        return snapshot.windows.filter { WeeklyReach.isLong($0) && $0.supportsPace && $0.hasValidUsage && $0.resetsAt.map { $0 > now } == true }
             .compactMap { long in
                 let ratio = short.flatMap {
                     WeeklyReach.ratio(shortID: $0.id, longID: long.id, history: recent, now: now,
@@ -109,12 +109,13 @@ public struct WorkPlanTarget: Equatable, Sendable {
     }
 
     private static func assess(long: QuotaWindow, short: QuotaWindow?, ratio: Double?, snapshot: AccountSnapshot,
-                               history: [AccountSnapshot], schedule: WorkSchedule, now: Date, calendar: Calendar) -> WorkPlanTarget {
+                               history: [AccountSnapshot], schedule: WorkSchedule, now: Date, calendar: Calendar) -> WorkPlanTarget? {
         let reset = long.resetsAt!, remaining = max(0, min(100, 100 - long.usedPercent))
         let workday = schedule.interval(on: now, calendar: calendar).flatMap { now < $0.end ? $0 : nil }
         let currentSlots = short.flatMap { slots(short: $0, from: now, until: reset, schedule: schedule, calendar: calendar) }
         let capacity = ratio.flatMap { r in currentSlots.map { $0.reduce(0) { $0 + $1.share } * 100 * r } }
         let additional = capacity.flatMap { c in ratio.map { max(0, remaining - c) / (100 * $0) } }
+        guard capacity.map(\.isFinite) ?? true, additional.map(\.isFinite) ?? true else { return nil }
         let target: Double
         if let workday {
             // Anchor at the start of today's work. Consuming the daily allocation must reach a stable marker.
@@ -132,6 +133,7 @@ public struct WorkPlanTarget: Equatable, Sendable {
                let all = slots(short: baselineShort, from: origin, until: reset, schedule: schedule, calendar: calendar) {
                 let total = all.reduce(0) { $0 + $1.share } * 100 * ratio
                 let today = all.filter { $0.start < workday.end }.reduce(0) { $0 + $1.share } * 100 * ratio
+                guard total.isFinite, today.isFinite else { return nil }
                 let load = total > 0 ? min(1, baselineRemaining / total) : 0
                 target = max(0, baselineRemaining - today * load)
             } else {

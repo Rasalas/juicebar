@@ -19,15 +19,22 @@ public enum AccountIdentity {
 }
 
 public enum ProviderParsing {
+    static func addingCost(_ value: Double, to total: Double) throws -> Double {
+        let result = total + value
+        guard QuotaNumbers.isPercent(value), QuotaNumbers.isPercent(total), result.isFinite else {
+            throw ProviderFailure.invalidData(tr("Unbekanntes Budget- oder Kostenformat."))
+        }
+        return result
+    }
     public static func costBucket(_ bucket: [String: Any], provider: ProviderKind) throws -> Double {
         guard let rows = bucket["results"] as? [[String: Any]] else { throw ProviderFailure.invalidData(tr("Kostenbericht enthält keine lesbaren Ergebnisse.")) }
         return try rows.reduce(0) { total, row in
             if provider == .openaiAPI {
                 guard let amount = row["amount"] as? [String: Any], (amount["currency"] as? String)?.lowercased() == "usd", let value = JSONValue.amount(amount["value"]) else { throw ProviderFailure.invalidData(tr("Unbekannte Währung oder Kosteneinheit.")) }
-                return total + value
+                return try addingCost(value, to: total)
             }
-            guard provider == .anthropicAPI, (row["currency"] as? String)?.uppercased() == "USD", let cents = JSONValue.amount(row["amount"]) else { throw ProviderFailure.invalidData(tr("Unbekannte Währung oder Kosteneinheit.")) }
-            return total + cents / 100
+            guard provider == .anthropicAPI, (row["currency"] as? String)?.uppercased() == "USD", let cents = JSONValue.amount(row["amount"]), cents >= 0 else { throw ProviderFailure.invalidData(tr("Unbekannte Währung oder Kosteneinheit.")) }
+            return try addingCost(cents / 100, to: total)
         }
     }
     public static func codex(_ payload: [String: Any], configuration: AccountConfiguration, account: [String: Any] = [:], now: Date = Date()) throws -> AccountSnapshot {
@@ -42,10 +49,10 @@ public enum ProviderParsing {
             for key in ["primary", "secondary"] {
                 guard let raw = bucket[key] as? [String: Any] else { continue }
                 guard let used = JSONValue.number(raw["usedPercent"]), used >= 0 else { throw ProviderFailure.invalidData(tr("Codex liefert ein unbekanntes Limitformat.")) }
-                let duration = JSONValue.number(raw["windowDurationMins"]).map { $0 * 60 }
+                let duration = QuotaNumbers.duration(JSONValue.number(raw["windowDurationMins"]).map { $0 * 60 })
                 let title = JSONValue.title(duration: duration, fallback: key == "primary" ? "Verbrauch" : tr("Weiteres Limit"))
                 windows.append(QuotaWindow(id: "\(bucketID).\(key)", title: name.map { "\($0) · \(title)" } ?? title,
-                                           usedPercent: used, resetsAt: JSONValue.date(raw["resetsAt"]), duration: duration))
+                                           usedPercent: used, resetsAt: JSONValue.date(raw["resetsAt"]), duration: duration, scope: .account))
             }
             if let credit = bucket["credits"] as? [String: Any], let balance = JSONValue.amount(credit["balance"]) {
                 // Provider credits are not USD. Their unit must remain visible.
@@ -59,7 +66,10 @@ public enum ProviderParsing {
             return ResetBenefit(id: id, title: raw["title"] as? String ?? tr("Angesparter Reset"), scope: "Codex-Limits",
                                 expiresAt: JSONValue.date(raw["expiresAt"]), status: status)
         }
-        let count = JSONValue.number(inventory?["availableCount"]).map(Int.init)
+        let count = QuotaNumbers.count(JSONValue.number(inventory?["availableCount"]))
+        if let rawCount = inventory?["availableCount"], !(rawCount is NSNull), count == nil {
+            throw ProviderFailure.invalidData(tr("Codex liefert ein unbekanntes Limitformat."))
+        }
         guard !windows.isEmpty || inventory != nil || !money.isEmpty else {
             throw ProviderFailure.unsupported(tr("Für diese Anmeldung sind keine Abo-Limits verfügbar. Für API-Kosten ein API-Konto hinzufügen."))
         }
@@ -88,12 +98,13 @@ public enum ProviderParsing {
             default: title = key.replacingOccurrences(of: "_", with: " ").capitalized
             }
             windows.append(QuotaWindow(id: key, title: title, usedPercent: used,
-                                       resetsAt: JSONValue.date(raw["resets_at"]), duration: duration, supportsPace: duration != nil))
+                                       resetsAt: JSONValue.date(raw["resets_at"]), duration: duration, supportsPace: duration != nil,
+                                       scope: key == "seven_day_oauth_apps" ? .app : ["seven_day_opus", "seven_day_sonnet"].contains(key) ? .model : .account))
         }
         for raw in limits["model_scoped"] as? [[String: Any]] ?? [] {
             guard let name = raw["display_name"] as? String, let used = JSONValue.number(raw["utilization"]), used >= 0 else { continue }
             windows.append(QuotaWindow(id: "model.\(name)", title: tr("{0} · Woche", name), usedPercent: used,
-                                       resetsAt: JSONValue.date(raw["resets_at"]), duration: 604800))
+                                       resetsAt: JSONValue.date(raw["resets_at"]), duration: 604800, kind: .weekly, scope: .model))
         }
         guard !windows.isEmpty else { throw ProviderFailure.invalidData(tr("Claude hat keine lesbaren Limitwerte geliefert.")) }
         return AccountSnapshot(configurationID: configuration.id,
@@ -110,7 +121,9 @@ public enum ProviderParsing {
             let title = ["rolling": tr("5 Stunden"), "weekly": tr("Woche"), "monthly": tr("Monat")][key] ?? key.capitalized
             let duration: Double? = key == "weekly" ? 604800 : nil
             return QuotaWindow(id: key, title: title, usedPercent: percent, resetsAt: JSONValue.date(raw["resetsAt"]),
-                               duration: duration, supportsPace: key == "weekly")
+                               duration: duration, supportsPace: key == "weekly",
+                               kind: ["rolling": .short, "weekly": .weekly, "monthly": .monthly][key] ?? .unknown,
+                               scope: ["rolling", "weekly", "monthly"].contains(key) ? .account : .unknown)
         }
         guard !windows.isEmpty else { throw ProviderFailure.invalidData(tr("OpenCode Go hat keine lesbaren Limitwerte geliefert.")) }
         return AccountSnapshot(configurationID: configuration.id, identity: identity, plan: "Go", observedAt: now,

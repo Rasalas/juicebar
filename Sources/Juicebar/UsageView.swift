@@ -140,11 +140,12 @@ struct UsageView: View {
                                     }
                                     Spacer()
                                     Text(compactNumber(model.tokens)).monospacedDigit()
-                                    Text(model.cost.formatted(.currency(code: "USD").locale(Localization.locale))).monospacedDigit().foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
+                                    Text(model.costLabel).monospacedDigit().foregroundStyle(.secondary).frame(width: 110, alignment: .trailing)
                                 }.font(.callout)
                                 Divider()
                             }
                             Text(tr("Kosten sind OpenCode-Schätzungen, keine Abo-Rechnung. SSH-Nutzung ist in dieser lokalen Modellliste nicht enthalten.")).font(.caption).foregroundStyle(.secondary)
+                            Text(tr("≥ zeigt nur den bepreisten Anteil. Fehlende Kosten sind nicht null.")).font(.caption).foregroundStyle(.secondary)
                         }.padding(.top, 14)
                     }
                 }
@@ -348,7 +349,7 @@ struct QuotaHistoryChart: View {
         return store.accounts.filter(\.enabled).flatMap { account in
             var values: [QuotaPoint] = []
             for snapshot in store.quotaHistory(for: account.id).reversed().prefix(while: { $0.observedAt > since }).reversed() {
-                values += QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).map { window in
+                values += QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider).filter(\.hasValidUsage).map { window in
                     QuotaPoint(date: snapshot.observedAt, value: store.settings.displayMode.value(used: window.usedPercent),
                                label: "\(account.displayName) · \(window.title)",
                                series: "\(account.id)|\(QuotaPeriod.key(window: window, snapshot: snapshot))")
@@ -364,12 +365,12 @@ struct QuotaHistoryChart: View {
             if values.count < 2 { Text(tr("Nach weiteren Abfragen erscheint hier der Verlauf.")).foregroundStyle(.secondary) }
             else {
                 Chart(Array(values.enumerated()), id: \.offset) { _, point in
-                    LineMark(x: .value(tr("Zeit"), point.date), y: .value(store.settings.displayMode.label, point.value), series: .value(tr("Fenster"), point.series))
+                    LineMark(x: .value(tr("Zeit"), point.date), y: .value(store.settings.displayMode.label, min(point.value, 100)), series: .value(tr("Fenster"), point.series))
                         .interpolationMethod(.stepEnd).foregroundStyle(by: .value(tr("Kontingent"), point.label))
                 }.chartYScale(domain: 0...100).chartYAxisLabel(tr("{0} in %", store.settings.displayMode.label)).frame(height: 210)
                     .accessibilityLabel(tr("Kontingent-Messungen · letzte 24 Stunden"))
                     .accessibilityValue(Dictionary(grouping: values, by: \.label).compactMap { label, points in
-                        points.max { $0.date < $1.date }.map { "\(label): \(Int($0.value.rounded())) % \(store.settings.displayMode.label.lowercased())" }
+                        points.max { $0.date < $1.date }.map { "\(label): \(QuotaNumbers.integerText($0.value.rounded())) % \(store.settings.displayMode.label.lowercased())" }
                     }.sorted().joined(separator: ". "))
             }
         }

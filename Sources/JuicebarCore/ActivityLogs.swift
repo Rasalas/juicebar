@@ -86,6 +86,7 @@ public enum ActivityLogs {
         for account in accounts where !account.profileDirectory.isEmpty && (account.provider == .codex || account.provider == .claude) {
             let root = URL(fileURLWithPath: (account.profileDirectory as NSString).expandingTildeInPath)
             roots.append(Root(source: account.provider == .codex ? .codex : .claude, url: root.appendingPathComponent(account.provider == .codex ? "sessions" : "projects")))
+            if account.provider == .codex { roots.append(Root(source: .codex, url: root.appendingPathComponent("archived_sessions"))) }
         }
         roots += additional.filter { ActivitySource.logFormats.contains($0.source) }
         var seen = Set<String>()
@@ -103,7 +104,7 @@ public enum ActivityLogs {
                      each: (ActivityEvent) -> Void) throws -> [String] {
         let fm = FileManager.default, since = Calendar.current.date(byAdding: .day, value: -90, to: now)!
         if let cacheDirectory { try fm.createDirectory(at: cacheDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
-        var notices: [String] = [], seen = Set<String>(), activeCache = Set<String>()
+        var notices: [String] = [], seen = Set<String>(), activeCache = Set<String>(), liveFiles = Set<String>()
         let decoder = PropertyListDecoder(), encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         func cached(_ url: URL?) -> CachedFile? {
@@ -144,7 +145,7 @@ public enum ActivityLogs {
                     let inode = resource.fileIdentifier
                     if let known, known.size == size, known.modified == modified, known.inode == nil || known.inode == inode {
                         current.files[id] = known
-                        known.events.forEach(since: since, through: now, each)
+                        if cacheDirectory == nil { known.events.forEach(since: since, through: now, each) }
                         skipped += known.skipped
                     } else {
                         let result: CachedFile = try autoreleasepool {
@@ -155,9 +156,12 @@ public enum ActivityLogs {
                             return parsed
                         }
                         if cacheDirectory != nil { current.files[id] = Entry(key: key, file: result) }
-                        for event in result.usage where event.date >= since && event.date <= now { each(event) }
+                        if cacheDirectory == nil {
+                            for event in result.usage where event.date >= since && event.date <= now { each(event) }
+                        }
                         skipped += result.skipped
                     }
+                    liveFiles.insert(id)
                     filesRead += 1
                     if filesRead % 10 == 0 { progress(tr("{0} Logdateien gelesen · {1}", filesRead, root.source.name)) }
                 } catch is CancellationError {
@@ -168,7 +172,7 @@ public enum ActivityLogs {
                     if let last = known ?? cached(cacheURL).map({ Entry(key: key, file: $0) }) {
                         activeCache.insert(key)
                         current.files[id] = last
-                        last.events.forEach(since: since, through: now, each)
+                        if cacheDirectory == nil { last.events.forEach(since: since, through: now, each) }
                     }
                 }
             }
@@ -179,7 +183,7 @@ public enum ActivityLogs {
             // Vanished logs keep their usage until it leaves the 90-day window.
             var vanished = previous.orphans
             for entry in previous.files.values { vanished[entry.key] = entry.events }
-            for name in (try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? [] where name.hasSuffix(".plist") && !activeCache.contains(name) {
+            for name in ((try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? []).sorted() where name.hasSuffix(".plist") && !activeCache.contains(name) {
                 try Task.checkCancellation()
                 let url = cacheDirectory.appendingPathComponent(name)
                 if let usage = vanished[name] ?? cached(url).map({ CompactEvents($0.usage) }) {
@@ -188,6 +192,17 @@ public enum ActivityLogs {
                     if retained { current.orphans[name] = usage; continue }
                 }
                 try? fm.removeItem(at: url)
+            }
+            // Retained observations precede live files so a moved/archived log can correct them.
+            // Reuse the compact entries already kept for the next scan; do not buffer another event list.
+            let files = current.files.keys.sorted()
+            for id in files where !liveFiles.contains(id) {
+                try Task.checkCancellation()
+                current.files[id]?.events.forEach(since: since, through: now, each)
+            }
+            for id in files where liveFiles.contains(id) {
+                try Task.checkCancellation()
+                current.files[id]?.events.forEach(since: since, through: now, each)
             }
         }
         completed = true

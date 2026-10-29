@@ -3,11 +3,15 @@ import Foundation
 public enum QuotaDisplay: String, Codable, CaseIterable, Sendable {
     case remaining, used
     public var label: String { self == .remaining ? tr("Verbleibend") : tr("Verbraucht") }
-    public func value(used: Double) -> Double { self == .remaining ? max(0, 100 - used) : max(0, used) }
+    public func value(used: Double) -> Double {
+        guard QuotaNumbers.isPercent(used) else { return .nan }
+        return self == .remaining ? max(0, 100 - used) : used
+    }
 }
 /// One wording for every remaining time: zero units are dropped, and from a week on only days are shown.
 public func durationText(_ seconds: TimeInterval) -> String {
-    let minutes = max(1, Int(seconds / 60))
+    guard seconds.isFinite, seconds >= 0, let wholeMinutes = Int(exactly: (seconds / 60).rounded(.towardZero)) else { return tr("unbekannt") }
+    let minutes = max(1, wholeMinutes)
     if minutes < 60 { return tr("{0} Min.", minutes) }
     let hours = minutes / 60
     if hours < 24 { return minutes % 60 == 0 ? tr("{0} Std.", hours) : tr("{0} Std. {1} Min.", hours, minutes % 60) }
@@ -42,11 +46,13 @@ public enum QuotaOrder {
     }
     public static func windows(_ windows: [QuotaWindow]) -> [QuotaWindow] {
         func rank(_ w: QuotaWindow) -> Int {
-            if w.title.contains(" · ") || w.id.hasPrefix("model.") { return 3 }
-            if ["5 Stunden", "5 hours"].contains(w.title) || (w.duration.map { $0 < 86400 } ?? false) { return 0 }
-            if w.duration == 604800 || ["Woche", "Week"].contains(w.title) { return 1 }
-            if ["Monat", "Month"].contains(w.title) || w.id == "budget" { return 2 }
-            return 3
+            guard w.scope == .account else { return 3 }
+            switch w.kind {
+            case .short: return 0
+            case .weekly: return 1
+            case .monthly: return 2
+            case .unknown: return 3
+            }
         }
         return windows.sorted { rank($0) == rank($1) ? $0.id < $1.id : rank($0) < rank($1) }
     }
@@ -59,14 +65,11 @@ public struct TrayMeter: Identifiable {
     public var id: String { "\(account.id):\(window?.id ?? "unknown")" }
     public var windowLabel: String {
         guard let window else { return "" }
-        if let duration = window.duration {
-            if duration == 604800 { return "W" }
-            if duration == 18000 { return "5h" }
-            if duration < 86400 { return "\(Int(duration / 3600))h" }
-        }
-        if ["woche", "week"].contains(where: { window.title.lowercased().contains($0) }) { return "W" }
-        if ["monat", "month"].contains(where: { window.title.lowercased().contains($0) }) { return "M" }
-        return ["5 Stunden", "5 hours"].contains(window.title) ? "5h" : String(window.title.prefix(5))
+        if window.kind == .weekly { return "W" }
+        if window.kind == .monthly { return "M" }
+        if let duration = QuotaNumbers.duration(window.duration), duration < 86400 { return "\(QuotaNumbers.integerText(duration / 3600))h" }
+        if ["rolling", "five_hour", "claude.five_hour"].contains(window.id) { return "5h" }
+        return String(window.title.prefix(5))
     }
 }
 public enum TraySelection {
@@ -142,14 +145,35 @@ public struct ActivityEvent: Codable, Sendable, Identifiable {
         self.id = id; self.source = source; self.date = date; self.model = model; self.provider = provider; self.tokens = tokens; self.usage = usage
         self.responseCount = responseCount; self.reportedCost = reportedCost; self.sessionStartedAt = sessionStartedAt
     }
-    /// Independent of directory, host and cache traversal order: Pi originals win over forks.
+    /// Duplicates are observations, not additional responses. Pi's earliest known session wins over forks,
+    /// then the largest streaming total wins, then completeness (valid split, logged cost, model, provider,
+    /// explicit response count, in that order). Those preferences are independent of traversal order.
+    /// Equally complete conflicts use the later input observation, including lower/zero cost corrections.
+    /// This is an ordered conflict policy, not a claim of log revision time: peer copies have no such field.
+    /// Archives therefore pass retained observations first and reread source observations second.
     static func preferred(_ first: Self, _ second: Self) -> Self {
-        keepsFirst(source: first.source, (first.tokens, first.usage != nil, first.sessionStartedAt), (second.tokens, second.usage != nil, second.sessionStartedAt)) ? first : second
+        keepsFirst(source: first.source, first.preference, second.preference) ? first : second
     }
     /// The fields `preferred` decides on; the report builder keeps only these.
-    static func keepsFirst(source: ActivitySource, _ first: (tokens: Double, hasUsage: Bool, session: Date?), _ second: (tokens: Double, hasUsage: Bool, session: Date?)) -> Bool {
+    struct Preference {
+        var tokens: Double
+        var completeness: UInt8
+        var session: Date?
+    }
+    static func labelCompleteness(model: String, provider: String) -> UInt8 {
+        func known(_ text: String) -> Bool { !["", "unknown", "unbekannt"].contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+        return (known(model) ? 4 : 0) | (known(provider) ? 2 : 0)
+    }
+    var preference: Preference { preference(labelCompleteness: Self.labelCompleteness(model: model, provider: provider)) }
+    func preference(labelCompleteness: UInt8) -> Preference {
+        let validUsage = usage.map { $0.isValid && abs($0.total - tokens) < 0.5 } ?? false
+        let validCost = reportedCost.map { $0.isFinite && $0 >= 0 } ?? false
+        let completeness: UInt8 = (validUsage ? 16 : 0) | (validCost ? 8 : 0) | labelCompleteness | (responseCount != nil ? 1 : 0)
+        return Preference(tokens: tokens, completeness: completeness, session: sessionStartedAt)
+    }
+    static func keepsFirst(source: ActivitySource, _ first: Preference, _ second: Preference) -> Bool {
         if source == .pi, first.session != second.session { return (first.session ?? .distantFuture) < (second.session ?? .distantFuture) }
-        return first.tokens > second.tokens || (first.tokens == second.tokens && first.hasUsage)
+        return first.tokens > second.tokens || (first.tokens == second.tokens && first.completeness > second.completeness)
     }
 }
 public struct ActivityDay: Codable, Identifiable, Sendable {

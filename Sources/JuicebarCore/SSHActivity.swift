@@ -27,8 +27,9 @@ public enum SSHActivity {
         func isDue(now: Date, force: Bool) -> Bool { SSHActivity.isDue(observedAt: observedAt, complete: complete, now: now, force: force) }
         func events(since: Date, now: Date) -> [ActivityEvent] {
             var result = carried.filter { $0.date >= since && $0.date <= now }
-            for file in files.values { result += file.parser.events.lazy.filter { $0.date >= since && $0.date <= now } }
-            for database in databases.values { result += database.events.lazy.filter { $0.date >= since && $0.date <= now } }
+            // Peer conflicts use input order, which must survive dictionary decoding.
+            for key in files.keys.sorted() { result += files[key]!.parser.events.lazy.filter { $0.date >= since && $0.date <= now } }
+            for key in databases.keys.sorted() { result += databases[key]!.events.lazy.filter { $0.date >= since && $0.date <= now } }
             return result
         }
         /// Vanished remote logs keep their usage until it leaves the import window, like local logs.
@@ -106,6 +107,7 @@ public enum SSHActivity {
                     database?.events.append(ActivityEvent(id: id, source: source, date: date, model: event["model"] as? String ?? tr("Unbekannt"), provider: event["provider"] as? String ?? "", tokens: tokens, usage: (event["tokenBreakdown"] as? [String: Any]).flatMap(TokenBreakdown.opencode), reportedCost: source == .kilo ? JSONValue.number(event["reportedCost"]) : nil))
                 } else if row["endDatabase"] as? Bool == true, let current = database {
                     // Rows deleted on the host stay imported, as with the local OpenCode archive.
+                    // Reread observations follow retained ones so equal-total metadata corrections can replace them.
                     var unique = Dictionary((state.databases[current.key]?.events ?? []).map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
                     for event in current.events {
                         let key = "\(event.source.rawValue)|\(event.id)"
