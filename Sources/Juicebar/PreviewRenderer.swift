@@ -212,7 +212,7 @@ import JuicebarCore
             sample.windows[1].usedPercent -= 24 * age / 3600
             return sample
         }
-        store.failures["demo-go"] = ProviderFailure.authentication.localizedDescription
+        store.failures["demo-go"] = .provider(.authentication)
         for mode in QuotaDisplay.allCases {
             store.editSettings { $0.quotaDisplay = mode }
             let view = TrayView(store: store, maximumHeight: 1000)

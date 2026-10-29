@@ -17,6 +17,11 @@ public struct AccountRefreshPolicy {
         if let until = rateLimitedUntil[id], until.at > now { return false }
         return force || (nextFetch[id]?.at ?? .distantPast) <= now
     }
+    /// A manual retry may bypass ordinary backoff, but never the provider's cooldown.
+    public func retryAllowedAt(id: String, now: Date) -> Date? {
+        guard let until = rateLimitedUntil[id]?.at, until > now else { return nil }
+        return until
+    }
     public func includesHistory(id: String, now: Date) -> Bool {
         lastHistory[id].map { now.timeIntervalSince($0) > 1800 } ?? true
     }

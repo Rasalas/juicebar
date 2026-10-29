@@ -15,18 +15,25 @@ struct AccountsView: View {
             }
             ForEach(store.accounts) { account in
                 Panel {
-                    HStack(spacing: 16) {
-                        ProviderMark(kind: account.provider, size: 42)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(account.displayName).font(.headline)
-                            Text(account.provider.name + (account.enabled ? "" : tr(" · Pausiert"))).font(.caption).foregroundStyle(.secondary)
-                            if let failure = store.failures[account.id] { Text(failure).font(.caption).foregroundStyle(Palette.warning).fixedSize(horizontal: false, vertical: true) }
-                            else if let snapshot = store.snapshots[account.id] { Text("\(snapshot.source) · \(updatedText(snapshot.observedAt, now: store.now))").font(.caption).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 16) {
+                            ProviderMark(kind: account.provider, size: 42)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(account.displayName).font(.headline)
+                                Text(account.provider.name + (account.enabled ? "" : tr(" · Pausiert"))).font(.caption).foregroundStyle(.secondary)
+                                if store.failures[account.id] == nil, let snapshot = store.snapshots[account.id] {
+                                    Text("\(snapshot.source) · \(updatedText(snapshot.observedAt, now: store.now))").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button(tr("Bearbeiten")) { editing = account }
+                            Menu { Button(tr("Konto entfernen"), role: .destructive) { removing = account } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+                                .accessibilityLabel(tr("Weitere Aktionen für {0}", account.displayName)).help(tr("Weitere Aktionen"))
                         }
-                        Spacer()
-                        Button(tr("Bearbeiten")) { editing = account }
-                        Menu { Button(tr("Konto entfernen"), role: .destructive) { removing = account } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
-                            .accessibilityLabel(tr("Weitere Aktionen für {0}", account.displayName)).help(tr("Weitere Aktionen"))
+                        // Disabled accounts are absent from the tray, but still need credential recovery.
+                        if let failure = store.failures[account.id] {
+                            AccountFailureView(store: store, account: account, failure: failure)
+                        }
                     }
                 }
             }

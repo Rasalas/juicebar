@@ -6,7 +6,7 @@
   "Bitte den gespeicherten Key entweder ersetzen oder entfernen.": "Please either replace or remove the saved key.",
   "Gespeicherten Key entfernen": "Remove saved key",
   "Konto und Verlauf bleiben erhalten. Ohne eigenen Key kann OpenCode Go wieder den lokalen Key verwenden.": "Your account and history are kept. Without a saved key, OpenCode Go can use the local key again.",
-  "Der Schlüssel konnte nach einem Speicherfehler nicht wiederhergestellt werden. Bitte die Kontoaktion erneut versuchen. Bis dahin wird dieses Konto nicht abgerufen.": "The key could not be restored after a storage error. Please retry the account action. Refresh for this account is paused until then.",
+  "Der Schlüssel konnte nach einem Speicherfehler nicht wiederhergestellt werden. Bitte die Wiederherstellung erneut versuchen. Bis dahin wird dieses Konto nicht abgerufen.": "The key could not be restored after a storage error. Please retry restoration. Refresh for this account is paused until then.",
   "Schlüssel konnte nicht aus dem Schlüsselbund entfernt werden.": "Could not remove the key from Keychain.",
   "Die OpenCode-Datenbank konnte nicht vollständig gelesen werden.": "Could not read the complete OpenCode database.",
   "Die beschädigten Originaldaten bleiben gesichert. Nur betroffene Einstellungen werden zurückgesetzt.": "The damaged original data remains backed up. Only affected settings will be reset.",
@@ -547,5 +547,10 @@
   "{0} archivierte Nachrichten": "{0} archived messages",
   "Claude-Kosten nicht rekonstruierbar": "Claude costs cannot be reconstructed",
   "API-Gegenwert": "API equivalent",
-  "Für diese Messgröße sind keine Werte bekannt.": "No known values for this metric."
+  "Für diese Messgröße sind keine Werte bekannt.": "No known values for this metric.",
+  "Der Kontostand konnte nicht abgerufen werden. Der letzte Stand bleibt sichtbar. Bitte erneut versuchen oder die Kontoeinstellungen prüfen.": "The account could not be refreshed. The last value remains visible. Please retry or check the account settings.",
+  "Erneuter Versuch frühestens um {0}.": "Retry available at {0}.",
+  "Wird ausgeführt …": "In progress…",
+  "Schlüssel wiederherstellen": "Restore key",
+  "Erneut versuchen": "Retry"
 }
