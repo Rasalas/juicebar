@@ -53,35 +53,118 @@ public enum HTTPTransport {
         return URLSession(configuration: config)
     }()
     public static func get(_ url: URL, headers: [String: String]) async throws -> [String: Any] {
+        try await get(url, headers: headers, session: session)
+    }
+    // Session injection keeps transport tests local and credential-free.
+    static func get(_ url: URL, headers: [String: String], session: URLSession) async throws -> [String: Any] {
         var request = URLRequest(url: url); request.timeoutInterval = 12
         request.setValue("Juicebar/0.1.0", forHTTPHeaderField: "User-Agent")
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
         do {
-            let (data, response) = try await session.data(for: request)
-            guard let response = response as? HTTPURLResponse else { throw ProviderFailure.network }
-            switch response.statusCode {
-            case 200..<300: break
-            case 401: throw ProviderFailure.authentication
-            case 403: throw ProviderFailure.unsupported(tr("Der Anbieter verweigert den Zugriff. Berechtigungen und aktives Abonnement prüfen."))
-            case 429:
-                let raw = response.value(forHTTPHeaderField: "Retry-After") ?? ""
-                let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
-                formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-                let delay = Double(raw) ?? formatter.date(from: raw)?.timeIntervalSinceNow ?? 300
-                throw ProviderFailure.rateLimited(max(60, min(delay, 86400)))
-            case 404: throw ProviderFailure.unsupported(tr("Diese Datenquelle ist für das Konto nicht verfügbar."))
-            default: throw ProviderFailure.network
-            }
+            let body = BoundedHTTPBody()
+            let data = try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                return try await withCheckedThrowingContinuation { body.start(request, session: session, continuation: $0) }
+            } onCancel: { body.cancel() }
+            try Task.checkCancellation()
             return try decode(data)
         } catch let error as ProviderFailure { throw error }
         catch is CancellationError { throw CancellationError() }
         catch let error as URLError where error.code == .cancelled && Task.isCancelled { throw CancellationError() }
         catch { throw ProviderFailure.network }
     }
+    fileprivate static func validate(_ response: URLResponse) throws {
+        guard let response = response as? HTTPURLResponse else { throw ProviderFailure.network }
+        // Reject error responses at the headers; never retain their potentially unbounded bodies.
+        switch response.statusCode {
+        case 200..<300: break
+        case 401: throw ProviderFailure.authentication
+        case 403: throw ProviderFailure.unsupported(tr("Der Anbieter verweigert den Zugriff. Berechtigungen und aktives Abonnement prüfen."))
+        case 429:
+            let raw = response.value(forHTTPHeaderField: "Retry-After") ?? ""
+            let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            let delay = Double(raw) ?? formatter.date(from: raw)?.timeIntervalSinceNow ?? 300
+            throw ProviderFailure.rateLimited(max(60, min(delay, 86400)))
+        case 404: throw ProviderFailure.unsupported(tr("Diese Datenquelle ist für das Konto nicht verfügbar."))
+        default: throw ProviderFailure.network
+        }
+        guard response.expectedContentLength <= maximumBytes else { throw oversized }
+    }
+    fileprivate static var oversized: ProviderFailure { .invalidData(tr("Die Anbieterantwort ist zu groß.")) }
     static func decode(_ data: Data) throws -> [String: Any] {
         guard data.count <= maximumBytes else { throw ProviderFailure.invalidData(tr("Die Anbieterantwort ist zu groß.")) }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderFailure.invalidData(tr("Unbekanntes Antwortformat. Adapter aktualisieren.")) }
         return object
+    }
+}
+
+/// One accumulator per request. The task delegate bounds received chunks before copying them.
+/// The lock coordinates delegate callbacks with cancellation, including cancellation before start.
+private final class BoundedHTTPBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var task: URLSessionDataTask?
+    private var completed = false
+    private var validated = false
+    private var data = Data()
+
+    func start(_ request: URLRequest, session: URLSession, continuation: CheckedContinuation<Data, Error>) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        let task = session.dataTask(with: request)
+        task.delegate = self
+        self.task = task
+        lock.unlock()
+        task.resume()
+    }
+    func cancel() { finish(.failure(CancellationError())) }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        do {
+            try HTTPTransport.validate(response)
+            lock.lock()
+            validated = true
+            let active = !completed
+            lock.unlock()
+            completionHandler(active ? .allow : .cancel)
+        } catch {
+            finish(.failure(error))
+            completionHandler(.cancel)
+        }
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        guard chunk.count <= HTTPTransport.maximumBytes - data.count else {
+            lock.unlock()
+            finish(.failure(HTTPTransport.oversized))
+            return
+        }
+        data.append(chunk)
+        lock.unlock()
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let result: Result<Data, Error> = error.map { .failure($0) } ?? (validated ? .success(data) : .failure(ProviderFailure.network))
+        lock.unlock()
+        finish(result)
+    }
+    private func finish(_ result: Result<Data, Error>) {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        let continuation = self.continuation, task = self.task
+        self.continuation = nil; self.task = nil; data = Data()
+        lock.unlock()
+        task?.cancel()
+        continuation?.resume(with: result)
     }
 }
 
