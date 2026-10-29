@@ -395,6 +395,7 @@ import JuicebarCore
         defer { store.activity = previous }
         store.activity?.sources = [
             .init(id: "local", label: tr("Logs dieses Macs"), tools: [.claude], phase: .success, lastSuccess: store.now),
+            .init(id: "local-unattributed|pi", label: tr("{0} · archivierte lokale Daten", ActivitySource.pi.name), tools: [.pi], phase: .unknown),
             .init(id: "ssh|build", label: "build", phase: .stale, lastSuccess: store.now.addingTimeInterval(-7200)),
             .init(id: "ssh|laptop", label: "laptop", phase: .checking, lastSuccess: store.now.addingTimeInterval(-86400))
         ]

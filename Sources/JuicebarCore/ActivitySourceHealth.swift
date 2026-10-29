@@ -2,7 +2,7 @@ import Foundation
 
 /// Evidence belongs to a collection/root or host, not to every tool that it might contain.
 public struct ActivitySourceHealth: Codable, Equatable, Identifiable, Sendable {
-    public enum Phase: String, Codable, Sendable { case checking, success, cached, stale, unavailable, retained }
+    public enum Phase: String, Codable, Sendable { case checking, success, cached, stale, unavailable, retained, unknown }
     public var id: String
     public var label: String
     /// nil for an SSH host, which can feed multiple tool kinds.
@@ -18,6 +18,12 @@ public struct ActivitySourceHealth: Codable, Equatable, Identifiable, Sendable {
         self.id = id; self.label = label; self.tools = tools; self.phase = phase; self.lastSuccess = lastSuccess; self.issue = issue; self.coverage = coverage
     }
     public func includes(_ tool: ActivitySource?) -> Bool { tool == nil || tools == nil || tools!.contains(tool!) }
+    mutating func expireCoverage(before date: Date) {
+        guard let observed = coverageObservedAt else { return }
+        let retained = observed.filter { $0.value >= date }
+        coverageObservedAt = retained
+        coverage = retained.keys.sorted()
+    }
 }
 
 extension ActivityReport {

@@ -45,6 +45,7 @@ enum UsageFreshness {
         case .unavailable:
             state = item.lastSuccess == nil ? tr("nicht verfügbar; kein erfolgreicher Abruf belegt") : tr("nicht verfügbar; gespeicherte Historie nicht lesbar")
         case .retained: state = tr("Quelle entfernt; gespeicherte Historie")
+        case .unknown: state = tr("Aktualität unbekannt; ursprüngliche Quelle nicht zuordenbar")
         }
         let success = item.lastSuccess.map {
             tr("Letzter erfolgreicher Abruf: {0}.", $0.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)))

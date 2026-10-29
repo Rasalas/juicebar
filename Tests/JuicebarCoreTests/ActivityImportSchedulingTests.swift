@@ -210,6 +210,14 @@ final class ActivityImportSchedulingTests: XCTestCase {
         try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
         final = await reports.values.last
         XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.coverage, ["a: Synthetic row limit reached"])
+        request.now = now.addingTimeInterval(90 * 86400 - 60)
+        try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        request.now = now.addingTimeInterval(90 * 86400 + 60); request.refreshRemote = false
+        try await ActivityImport.readProgressively(request, collectors: .init(remote: { _, _, _ in XCTFail("Host is not due") })) { report, _ in await reports.append(report) }
+        final = await reports.values.last
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.phase, .cached)
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.coverage, [], "Expiry also applies before a cached publication")
+        request.refreshRemote = true
         request.now = now.addingTimeInterval(91 * 86400)
         try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
         final = await reports.values.last
@@ -302,6 +310,55 @@ final class ActivityImportSchedulingTests: XCTestCase {
         XCTAssertTrue(local.includes(nil)); XCTAssertTrue(legacy.sources!.first!.includes(.claude))
         XCTAssertNil(legacy.sources?.first?.lastSuccess)
         XCTAssertEqual(legacy.sources?.last?.lastSuccess, now)
+    }
+
+    func testLegacyOrphanUsageKeepsUnknownFreshnessBesideSuccessfulCurrentRoot() throws {
+        struct LegacyFile: Encodable {
+            var version = 2
+            var size = 10
+            var modified: Date
+            var events: [ActivityEvent]
+            var skipped = 0
+        }
+        struct LegacyArchive: Encodable {
+            var events: CompactEvents
+            var observedAt: Date
+            var retainedSource = ActivitySource.kilo
+        }
+        let root = try directory(), state = root.appendingPathComponent("state")
+        let cache = state.appendingPathComponent("activity-cache"), logs = root.appendingPathComponent("empty-pi")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let file = LegacyFile(modified: now, events: [event()])
+        try PropertyListEncoder().encode(file).write(to: cache.appendingPathComponent("removed-folder.plist"))
+        let archives = state.appendingPathComponent("activity-sources")
+        try FileManager.default.createDirectory(at: archives, withIntermediateDirectories: true)
+        let legacyKilo = LegacyArchive(events: CompactEvents([.init(id: "old-kilo", source: .kilo, date: now, model: "fixture", tokens: 25)]), observedAt: now)
+        try PropertyListEncoder().encode(legacyKilo).write(to: archives.appendingPathComponent("kilo-legacy.plist"))
+        func read(_ directory: URL, at: Date) throws -> ActivityReport {
+            try ActivityImport.read(roots: [.init(source: .pi, url: logs)], databasePath: root.appendingPathComponent("absent.db").path,
+                                    hosts: [], directory: directory, now: at).0
+        }
+        func verify(_ report: ActivityReport) throws {
+            XCTAssertEqual(report.days.filter { $0.source == .pi }.reduce(0) { $0 + $1.tokens }, 100)
+            let sources = report.sources?.filter { $0.includes(.pi) } ?? []
+            XCTAssertTrue(sources.contains { $0.phase == .success }, "The current empty root really was read")
+            let unknown = sources.filter { $0.phase == .unknown }
+            XCTAssertEqual(unknown.count, 1, "Legacy orphan usage needs its own freshness warning")
+            XCTAssertNil(unknown.first?.lastSuccess, "Cache modification is not a successful observation")
+            XCTAssertFalse(unknown.first?.includes(.claude) == true)
+            let kilo = report.sources?.first { $0.tools == [.kilo] }
+            XCTAssertEqual(kilo?.phase, .retained)
+            XCTAssertEqual(kilo?.lastSuccess, now, "Legacy aggregate archives preserve their actual observation")
+        }
+        try verify(read(state, at: now))
+        try verify(read(state, at: now.addingTimeInterval(60)))
+        let cold = root.appendingPathComponent("cold")
+        try FileManager.default.copyItem(at: state, to: cold)
+        try verify(read(cold, at: now.addingTimeInterval(120)))
+        let expired = try read(cold, at: now.addingTimeInterval(91 * 86400))
+        XCTAssertTrue(expired.days.isEmpty)
+        XCTAssertFalse(expired.sources?.contains { $0.phase == .unknown } == true)
     }
 
     func testSuccessFailureRestartCadenceAndRecoveryKeepLastSuccess() async throws {

@@ -571,5 +571,7 @@
   "Erneuter Versuch frühestens um {0}.": "Retry available at {0}.",
   "Wird ausgeführt …": "In progress…",
   "Schlüssel wiederherstellen": "Restore key",
-  "Erneut versuchen": "Retry"
+  "Erneut versuchen": "Retry",
+  "{0} · archivierte lokale Daten": "{0} · archived local data",
+  "Aktualität unbekannt; ursprüngliche Quelle nicht zuordenbar": "freshness unknown; original source cannot be identified"
 }

@@ -196,12 +196,10 @@ public enum ActivityImport {
             let loaded = load()
             var state = loaded.state, health = health
             let previousCoverage = health.coverage ?? state.notices
-            var coverageTimes = health.coverageObservedAt ?? Dictionary(previousCoverage.map {
+            health.coverageObservedAt = health.coverageObservedAt ?? Dictionary(previousCoverage.map {
                 ($0, health.lastSuccess ?? state.observedAt ?? now)
             }, uniquingKeysWith: max)
-            coverageTimes = coverageTimes.filter { $0.value >= now.addingTimeInterval(-90 * 86400) }
-            health.coverageObservedAt = coverageTimes
-            health.coverage = coverageTimes.keys.sorted()
+            health.expireCoverage(before: now.addingTimeInterval(-90 * 86400))
             let revision = state.revision
             state.complete = false
             func failedPhase() -> ActivitySourceHealth.Phase {
@@ -225,9 +223,8 @@ public enum ActivityImport {
                 try control.check()
                 // An unchanged database emits no new notice. Its retained rows still have
                 // the original coverage limit, until that observation leaves the window.
-                for notice in state.notices { coverageTimes[notice] = now }
-                health.coverageObservedAt = coverageTimes
-                health.coverage = coverageTimes.keys.sorted()
+                for notice in state.notices { health.coverageObservedAt?[notice] = now }
+                health.coverage = health.coverageObservedAt?.keys.sorted()
                 health.phase = .success; health.lastSuccess = state.observedAt; health.issue = nil
             } catch is CancellationError {
                 health.phase = failedPhase()
@@ -352,6 +349,11 @@ public enum ActivityImport {
                     phase: success ? .success : health[id]?.lastSuccess == nil ? .unavailable : .stale,
                     lastSuccess: success ? now : health[id]?.lastSuccess, issue: success ? nil : issues.first, coverage: success ? issues : health[id]?.coverage)
                 activeHealth.insert(id)
+            }, unattributed: { source in
+                let id = "local-unattributed|\(source.rawValue)"
+                health[id] = ActivitySourceHealth(id: id, label: tr("{0} · archivierte lokale Daten", source.name),
+                    tools: [source], phase: .unknown)
+                activeHealth.insert(id)
             }) { builder.add($0) }
             for root in roots where root.source == .kilo {
                 _ = try collect("kilo|\(root.url.path)", label: rootLabel(root),
@@ -375,7 +377,14 @@ public enum ActivityImport {
                 guard var archive = decoded.load(Archive.self, from: file), archive.retainedSource == .kilo else { continue }
                 let retained = archive.events.events(since: since, through: now)
                 for event in retained { builder.add(event) }
-                if !retained.isEmpty { warnings += archive.notices ?? [] }
+                if !retained.isEmpty {
+                    warnings += archive.notices ?? []
+                    let id = String(file.deletingPathExtension().lastPathComponent.dropFirst("kilo-".count))
+                    if health[id] == nil {
+                        health[id] = ActivitySourceHealth(id: id, label: tr("{0} · archivierte lokale Daten", ActivitySource.kilo.name),
+                            tools: [.kilo], phase: .retained, lastSuccess: archive.observedAt, coverage: archive.notices)
+                    }
+                }
                 if retained.isEmpty { try? fm.removeItem(at: file); decoded.forget(file) }
                 else if retained.count != archive.events.count {
                     archive.events = CompactEvents(retained)
@@ -419,6 +428,7 @@ public enum ActivityImport {
                 }
                 if !hasRetainedUsage { job.health.coverage = []; job.health.coverageObservedAt = [:] }
                 else if job.health.coverage == nil { job.health.coverage = kept.notices }
+                job.health.expireCoverage(before: since)
                 health[job.health.id] = job.health
                 remoteNotices[index] = kept.notices
                 if due { jobs.append(job) }
