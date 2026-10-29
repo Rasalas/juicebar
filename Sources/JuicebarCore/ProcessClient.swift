@@ -68,6 +68,8 @@ public final class ProcessClient {
         closeInput()
         // The leader is still ours, including when it is a zombie. Kill helpers before reaping it.
         killpg(pid, SIGTERM)
+        // A child can leave its original group. Its PID remains ours until waitpid reaps it.
+        kill(pid, SIGTERM)
         let end = ContinuousClock.now.advanced(by: .milliseconds(400))
         var info = siginfo_t()
         while ContinuousClock.now < end {
@@ -75,6 +77,7 @@ public final class ProcessClient {
             Thread.sleep(forTimeInterval: 0.01)
         }
         killpg(pid, SIGKILL)
+        kill(pid, SIGKILL)
         while waitpid(pid, nil, 0) < 0 && errno == EINTR {}
         pid = 0
         try? output.fileHandleForReading.close()

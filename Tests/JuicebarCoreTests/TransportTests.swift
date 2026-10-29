@@ -134,6 +134,27 @@ final class ProcessTransportTests: XCTestCase {
         XCTAssertTrue(unrelated.isRunning)
     }
 
+    func testCloseKillsOwnedLeaderAfterItChangesGroups() throws {
+        let script = """
+        import os,signal,json
+        os.setpgid(0,os.getpgid(os.getppid()))
+        signal.signal(signal.SIGTERM,signal.SIG_IGN)
+        signal.alarm(3)
+        print(json.dumps({'pid':os.getpid(),'group':os.getpgrp()}),flush=True)
+        while True: signal.pause()
+        """
+        let client = try python(script, timeout: 5)
+        defer { client.close() }
+        let row = try client.receive { _ in true }
+        let pid = pid_t(try XCTUnwrap(row["pid"] as? Int))
+        XCTAssertNotEqual(row["group"] as? Int, Int(pid))
+        let start = ContinuousClock.now
+        client.close()
+        XCTAssertLessThan(start.duration(to: .now), .seconds(1.2), "Cleanup must kill the owned PID rather than wait for its alarm")
+        XCTAssertEqual(kill(pid, 0), -1)
+        XCTAssertEqual(errno, ESRCH)
+    }
+
     private func python(_ script: String, timeout: TimeInterval = 3, maximumResponseBytes: Int = 2_000_000) throws -> ProcessClient {
         try ProcessClient(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-c", script], timeout: timeout, maximumResponseBytes: maximumResponseBytes)
     }
@@ -148,16 +169,20 @@ final class HTTPTransportTests: XCTestCase {
         XCTAssertEqual((result["pad"] as? String)?.utf8.count, HTTPTransport.maximumBytes - prefix.count - suffix.count)
     }
 
-    func testRejectsOversizedContentLengthBeforeDownloadingBody() async throws {
-        let fixture = HTTPFixture(headers: ["Content-Length": "\(HTTPTransport.maximumBytes + 1)"], body: Data(repeating: 65, count: 8_000_000))
+    func testRejectsOversizedContentLengthWithoutWaitingForBody() async throws {
+        // URL loading may defer header delivery until the first body byte. Stop the fixture
+        // there so rejection cannot depend on producer speed or on receiving the rest.
+        let fixture = HTTPFixture(headers: ["Content-Type": "application/json", "Content-Length": "\(HTTPTransport.maximumBytes + 1)"], body: Data([65]), stall: true)
         await assertFailure(fixture, .invalidData(tr("Die Anbieterantwort ist zu groß.")))
-        XCTAssertLessThan(fixture.bytesSent, 65_536)
+        XCTAssertLessThanOrEqual(fixture.bytesSent, 1)
+        await fulfillment(of: [fixture.stopped], timeout: 2)
     }
 
     func testUnknownLengthStopsReceptionAtLimit() async throws {
-        let fixture = HTTPFixture(body: Data(repeating: 65, count: 8_000_000))
+        // No end-of-body callback: the byte cap itself must finish the request.
+        let fixture = HTTPFixture(body: Data(repeating: 65, count: HTTPTransport.maximumBytes + 1), stall: true)
         await assertFailure(fixture, .invalidData(tr("Die Anbieterantwort ist zu groß.")))
-        XCTAssertLessThan(fixture.bytesSent, HTTPTransport.maximumBytes + 65_536)
+        XCTAssertEqual(fixture.bytesSent, HTTPTransport.maximumBytes + 1)
         await fulfillment(of: [fixture.stopped], timeout: 2)
     }
 
@@ -169,16 +194,19 @@ final class HTTPTransportTests: XCTestCase {
             (429, .rateLimited(120)), (500, .network)
         ]
         for (status, failure) in failures {
-            let fixture = HTTPFixture(status: status, headers: ["Retry-After": "120"], body: Data(repeating: 65, count: 8_000_000))
+            let fixture = HTTPFixture(status: status, headers: ["Content-Type": "application/json", "Retry-After": "120", "Content-Length": "8000000"],
+                                      body: Data([65]), stall: true)
             await assertFailure(fixture, failure)
-            XCTAssertLessThan(fixture.bytesSent, 65_536)
+            XCTAssertLessThanOrEqual(fixture.bytesSent, 1)
+            await fulfillment(of: [fixture.stopped], timeout: 2)
         }
     }
 
     func testUnderstatedContentLengthStillStopsAtLimit() async throws {
-        let fixture = HTTPFixture(headers: ["Content-Length": "1"], body: Data(repeating: 65, count: 8_000_000))
+        let fixture = HTTPFixture(headers: ["Content-Length": "1"], body: Data(repeating: 65, count: HTTPTransport.maximumBytes + 1), stall: true)
         await assertFailure(fixture, .invalidData(tr("Die Anbieterantwort ist zu groß.")))
-        XCTAssertLessThan(fixture.bytesSent, HTTPTransport.maximumBytes + 65_536)
+        XCTAssertEqual(fixture.bytesSent, HTTPTransport.maximumBytes + 1)
+        await fulfillment(of: [fixture.stopped], timeout: 2)
     }
 
     func testCancellingOneRequestLeavesSharedSessionUsable() async throws {
