@@ -59,7 +59,7 @@ public final class HistoryDatabase {
     public init(path: String) throws {
         if sqlite3_open(path, &database) != SQLITE_OK { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht geöffnet werden.")) }
         sqlite3_busy_timeout(database, 100)
-        try execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS observations (id INTEGER PRIMARY KEY, account TEXT NOT NULL, time REAL NOT NULL, payload BLOB NOT NULL); CREATE INDEX IF NOT EXISTS observation_account_time ON observations(account,time); CREATE TABLE IF NOT EXISTS warnings (id TEXT PRIMARY KEY, time REAL NOT NULL, payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS preferences (id TEXT PRIMARY KEY, payload BLOB NOT NULL);")
+        try execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS observations (id INTEGER PRIMARY KEY, account TEXT NOT NULL, time REAL NOT NULL, payload BLOB NOT NULL); CREATE INDEX IF NOT EXISTS observation_account_time ON observations(account,time); CREATE TABLE IF NOT EXISTS warnings (id TEXT PRIMARY KEY, time REAL NOT NULL, payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS preferences (id TEXT PRIMARY KEY, payload BLOB NOT NULL);")
         // Migrations are housekeeping only; a busy database retries on the next launch.
         try? migrate()
     }
@@ -113,10 +113,13 @@ public final class HistoryDatabase {
         bind(account, to: stmt, at: 1); sqlite3_bind_double(stmt, 2, thinnedFrom[account] ?? -.infinity)
         sqlite3_bind_double(stmt, 3, cutoff.timeIntervalSince1970)
         var rows: [(id: Int64, time: Double, snapshot: AccountSnapshot)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        defer { sqlite3_finalize(stmt) }
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
             if let v = try? decoder.decode(AccountSnapshot.self, from: data(stmt, 2)) { rows.append((sqlite3_column_int64(stmt, 0), sqlite3_column_double(stmt, 1), v)) }
+            status = sqlite3_step(stmt)
         }
-        sqlite3_finalize(stmt)
+        guard status == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht gelesen werden.")) }
         let redundant = HistoryRetention.redundant(rows.map(\.snapshot), before: cutoff)
         if !redundant.isEmpty { try execute("DELETE FROM observations WHERE id IN (\(redundant.map { String(rows[$0].id) }.joined(separator: ",")))") }
         let dropped = Set(redundant), kept = rows.indices.filter { !dropped.contains($0) }
@@ -128,7 +131,12 @@ public final class HistoryDatabase {
         bind(account, to: stmt, at: 1); sqlite3_bind_double(stmt, 2, since.timeIntervalSince1970)
         sqlite3_bind_int(stmt, 3, Int32(max(1, min(limit, HistoryRetention.maximumRows))))
         var result: [AccountSnapshot] = []
-        while sqlite3_step(stmt) == SQLITE_ROW { if let v = try? decoder.decode(AccountSnapshot.self, from: data(stmt, 0)) { result.append(v) } }
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            if let v = try? decoder.decode(AccountSnapshot.self, from: data(stmt, 0)) { result.append(v) }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht gelesen werden.")) }
         return result.reversed()
     }
     public func saveWarning(_ event: WarningEvent) throws {
@@ -143,7 +151,12 @@ public final class HistoryDatabase {
         let stmt = try statement("SELECT payload FROM warnings ORDER BY time DESC LIMIT ?")
         defer { sqlite3_finalize(stmt) }; sqlite3_bind_int(stmt, 1, Int32(limit))
         var result: [WarningEvent] = []
-        while sqlite3_step(stmt) == SQLITE_ROW { if let v = try? decoder.decode(WarningEvent.self, from: data(stmt, 0)) { result.append(v) } }
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            if let v = try? decoder.decode(WarningEvent.self, from: data(stmt, 0)) { result.append(v) }
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Der lokale Verlauf konnte nicht gelesen werden.")) }
         return result
     }
     private func payload(key: String) throws -> Data? {
@@ -209,8 +222,45 @@ public final class HistoryDatabase {
         defer { sqlite3_finalize(stmt) }; bind(key, to: stmt, at: 1); bind(try encoder.encode(value), to: stmt, at: 2)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Einstellung konnte nicht gespeichert werden.")) }
     }
+    /// Commits related preferences and history together. The hook runs only after all SQL writes
+    /// succeed, allowing the caller to compensate an external credential change if COMMIT fails.
+    public func saveAccounts(_ accounts: [AccountConfiguration], clearingHistoryFor id: String? = nil,
+                             beforeCommit: () throws -> Void = {}) throws {
+        try transaction {
+            try write(accounts, key: "accounts")
+            if let id { try deleteHistory(id) }
+            try beforeCommit()
+        }
+        if let id { thinnedFrom[id] = nil; insertsSincePrune[id] = nil }
+    }
+
+    public func deleteAccount<Resets: Encodable>(_ id: String, accounts: [AccountConfiguration], manualResets: Resets,
+                                                 beforeCommit: () throws -> Void = {}) throws {
+        try transaction {
+            try write(accounts, key: "accounts")
+            try write(manualResets, key: "manual-resets")
+            try deleteHistory(id)
+            try beforeCommit()
+        }
+        thinnedFrom[id] = nil; insertsSincePrune[id] = nil
+    }
+
+    private func transaction(_ changes: () throws -> Void) throws {
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try changes()
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     public func removeAccount(_ id: String) throws {
-        thinnedFrom[id] = nil
+        try deleteHistory(id)
+        thinnedFrom[id] = nil; insertsSincePrune[id] = nil
+    }
+    private func deleteHistory(_ id: String) throws {
         let stmt = try statement("DELETE FROM observations WHERE account=?")
         defer { sqlite3_finalize(stmt) }; bind(id, to: stmt, at: 1)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw ProviderFailure.unavailable(tr("Verlauf konnte nicht entfernt werden.")) }

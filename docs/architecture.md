@@ -12,6 +12,10 @@ Der lokale und per SSH gelesene Aktivitätsverlauf läuft unabhängig davon auf 
 
 Fehlende Einstellungen verwenden Vorgaben. Nicht lesbare Einstellungen erzeugen einen sichtbaren Fehler und sperren das Überschreiben des betroffenen Werts. Das ausdrücklich gewählte Zurücksetzen sichert die ursprünglichen Bytes in derselben Datenbanktransaktion, bevor es nur die betroffenen Einstellungen entfernt.
 
+Kontenänderungen speichern zusammengehörige Einstellungen und Verlauf in einer SQLite-Transaktion. Erst danach veröffentlicht `AppStore` den neuen Zustand. Schlüsselbundänderungen werden bei einem fehlgeschlagenen Commit zurückgenommen; scheitert auch die Wiederherstellung, bleibt die Sicherung für die laufende Sitzung erhalten und das Konto wird bis zur Wiederherstellung gesperrt. SQLite und Schlüsselbund bilden keine gemeinsame absturzsichere Transaktion.
+
+Das Entfernen eines eigenen Keys wird im Kontoeditor bis zum Speichern vorgemerkt. Ein automatischer Wechsel der Anmeldung, etwa zum lokalen OpenCode-Go-Key, löscht keine vorhandenen Messwerte. Jede Messung behält ihre Anmeldekennung. Diagramme trennen danach ihre Linien; Prognosen verwenden nur Messwerte derselben Anmeldung. Die normalen Aufbewahrungsfristen gelten weiter. Bei fehlgeschlagenen OpenCode-Imports bleiben Ereignisse und Modellübersicht mit dem bisherigen Zeitstempel erhalten.
+
 # Juicebar: Architekturvorschlag
 
 Stand: 25. September 2026. Entwurf, noch keine implementierte App. Die Modulstruktur ist unabhängig vom Stack. Tauri ist eine vorläufige Variante; Swift und Wails werden in [technology-choice.md](technology-choice.md) dagegen abgewogen.

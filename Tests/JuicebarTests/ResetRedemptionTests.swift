@@ -2,7 +2,7 @@ import XCTest
 import JuicebarCore
 @testable import Juicebar
 
-private actor ResetFake: CodexResetRedeeming {
+actor ResetFake: CodexResetRedeeming {
     private var failFirst: Bool
     private let hold: Bool
     private let includesFreshLimits: Bool
