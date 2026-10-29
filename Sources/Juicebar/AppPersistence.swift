@@ -51,7 +51,7 @@ enum ConfigurationWrite: Sendable {
 
 struct CredentialRecoveryFailure: LocalizedError {
     var errorDescription: String? {
-        tr("Der Schlüssel konnte nach einem Speicherfehler nicht wiederhergestellt werden. Bitte die Kontoaktion erneut versuchen. Bis dahin wird dieses Konto nicht abgerufen.")
+        tr("Der Schlüssel konnte nach einem Speicherfehler nicht wiederhergestellt werden. Bitte die Wiederherstellung erneut versuchen. Bis dahin wird dieses Konto nicht abgerufen.")
     }
 }
 
@@ -183,6 +183,11 @@ final class AppPersistence: @unchecked Sendable {
             configuration.accounts = accounts; configuration.manualResets = resets
             return AccountCommit(accounts: accounts, manualResets: resets, clearedHistory: clearHistory)
         }
+    }
+
+    /// Runs the same compensation used by account commits, without changing account or history.
+    func retryCredentialRecovery(_ id: String) async throws {
+        try await perform { [self] in try restoreCredential(id) }
     }
 
     private func restoreCredential(_ id: String) throws {

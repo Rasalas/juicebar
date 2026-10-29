@@ -1,5 +1,7 @@
 import XCTest
 import CSQLite
+import Observation
+import SwiftUI
 import JuicebarCore
 @testable import Juicebar
 
@@ -8,6 +10,7 @@ private final class CredentialFake: CredentialStore {
     var reads = 0, mutations = 0
     var failRead = false, failSave = false, failRemove = false
     var onMutation: (() -> Void)?
+    var beforeSave: (() -> Void)?
     func read(account: String) throws -> String? {
         reads += 1
         if failRead { throw ProviderFailure.unavailable("Fixture read failure") }
@@ -15,6 +18,7 @@ private final class CredentialFake: CredentialStore {
     }
     func contains(account: String) -> Bool { values[account] != nil }
     func save(_ secret: String, account: String) throws {
+        beforeSave?()
         if failSave { throw ProviderFailure.unavailable("Fixture save failure") }
         values[account] = secret; mutations += 1
         let hook = onMutation; onMutation = nil; hook?()
@@ -46,7 +50,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         try database.save(AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture"))
         let credentials = CredentialFake()
         credentials.values[account.id] = "fixture-old-key"
-        let store = AppStore(directory: directory, resetRedeemer: resetRedeemer, credentials: credentials, registry: registry)
+        let store = AppStore(directory: directory, resetRedeemer: resetRedeemer, credentials: credentials, registry: registry, notifications: NotificationFixture())
         await store.waitUntilReady()
         if paused { store.isPaused = true }
         return (store, database, account, directory, credentials)
@@ -104,7 +108,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         let (store, database, account, directory, credentials) = try await fixture()
         await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
         let resetIDs = store.manualResets.map(\.id)
-        store.failures[account.id] = "Previous failure"
+        store.failures[account.id] = .provider(.unavailable("Previous failure"))
         store.resetAccountsAwaitingRefresh.insert(account.id)
         try execute("CREATE TRIGGER fail_resets BEFORE INSERT ON preferences WHEN NEW.id='manual-resets' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
         await store.removeAccount(account)
@@ -112,7 +116,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
         XCTAssertEqual(store.manualResets.map(\.id), resetIDs)
         XCTAssertEqual(try database.read([ManualReset].self, key: "manual-resets")?.map(\.id), resetIDs)
-        XCTAssertEqual(store.failures[account.id], "Previous failure")
+        XCTAssertEqual(store.failures[account.id], .provider(.unavailable("Previous failure")))
         XCTAssertTrue(store.resetAccountsAwaitingRefresh.contains(account.id))
         XCTAssertEqual(credentials.mutations, 0)
     }
@@ -191,6 +195,119 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertNil(store.storageError)
     }
 
+    func testExplicitCredentialRecoveryRetriesWithoutChangingAccountHistoryOrFreshResetGuard() async throws {
+        let (store, database, account, directory, credentials) = try await fixture(provider: .codex, enabled: true)
+        let history = store.history[account.id], snapshot = store.snapshots[account.id]
+        store.resetAccountsAwaitingRefresh.insert(account.id)
+        let removeCommitFailure = try failCommit(directory: directory, credentials: credentials, failCompensation: true)
+        defer { removeCommitFailure() }
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(account, secret: "fixture-new-key"))
+        XCTAssertEqual(store.failures[account.id], .credentialRecovery)
+        XCTAssertEqual(store.failureRecoveryState(for: account), .ready, "Compensation is available while paused")
+        XCTAssertEqual(store.failures[account.id]?.actions(for: account), [.restoreCredentials])
+        await store.retryAccountFailure(for: account)
+        XCTAssertEqual(store.failures[account.id], .credentialRecovery)
+        XCTAssertEqual(credentials.values[account.id], "fixture-new-key")
+        XCTAssertEqual(store.history[account.id], history)
+        XCTAssertEqual(store.snapshots[account.id], snapshot)
+        XCTAssertEqual(store.accounts, [account])
+        let reads = credentials.reads
+        removeCommitFailure(); credentials.failSave = false
+        await store.retryAccountFailure(for: account)
+        XCTAssertEqual(credentials.reads, reads, "Recovery uses the retained backup without re-reading or asking for a key")
+        XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
+        XCTAssertEqual(store.history[account.id], history)
+        XCTAssertEqual(store.snapshots[account.id], snapshot)
+        XCTAssertEqual(try database.history(account: account.id), history)
+        XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
+        XCTAssertTrue(store.resetAccountsAwaitingRefresh.contains(account.id))
+        XCTAssertNil(store.failures[account.id]); XCTAssertNil(store.storageError)
+        XCTAssertFalse(store.isRefreshing)
+        await store.shutDown()
+    }
+
+    func testLateProviderErrorCannotReplaceOrRecreateCredentialRecoveryFailure() async throws {
+        let provider = HeldFailureProvider()
+        defer { Task { await provider.finish(.failure(CancellationError())) } }
+        let registry = ProviderRegistry(overrides: [.codex: provider])
+        let (store, _, account, directory, credentials) = try await fixture(provider: .codex, enabled: true, paused: false, registry: registry)
+        store.refresh(force: true)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await provider.calls == 0, ContinuousClock.now < deadline { await Task.yield() }
+        let calls = await provider.calls
+        XCTAssertEqual(calls, 1)
+        let removeCommitFailure = try failCommit(directory: directory, credentials: credentials, failCompensation: true)
+        defer { removeCommitFailure() }
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(account, secret: "fixture-new-key"))
+        store.isPaused = true
+        await provider.finish(.failure(ProviderFailure.authentication))
+        XCTAssertEqual(store.failures[account.id], .credentialRecovery)
+        removeCommitFailure(); credentials.failSave = false
+        await store.retryAccountFailure(for: account)
+        await store.shutDown()
+        XCTAssertNil(store.failures[account.id])
+        XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
+    }
+
+    func testCredentialRecoveryIsBusyDeduplicatedAndOrderedBeforeRemovalDuringShutdown() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
+        let removeCommitFailure = try failCommit(directory: directory, credentials: credentials, failCompensation: true)
+        defer { removeCommitFailure() }
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(account, secret: "fixture-new-key"))
+        removeCommitFailure(); credentials.failSave = false
+        if let path = ProcessInfo.processInfo.environment["JUICEBAR_FAILURE_RENDER_DIR"] {
+            try renderDisabledAccountRecovery(store, directory: URL(fileURLWithPath: path))
+        }
+        let entered = expectation(description: "Restoring retained credential")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        credentials.beforeSave = {
+            entered.fulfill()
+            XCTAssertEqual(release.wait(timeout: .now() + 4), .success)
+        }
+        let reads = credentials.reads
+        let stateChanged = expectation(description: "Recovery busy state is observable")
+        withObservationTracking {
+            _ = store.failureRecoveryState(for: account)
+        } onChange: { stateChanged.fulfill() }
+        let recovery = Task { await store.retryAccountFailure(for: account) }
+        await fulfillment(of: [entered, stateChanged], timeout: 3)
+        XCTAssertEqual(store.failureRecoveryState(for: account), .running)
+        await store.retryAccountFailure(for: account)
+        store.refresh(force: true)
+        XCTAssertFalse(store.isRefreshing)
+        let removal = Task { await store.removeAccount(account) }
+        await Task.yield()
+        let shutdown = Task { await store.shutDown() }
+        await Task.yield()
+        credentials.beforeSave = nil
+        release.signal()
+        await recovery.value; await removal.value; await shutdown.value
+        XCTAssertEqual(credentials.reads, reads + 1, "Only the later removal reads the restored key")
+        XCTAssertTrue(store.accounts.isEmpty)
+        XCTAssertNil(store.failures[account.id]); XCTAssertNil(store.storageError)
+        XCTAssertNil(credentials.values[account.id])
+        XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [])
+        XCTAssertFalse(store.isRefreshing)
+    }
+
+    private func renderDisabledAccountRecovery(_ store: AppStore, directory: URL) throws {
+        _ = NSApplication.shared
+        let view = AccountsView(store: store).padding(24).frame(width: 760)
+            .environment(\.colorScheme, .light).background(Color(nsColor: .windowBackgroundColor))
+        let host = NSHostingView(rootView: view)
+        let size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.appearance = NSAppearance(named: .aqua); window.contentView = host
+        defer { window.close() }
+        host.frame = NSRect(origin: .zero, size: size); host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent("disabled-account-recovery.png"))
+    }
+
     func testPresenceAndOrdinaryEditsDoNotReadSecretsAndKeyRemovalRetainsHistory() async throws {
         let (store, database, account, _, credentials) = try await fixture()
         let history = store.history[account.id], snapshot = store.snapshots[account.id]
@@ -201,7 +318,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         var edited = account; edited.label = "Edited"
         try await store.saveAccount(edited, secret: "")
         XCTAssertEqual(credentials.reads, 0)
-        store.failures[account.id] = "Old credential failure"
+        store.failures[account.id] = .provider(.unavailable("Old credential failure"))
         store.resetAccountsAwaitingRefresh.insert(account.id)
         try await store.removeSavedKey(for: edited)
         XCTAssertNil(credentials.values[account.id])
@@ -221,11 +338,11 @@ final class AtomicAccountPersistenceTests: XCTestCase {
     func testFailedSavedKeyRemovalPreservesKeyAndRefreshState() async throws {
         let (store, database, account, directory, credentials) = try await fixture()
         let history = store.history[account.id]
-        store.failures[account.id] = "Previous failure"
+        store.failures[account.id] = .provider(.unavailable("Previous failure"))
         try execute("CREATE TRIGGER fail_accounts BEFORE INSERT ON preferences WHEN NEW.id='accounts' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
         await XCTAssertThrowsErrorAsync(try await store.removeSavedKey(for: account))
         XCTAssertEqual(credentials.mutations, 0)
-        XCTAssertEqual(store.failures[account.id], "Previous failure")
+        XCTAssertEqual(store.failures[account.id], .provider(.unavailable("Previous failure")))
         try execute("DROP TRIGGER fail_accounts", directory: directory)
         credentials.failRemove = true
         await XCTAssertThrowsErrorAsync(try await store.removeSavedKey(for: account))
@@ -249,7 +366,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertNil(credentials.values[account.id])
         XCTAssertEqual(store.history[account.id]?.map(\.identity), [original.identity, next.identity])
         XCTAssertEqual(try database.history(account: account.id).map(\.identity), [original.identity, next.identity])
-        let restarted = AppStore(directory: directory, credentials: credentials, registry: registry)
+        let restarted = AppStore(directory: directory, credentials: credentials, registry: registry, notifications: NotificationFixture())
         await restarted.waitUntilReady()
         XCTAssertEqual(restarted.quotaHistory(for: account.id).map(\.identity), [original.identity, next.identity])
         let window = QuotaWindow(id: "weekly", title: "Week", usedPercent: 10, duration: 604800)

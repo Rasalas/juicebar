@@ -1,5 +1,15 @@
 # Validation status · 25 September 2026
 
+## Typed account recovery, 29 October 2026
+
+The baseline refresh regression failed because a synthetic network error became a `String`. It now retains `ProviderFailure.network` and offers Retry without inspecting localized text. Tests cover real synthetic HTTP, parser and executable errors, misleading messages in both languages, configured CLI login commands, every provider context, retry success, busy/pending/pause guards, Retry-After expiry, and errors arriving after account edits/removal. Credential tests force a deferred SQLite commit failure followed by failed compensation, then verify failed/successful restoration from the retained backup, observable busy state, duplicate suppression, preserved account/history and fresh-reset guards, stale provider responses, and ordering with removal/shutdown.
+
+Local validation on macOS 27.0.1 passed 312 Swift tests with the same eight optional skips, 13 Python collector tests and nine validation-script tests. All three bounded release benchmarks ran without skips and passed their existing gates. The source app bundle passed deep strict ad-hoc signature verification, the packaged macOS 14 deployment-target check, English/German tray layout in normal/always-visible-scrollbar modes, and isolated activity/history persistence. The direct-download Sparkle variant also compiled and passed its macOS 14 deployment-target check. No release or installation was performed.
+
+Offscreen native error cards were inspected in English and German, light and dark appearances, at 344 and 680 pt. The Accounts list was also rendered with an actually blocked, disabled fixture account; its Restore key action remains available. The shared card stacks actions when necessary. Set `JUICEBAR_FAILURE_RENDER_DIR` for the fixture PNGs. Run `AccountFailureTests/testOffscreenFailureStates` in a separate test process with `JUICEBAR_FAILURE_RENDER_LANGUAGE=en` or `de` to select its launch language; the disabled-account fixture renders in `AtomicAccountPersistenceTests/testCredentialRecoveryIsBusyDeduplicatedAndOrderedBeforeRemovalDuringShutdown`.
+
+Only synthetic temporary databases, injected credential/provider/notification fakes and offscreen views were used. The installed app and real accounts/settings/history were unchanged. macOS 14 runtime and live keyboard/VoiceOver interaction remain unverified. SQLite/Keychain crash atomicity, memory-only credential backups and the session fresh-reset guard retain the documented limits.
+
 ## CI validation contract, 29 October 2026
 
 The `macOS / test` job validates pull requests, pushes to main and manual runs. Feature-branch pushes no longer duplicate the PR job. A newer run cancels the superseded run for the same PR or ref. Swift tests, Python collector tests, source app packaging, tray layout, restart persistence and the direct-download Sparkle compile remain required steps. Only main pushes and manual runs archive and upload the ad-hoc development app. No workflow publishes or installs a release.

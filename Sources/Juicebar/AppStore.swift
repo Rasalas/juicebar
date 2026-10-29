@@ -16,7 +16,7 @@ final class AppStore {
     var accounts: [AccountConfiguration] = []
     private(set) var settings = MonitorSettings()
     var snapshots: [String: AccountSnapshot] = [:]
-    var failures: [String: String] = [:]
+    var failures: [String: AccountFailure] = [:]
     var refreshingAccountIDs: Set<String> = []
     var isRefreshing: Bool { !refreshingAccountIDs.isEmpty }
     var isPaused = false { didSet { if isPaused { scheduler.cancelAll(); cancelActivityImport() } else { refreshActivityIfNeeded() } } }
@@ -62,7 +62,7 @@ final class AppStore {
     @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private var durableSettings = MonitorSettings()
     @ObservationIgnored private var credentialRecovery: Set<String> = []
-    @ObservationIgnored private var pendingAccountMutations: [String: Int] = [:]
+    private var pendingAccountMutations: [String: Int] = [:]
     private let registry: ProviderRegistry
     @ObservationIgnored private var refreshPolicy = AccountRefreshPolicy()
     private let scheduler = AccountRefreshScheduler()
@@ -224,8 +224,8 @@ final class AppStore {
                 } catch is CancellationError { return }
                 catch {
                     guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
-                    failures[account.id] = error.localizedDescription
                     refreshPolicy.failed(id: account.id, error: error, refreshSeconds: settings.refreshSeconds, now: Date())
+                    failures[account.id] = AccountFailure(error)
                 }
                 lastChecked = Date()
             }
@@ -237,6 +237,37 @@ final class AppStore {
                 let snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: tr("Manuell"))
                 await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
             }
+        }
+    }
+
+    func failureRecoveryState(for account: AccountConfiguration, at date: Date = Date()) -> AccountFailureRecoveryState {
+        guard !isLoading, !isShuttingDown, !isDemo, accounts.contains(account), failures[account.id] != nil else { return .unavailable }
+        if pendingAccountMutations[account.id, default: 0] > 0 || refreshingAccountIDs.contains(account.id) || redeemingResetAccounts.contains(account.id) { return .running }
+        // Credential compensation must remain available even for paused or disabled accounts.
+        if credentialRecovery.contains(account.id) { return .ready }
+        guard account.enabled, !isPaused else { return .unavailable }
+        if let until = refreshPolicy.retryAllowedAt(id: account.id, now: date) { return .waiting(until: until) }
+        return .ready
+    }
+
+    /// Retry the current failure without overlapping accepted account actions or bypassing cooldowns.
+    /// Restoration uses the persistence worker's retained backup, never asks for a replacement secret.
+    func retryAccountFailure(for account: AccountConfiguration) async {
+        guard failureRecoveryState(for: account).canRetry, let failure = failures[account.id] else { return }
+        guard credentialRecovery.contains(account.id) else {
+            guard failure.actions(for: account).contains(.retry) else { return }
+            refresh(force: true, only: account.id)
+            return
+        }
+        let id = account.id
+        do {
+            try await mutateAccount(id) { [self] in
+                guard accounts.contains(account), credentialRecovery.contains(id) else { return }
+                try await persistence.retryCredentialRecovery(id)
+                publishRestoredCredentials(id)
+            }
+        } catch {
+            storageError = error.localizedDescription
         }
     }
 
@@ -408,7 +439,8 @@ final class AppStore {
         return await persistence.hasSavedKey(account.id)
     }
 
-    private func commitAccount(_ mutation: AccountMutation, id: String) async throws {
+    /// Account edits and credential restoration share busy-state and generation ownership.
+    private func mutateAccount(_ id: String, _ action: @escaping @MainActor () async throws -> Void) async throws {
         // Invalidate before suspension as well as at publication. A late provider response
         // cannot write a measurement using credentials that are being replaced.
         pendingAccountMutations[id, default: 0] += 1
@@ -421,23 +453,34 @@ final class AppStore {
         try await mutate { [self] in
             scheduler.invalidate(id: id)
             do {
-                let commit = try await persistence.commitAccount(mutation)
-                let recovered = credentialRecovery.remove(id) != nil
-                if recovered, storageError == CredentialRecoveryFailure().localizedDescription { storageError = nil }
-                invalidateAccount(id)
-                accounts = commit.accounts; manualResets = commit.manualResets
-                if commit.clearedHistory { snapshots[id] = nil; history[id] = [] }
-                if !accounts.contains(where: { $0.id == id }) {
-                    resetAccountsAwaitingRefresh.remove(id); snapshots[id] = nil; history[id] = nil
-                }
+                try await action()
             } catch {
                 if error is CredentialRecoveryFailure {
-                    credentialRecovery.insert(id); failures[id] = error.localizedDescription; storageError = error.localizedDescription
+                    credentialRecovery.insert(id); failures[id] = .credentialRecovery; storageError = error.localizedDescription
                 }
                 throw error
             }
         }
         committed = true
+    }
+
+    private func publishRestoredCredentials(_ id: String) {
+        let recovered = credentialRecovery.remove(id) != nil
+        if recovered, storageError == CredentialRecoveryFailure().localizedDescription { storageError = nil }
+        // Keep the fresh-reset requirement until an actual provider read succeeds.
+        invalidateAccount(id)
+    }
+
+    private func commitAccount(_ mutation: AccountMutation, id: String) async throws {
+        try await mutateAccount(id) { [self] in
+            let commit = try await persistence.commitAccount(mutation)
+            publishRestoredCredentials(id)
+            accounts = commit.accounts; manualResets = commit.manualResets
+            if commit.clearedHistory { snapshots[id] = nil; history[id] = [] }
+            if !accounts.contains(where: { $0.id == id }) {
+                resetAccountsAwaitingRefresh.remove(id); snapshots[id] = nil; history[id] = nil
+            }
+        }
     }
 
     func saveAccount(_ account: AccountConfiguration, secret: String, removeSavedKey: Bool = false) async throws {
