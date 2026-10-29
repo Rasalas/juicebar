@@ -8,7 +8,7 @@ public enum QuotaStatus: Equatable, Sendable {
 
     public static func assess(window: QuotaWindow, snapshot: AccountSnapshot, history: [AccountSnapshot],
                               now: Date, hasFailure: Bool = false) -> QuotaStatus {
-        guard !hasFailure, snapshot.isFresh(at: now), window.resetsAt.map({ $0 > now }) ?? true else { return .unavailable }
+        guard window.hasValidUsage, !hasFailure, snapshot.isFresh(at: now), window.resetsAt.map({ $0 > now }) ?? true else { return .unavailable }
         if window.usedPercent >= 100 { return .exhausted }
         // Recent activity is useful for an imminent limit, not a multi-day extrapolation.
         guard let projection = WarningEngine.projection(window: window, snapshot: snapshot, history: history, now: now) else {
