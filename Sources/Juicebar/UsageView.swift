@@ -8,6 +8,7 @@ struct UsageView: View {
     @State private var days = 90
     @State private var metric: ActivityMetric = .cost
     @State private var showQuotas = false
+    @State private var selectedDay: Date?
     private var filtered: [ActivityDay] {
         let since = Calendar.current.date(byAdding: .day, value: -(days - 1), to: Calendar.current.startOfDay(for: store.now))!
         return (store.activity?.days ?? []).filter { (source == nil || $0.source == source) && $0.day >= since && $0.day <= store.now }
@@ -44,13 +45,13 @@ struct UsageView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(tr("Aktivität")).font(.headline)
-                                Text(tr("{0} Tage · Antworten und archivierte Nachrichten", days)).font(.caption).foregroundStyle(.secondary)
+                                Text(tr("{0} Tage · {1}", days, tr(metric.rawValue))).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Text(tr("{0} aktive Tage", Set(filtered.map(\.day)).count))
                                 .font(.callout.weight(.medium)).foregroundStyle(Palette.accent)
                         }
-                        ActivityCalendar(days: filtered, now: store.now, numberOfDays: days)
+                        ActivityCalendar(days: filtered, now: store.now, numberOfDays: days, metric: metric, selection: $selectedDay)
                     }
                 }
                 Panel {
@@ -63,23 +64,7 @@ struct UsageView: View {
                             JuiceSegments(title: tr("Messgröße"), selection: $metric, options: ActivityMetric.allCases.map { (tr($0.rawValue), $0) }).frame(width: 330)
                             Spacer()
                         }
-                        if filtered.isEmpty { EmptyState(symbol: "chart.bar", title: tr("Hier ist noch Ruhe."), message: tr("Für diese Auswahl sind keine lokalen Nutzungsdaten vorhanden.")) }
-                        else {
-                            Chart(filtered) { day in
-                                BarMark(x: .value(tr("Tag"), day.day, unit: .day), y: .value(tr(metric.rawValue), metric.value(day)))
-                                    .foregroundStyle(by: .value(tr("Werkzeug"), day.source.name))
-                            }
-                            .chartForegroundStyleScale(domain: ActivitySource.allCases.map(\.name), range: ActivitySource.allCases.map(activityColor))
-                            .chartXScale(domain: Calendar.current.date(byAdding: .day, value: -(days - 1), to: Calendar.current.startOfDay(for: store.now))!...store.now)
-                            .chartYAxis {
-                                AxisMarks(position: .leading) { value in
-                                    AxisGridLine()
-                                    AxisValueLabel { if let number = value.as(Double.self) { Text(compactNumber(number)) } }
-                                }
-                            }
-                            .frame(height: 220)
-                            .accessibilityChartDescriptor(DailyChartDescriptor(days: filtered, metric: metric))
-                        }
+                        ActivityDailyChart(days: filtered, dates: UsageSelection.days(ending: store.now, count: days), metric: metric, selection: $selectedDay)
                         Text(metric == .cost ? tr("API-Gegenwert in USD. Protokollierte Kostenschätzungen haben Vorrang, sonst gelten heutige Standardpreise. Unbepreiste Nutzung fehlt in diesen Balken.") : tr("Tokens einschließlich Cache. Wiederholte Modellantworten zählen einmal. Archivierte Nachrichten werden separat ausgewiesen."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -168,14 +153,16 @@ struct UsageView: View {
                 }
             }
         }.onAppear { store.refreshActivityIfNeeded() }
+            .onChange(of: UsageSelection.days(ending: store.now, count: days), initial: true) { _, dates in
+                selectedDay = UsageSelection.nearest(selectedDay, in: dates)
+            }
     }
     private func costLabel(_ values: [ActivityDay]) -> String {
-        guard values.contains(where: { $0.pricedTokens > 0 }) else { return "—" }
-        return values.reduce(0) { $0 + $1.apiCost }.formatted(.currency(code: "USD").locale(Localization.locale))
+        ActivityMetricDetails(values).costLabel()
     }
+
     private func summary(_ filtered: [ActivityDay]) -> some View {
         let tokens = filtered.reduce(0) { $0 + $1.tokens }
-        let priced = filtered.reduce(0) { $0 + $1.pricedTokens }
         let archived = filtered.reduce(0) { $0 + $1.archivedMessages }
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 28) {
@@ -192,9 +179,7 @@ struct UsageView: View {
                 }
             }
             HStack(alignment: .top) {
-                if priced < tokens {
-                    Text(tr("Teilbetrag · {0} % der Tokens bepreist", Int(tokens > 0 ? 100 * priced / tokens : 0))).foregroundStyle(.secondary)
-                }
+                Text(ActivityMetricDetails(filtered).tokenCoverage).foregroundStyle(.secondary)
                 Spacer()
                 Text(tr("{0} Modellantworten", filtered.reduce(0) { $0 + $1.responses }.formatted(.number.locale(Localization.locale)))
                      + (archived > 0 ? tr(" · {0} archivierte Nachrichten", archived.formatted(.number.locale(Localization.locale))) : ""))
@@ -204,13 +189,6 @@ struct UsageView: View {
     }
 }
 
-enum ActivityMetric: String, CaseIterable, Identifiable {
-    case cost = "API-Kosten", tokens = "Tokens", responses = "Antworten"
-    func value(_ day: ActivityDay) -> Double {
-        switch self { case .cost: day.apiCost; case .tokens: day.tokens; case .responses: Double(day.responses) }
-    }
-    var id: String { rawValue }
-}
 func activityColor(_ source: ActivitySource) -> Color {
     switch source {
     case .codex: Palette.provider(.codex)
@@ -225,122 +203,6 @@ func activityColor(_ source: ActivitySource) -> Color {
     }
 }
 func compactNumber(_ number: Double) -> String { number.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Localization.locale)) }
-
-private struct DailyChartDescriptor: AXChartDescriptorRepresentable {
-    let days: [ActivityDay]
-    let metric: ActivityMetric
-    func makeChartDescriptor() -> AXChartDescriptor {
-        let style = Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)
-        let totals = Dictionary(grouping: days, by: \.day).mapValues { $0.reduce(0) { $0 + metric.value($1) } }.sorted { $0.key < $1.key }
-        let names = totals.map { $0.key.formatted(style) }
-        let x = AXCategoricalDataAxisDescriptor(title: tr("Tag"), categoryOrder: names)
-        let y = AXNumericDataAxisDescriptor(title: tr(metric.rawValue), range: 0...max(1, totals.map(\.value).max() ?? 0), gridlinePositions: []) { compactNumber($0) }
-        let series = AXDataSeriesDescriptor(name: tr(metric.rawValue), isContinuous: false,
-                                            dataPoints: zip(names, totals).map { AXDataPoint(x: $0, y: $1.value) })
-        return AXChartDescriptor(title: tr("Im Tagesverlauf"), summary: nil, xAxis: x, yAxis: y, additionalAxes: [], series: [series])
-    }
-}
-
-struct ActivityCalendar: View {
-    let days: [ActivityDay]
-    let now: Date
-    let numberOfDays: Int
-    private let groupedDays: [Date: [ActivityDay]]
-    private let calendar: Calendar
-    private let firstDay: Date
-    private let cells: [Date]
-    // Built once per input change; selecting a day only redraws.
-    private let labels: [Date: String]
-    private static let dayStyle = Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localization.locale)
-    init(days: [ActivityDay], now: Date, numberOfDays: Int = 90) {
-        self.days = days
-        self.now = now
-        self.numberOfDays = numberOfDays
-        var calendar = Calendar.current; calendar.firstWeekday = 2
-        self.calendar = calendar
-        let grouped = Dictionary(grouping: days) { calendar.startOfDay(for: $0.day) }
-        groupedDays = grouped
-        firstDay = calendar.date(byAdding: .day, value: -(numberOfDays - 1), to: calendar.startOfDay(for: now))!
-        let start = calendar.dateInterval(of: .weekOfYear, for: firstDay)!.start
-        let count = calendar.dateComponents([.day], from: start, to: now).day! + 1
-        let cells = (0..<(Int(ceil(Double(count) / 7)) * 7)).map { calendar.date(byAdding: .day, value: $0, to: start)! }
-        self.cells = cells
-        labels = Dictionary(uniqueKeysWithValues: cells.map { ($0, Self.detail($0, values: grouped[calendar.startOfDay(for: $0)] ?? [])) })
-    }
-    @State private var selected: Date?
-    @FocusState private var focused: Bool
-    private var totals: [Date: Int] { groupedDays.mapValues { $0.reduce(0) { $0 + $1.responses + $1.archivedMessages } } }
-    var body: some View {
-        let dates = cells, counts = totals, maximum = max(1, counts.values.max() ?? 1)
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 5) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(" ").frame(height: 16)
-                    ForEach(0..<7) { row in Text(row == 0 ? tr("Mo") : row == 2 ? tr("Mi") : row == 4 ? tr("Fr") : " ").font(.caption2).foregroundStyle(.secondary).frame(height: 21) }
-                }.fixedSize()
-                ForEach(0..<(dates.count / 7), id: \.self) { week in
-                    let first = dates[week * 7]
-                    VStack(spacing: 5) {
-                        Text(week == 0 || calendar.component(.day, from: first) <= 7 ? first.formatted(.dateTime.month(.abbreviated).locale(Localization.locale)) : " ")
-                            .font(.caption2).foregroundStyle(.secondary).frame(height: 16)
-                        ForEach(0..<7) { row in
-                            let date = dates[week * 7 + row], count = counts[date] ?? 0
-                            let valid = date <= now && date >= firstDay
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(valid ? color(count, maximum: maximum) : Color.clear)
-                                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected == date ? Palette.accent : Color.primary.opacity(valid ? 0.06 : 0), lineWidth: selected == date ? 2 : 1))
-                                .frame(height: 21).contentShape(Rectangle())
-                                .onTapGesture { if valid { selected = date } }
-                                .help(labels[date] ?? "")
-                        }
-                    }.frame(maxWidth: .infinity)
-                }
-            }
-            // One focus stop and one accessibility element instead of a button per day.
-            .focusable().focused($focused).focusEffectDisabled()
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? Palette.accent : .clear, lineWidth: 2).padding(-4))
-            .onMoveCommand { direction in
-                switch direction {
-                case .left: move(by: -7)
-                case .right: move(by: 7)
-                case .up: move(by: -1)
-                case .down: move(by: 1)
-                @unknown default: break
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(tr("Aktivitätskalender"))
-            .accessibilityValue(selected.flatMap { labels[$0] } ?? tr("{0} aktive Tage", counts.filter { $0.key >= firstDay && $0.value > 0 }.count))
-            .accessibilityHint(tr("Mit den Pfeiltasten einen Tag wählen."))
-            .accessibilityAdjustableAction { direction in move(by: direction == .increment ? 1 : -1) }
-            HStack(spacing: 4) {
-                Text(selected.flatMap { labels[$0] } ?? tr("Ein Tag, alle Werkzeuge. Klicke für die Aufschlüsselung."))
-                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                Text(tr("Wenig")).font(.caption2).foregroundStyle(.secondary)
-                ForEach(0..<5) { index in RoundedRectangle(cornerRadius: 2).fill(index == 0 ? Color.primary.opacity(0.05) : Palette.green.opacity(Double(index) / 4)).frame(width: 9, height: 9) }
-                Text(tr("Viel")).font(.caption2).foregroundStyle(.secondary)
-            }.accessibilityHidden(true)
-        }.onChange(of: numberOfDays) { _, _ in selected = nil }
-    }
-    private func move(by days: Int) {
-        guard let next = calendar.date(byAdding: .day, value: days, to: selected ?? calendar.startOfDay(for: now)),
-              next >= firstDay, next <= now else { return }
-        selected = next
-    }
-    private func color(_ count: Int, maximum: Int) -> Color {
-        guard count > 0 else { return Color.primary.opacity(0.05) }
-        let level = max(1, ceil(4 * log1p(Double(count)) / log1p(Double(maximum))))
-        return Palette.green.opacity(level / 4)
-    }
-    private static func detail(_ date: Date, values: [ActivityDay]) -> String {
-        let total = values.reduce(0) { $0 + $1.responses }
-        let archived = values.reduce(0) { $0 + $1.archivedMessages }
-        let breakdown = values.map { "\($0.source.name) \($0.responses)" }.joined(separator: " · ")
-        if archived > 0 { return tr("{0}: {1} archivierte Claude-Nachrichten", date.formatted(dayStyle), archived) + (total > 0 ? tr(" · {0} Modellantworten anderer Werkzeuge", total) : "") + tr(" · Claude-Kosten nicht rekonstruierbar") }
-        return tr("{0}: {1} Antworten{2}", date.formatted(dayStyle), total, breakdown.isEmpty ? tr(" · keine protokollierte Aktivität") : " · \(breakdown)")
-    }
-}
 
 struct QuotaHistoryChart: View {
     let store: AppStore
@@ -359,21 +221,9 @@ struct QuotaHistoryChart: View {
         }
     }
     var body: some View {
-        let values = points
         VStack(alignment: .leading, spacing: 14) {
             Text(tr("Direkte Messwerte der Anbieter seit dem ersten Juicebars-Start. Eine waagerechte Linie bedeutet, dass sich der gemeldete Stand nicht verändert hat. Abo-Prozente lassen sich nicht aus Log-Tokens rekonstruieren.")).font(.caption).foregroundStyle(.secondary)
-            if values.count < 2 { Text(tr("Nach weiteren Abfragen erscheint hier der Verlauf.")).foregroundStyle(.secondary) }
-            else {
-                Chart(Array(values.enumerated()), id: \.offset) { _, point in
-                    LineMark(x: .value(tr("Zeit"), point.date), y: .value(store.settings.displayMode.label, min(point.value, 100)), series: .value(tr("Fenster"), point.series))
-                        .interpolationMethod(.stepEnd).foregroundStyle(by: .value(tr("Kontingent"), point.label))
-                }.chartYScale(domain: 0...100).chartYAxisLabel(tr("{0} in %", store.settings.displayMode.label)).frame(height: 210)
-                    .accessibilityLabel(tr("Kontingent-Messungen · letzte 24 Stunden"))
-                    .accessibilityValue(Dictionary(grouping: values, by: \.label).compactMap { label, points in
-                        points.max { $0.date < $1.date }.map { "\(label): \(QuotaNumbers.integerText($0.value.rounded())) % \(store.settings.displayMode.label.lowercased())" }
-                    }.sorted().joined(separator: ". "))
-            }
+            QuotaTimelineChart(points: points, displayLabel: store.settings.displayMode.label)
         }
     }
 }
-private struct QuotaPoint { var date: Date; var value: Double; var label: String; var series: String }

@@ -529,5 +529,21 @@
   "Dieser Reset wurde bereits eingelöst.": "This reset was already redeemed.",
   "Aktuell gibt es kein Kontingent zurückzusetzen.": "There is currently no eligible quota to reset.",
   "Die Reset-Gutschrift ist nicht mehr verfügbar.": "The reset credit is no longer available.",
-  "Der Kontostand wird beim nächsten Abruf aktualisiert.": "The account balance will update at the next refresh."
+  "Der Kontostand wird beim nächsten Abruf aktualisiert.": "The account balance will update at the next refresh.",
+  "{0} Tage · {1}": "{0} days · {1}",
+  "Ausgewählter Tag": "Selected day",
+  "Keine protokollierte Aktivität": "No logged activity",
+  "Kosten unbekannt": "Cost unknown",
+  "Tokens unbekannt": "Tokens unknown",
+  "Antworten unbekannt": "Responses unknown",
+  "{0} % der Tokens bepreist": "{0}% of tokens priced",
+  "Unbepreist: {0}": "Unpriced: {0}",
+  "Archivierte Nachrichten sind keine Modellantworten.": "Archived messages are not model responses.",
+  "Unbekannte Werte fehlen im Diagramm.": "Unknown values are omitted from the chart.",
+  "Links und rechts: Messung. Oben und unten: Kontingent. Maus: gewähltes Kontingent prüfen.": "Left and right: measurement. Up and down: quota. Mouse: inspect the selected quota.",
+  "{0} Tokens": "{0} tokens",
+  "{0} archivierte Nachrichten": "{0} archived messages",
+  "Claude-Kosten nicht rekonstruierbar": "Claude costs cannot be reconstructed",
+  "API-Gegenwert": "API equivalent",
+  "Für diese Messgröße sind keine Werte bekannt.": "No known values for this metric."
 }
