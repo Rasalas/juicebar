@@ -8,6 +8,7 @@ extension ActivityReport {
         private struct Text: Hashable { var id: String; var source: ActivitySource }
         /// The winning event of its key, reduced to what `preferred` and the aggregation read.
         private struct Record {
+            var priority: Int
             var digest: Digest
             var date: Double
             var tokens: Double
@@ -26,7 +27,7 @@ extension ActivityReport {
         private struct Model { var key: ModelKey; var rate: CatalogDocument.Rate?; var alias: String?; var completeness: UInt8 }
         private static let priced: UInt8 = 2, hasSession: UInt8 = 4, textID: UInt8 = 8
         private static let chunkSize = 16384
-        private let now: Date, calendar: Calendar, catalog = ModelCatalog.shared.snapshot
+        private let now: Date, calendar: Calendar, catalog: CatalogDocument
         // Fixed-size chunks and a slot table of record numbers: growing never copies the records,
         // which would double the peak, and the SHA-256 digest needs no further hashing.
         private var chunks: [[Record]] = [], count = 0
@@ -34,9 +35,11 @@ extension ActivityReport {
         private var texts: [Text: Int] = [:]
         private var modelIDs: [ModelKey: UInt32] = [:], models: [Model] = []
 
-        init(now: Date, calendar: Calendar = .current) { self.now = now; self.calendar = calendar }
+        init(now: Date, calendar: Calendar = .current, catalog: CatalogDocument = ModelCatalog.shared.snapshot) {
+            self.now = now; self.calendar = calendar; self.catalog = catalog
+        }
 
-        mutating func add(_ event: ActivityEvent) {
+        mutating func add(_ event: ActivityEvent, priority: Int = 0) {
             guard event.date <= now, event.tokens.isFinite, event.tokens > 0 else { return }
             let label = label(for: event)
             let preference = event.preference(labelCompleteness: models[Int(label)].completeness)
@@ -47,12 +50,17 @@ extension ActivityReport {
             // Streaming blocks may repeat a message with an updated output count.
             if let existing {
                 let record = chunks[existing / Self.chunkSize][existing % Self.chunkSize]
-                guard !ActivityEvent.keepsFirst(source: event.source, record.preference, preference) else { return }
-                chunks[existing / Self.chunkSize][existing % Self.chunkSize] = self.record(event, digest: digest, label: label, preference: preference)
+                // Equal peers use configured source order, regardless of arrival order.
+                if priority < record.priority {
+                    guard ActivityEvent.keepsFirst(source: event.source, preference, record.preference) else { return }
+                } else {
+                    guard !ActivityEvent.keepsFirst(source: event.source, record.preference, preference) else { return }
+                }
+                chunks[existing / Self.chunkSize][existing % Self.chunkSize] = self.record(event, digest: digest, label: label, preference: preference, priority: priority)
                 return
             }
             if count % Self.chunkSize == 0 { chunks.append([]); chunks[chunks.count - 1].reserveCapacity(Self.chunkSize) }
-            chunks[chunks.count - 1].append(record(event, digest: digest, label: label, preference: preference))
+            chunks[chunks.count - 1].append(record(event, digest: digest, label: label, preference: preference, priority: priority))
             count += 1
             if let text { texts[text] = count - 1; return }
             slots[slot] = UInt32(count)
@@ -91,7 +99,7 @@ extension ActivityReport {
             return label
         }
 
-        private func record(_ event: ActivityEvent, digest: Digest?, label: UInt32, preference: ActivityEvent.Preference) -> Record {
+        private func record(_ event: ActivityEvent, digest: Digest?, label: UInt32, preference: ActivityEvent.Preference, priority: Int) -> Record {
             var flags: UInt8 = digest == nil ? Self.textID : 0, cost = 0.0
             if let reported = event.reportedCost, reported.isFinite, reported >= 0 {
                 cost = reported; flags |= Self.priced
@@ -100,7 +108,7 @@ extension ActivityReport {
                 cost = estimate; flags |= Self.priced
             }
             if event.sessionStartedAt != nil { flags |= Self.hasSession }
-            return Record(digest: digest ?? (0, 0, 0, 0), date: event.date.timeIntervalSinceReferenceDate, tokens: event.tokens, cost: cost,
+            return Record(priority: priority, digest: digest ?? (0, 0, 0, 0), date: event.date.timeIntervalSinceReferenceDate, tokens: event.tokens, cost: cost,
                           session: event.sessionStartedAt?.timeIntervalSinceReferenceDate ?? 0, responses: event.responseCount ?? 1,
                           label: label, source: event.source, flags: flags, completeness: preference.completeness)
         }
@@ -144,7 +152,9 @@ extension ActivityReport {
                 .sorted { $0.day == $1.day ? $0.source.rawValue < $1.source.rawValue : $0.day < $1.day }
             let resolved = Set(models.indices.filter { used[$0] }.compactMap { models[$0].alias }).sorted()
             let aliases: [String] = resolved.isEmpty ? [] : [tr("Veröffentlichte Modell-Aliase: ") + resolved.joined(separator: "; ") + tr(". Auch ältere Nutzung wird zum aktuellen API-Gegenwert bewertet; die damals kostenlose Preview bleibt in gemeldeten Kosten unverändert.")]
-            return ActivityReport(days: days, activeHours: activeHours, notices: notices + aliases, warnings: warnings, observedAt: now)
+            var report = ActivityReport(days: days, activeHours: activeHours, notices: notices + aliases, warnings: warnings, observedAt: now)
+            report.pricingVerifiedOn = catalog.verifiedOn
+            return report
         }
     }
 }

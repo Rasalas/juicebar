@@ -2,7 +2,7 @@
 
 `Sources/JuicebarCore/Resources/model-catalog.json` contains confirmed provider-scoped aliases and current standard USD prices per million tokens. Original model names and event IDs in logs remain unchanged. Each alias and rate carries a source URL and verification date. Unknown models remain unpriced.
 
-The app ships a verified baseline and checks `https://rasalas.github.io/juicebar/catalog/model-catalog.signed.json` at most once per day, during automatic history refresh. Settings can disable the check. The request contains no credentials or usage data. It is subject to normal web-host request metadata.
+The app ships a verified baseline and checks `https://rasalas.github.io/juicebar/catalog/model-catalog.signed.json` at most once per day, alongside automatic history refresh. The network request does not delay local usage publication; accepted prices apply by the next import. Reports retain the verification date of their own pricing snapshot, so a concurrent catalog update cannot relabel older calculations. Settings can disable the check. The request contains no credentials or usage data. It is subject to normal web-host request metadata.
 
 The envelope signs the exact decoded payload bytes with Ed25519. The public key is bundled in `catalog-public-key.txt`; the private key stays in the maintainer's login Keychain under service `app.juicebar.catalog-signing`. This key is independent of app/update signing. No private keys are in GitHub Actions.
 

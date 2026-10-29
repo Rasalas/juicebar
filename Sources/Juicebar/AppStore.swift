@@ -39,9 +39,11 @@ final class AppStore {
     @ObservationIgnored private var nextActivityImport = Date.distantPast
     private let storageDirectory: URL
     @ObservationIgnored private var activityTask: Task<Void, Never>?
-    @ObservationIgnored private var activityWorker: Task<(ActivityReport, LocalUsageReport?), Error>?
+    @ObservationIgnored private var activityWorker: Task<Void, Error>?
+    @ObservationIgnored private var activityControl: ActivityImport.Control?
+    @ObservationIgnored private let activityReader: ActivityImport.Reader
     @ObservationIgnored private var activityImportID: UUID?
-    @ObservationIgnored private var lastActivityProgress: ContinuousClock.Instant?
+    @ObservationIgnored private let activityCatalogRefresh: @Sendable () async -> Void
     var storageError: String?
     var hasRecoverableStorageError = false
     var notificationStatus = tr("Nicht aktiviert")
@@ -69,7 +71,8 @@ final class AppStore {
     @ObservationIgnored private var pendingWarningIDs: Set<String> = []
     @ObservationIgnored private var quotaHistoryCache: [String: [AccountSnapshot]] = [:]
 
-    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil, credentials: any CredentialStore = KeychainCredentialStore(), registry: ProviderRegistry = ProviderRegistry(), notifications: any AppNotifications = SystemAppNotifications(), persistence: AppPersistence? = nil) {
+    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil, credentials: any CredentialStore = KeychainCredentialStore(), registry: ProviderRegistry = ProviderRegistry(), notifications: any AppNotifications = SystemAppNotifications(), persistence: AppPersistence? = nil, activityReader: @escaping ActivityImport.Reader = { try await ActivityImport.readProgressively($0, control: $1, publish: $2) }, activityCatalogRefresh: @escaping @Sendable () async -> Void = { await AppStore.refreshCatalog() }) {
+        self.activityReader = activityReader; self.activityCatalogRefresh = activityCatalogRefresh
         self.registry = registry; self.notifications = notifications
         isDemo = demo
         if let resetRedeemer { self.resetRedeemer = resetRedeemer }
@@ -481,35 +484,42 @@ final class AppStore {
         localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
         let importID = UUID()
         activityImportID = importID
-        lastActivityProgress = .now
         let path = localDatabasePath.isEmpty ? nil : localDatabasePath
         let roots = ActivityLogs.defaultRoots(accounts: accounts, additional: activityRoots)
-        let owner = self, hosts = sshHosts, directory = storageDirectory
-        let worker = Task.detached(priority: .utility) {
-            if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
-            return try ActivityImport.read(roots: roots, databasePath: path, hosts: hosts, directory: directory, refreshRemote: refreshRemote) { message in
-                Task { @MainActor in
-                    guard owner.activityImportID == importID else { return }
-                    let instant = ContinuousClock.now
-                    // Thousands of files otherwise invalidate every store-observing view hundreds of times.
-                    if let last = owner.lastActivityProgress, last.duration(to: instant) < .seconds(1) { return }
-                    owner.lastActivityProgress = instant
-                    if owner.activityProgress != message { owner.activityProgress = message }
-                }
+        let request = ActivityImport.Request(roots: roots, databasePath: path, hosts: sshHosts, directory: storageDirectory, refreshRemote: refreshRemote)
+        let control = ActivityImport.Control(), reader = activityReader
+        activityControl = control
+        let worker = Task.detached(priority: .utility) { [self] in
+            // Catalog network latency never holds local publication. Accepted prices apply on the next import.
+            async let catalog: Void = activityCatalogRefresh()
+            try await reader(request, control) { [self] report, local in
+                await publishActivity(report, local: local, importID: importID, control: control)
             }
+            _ = await catalog
         }
         activityWorker = worker
         activityTask = Task {
-            defer { localUsageLoading = false; activityWorker = nil; activityImportID = nil; activityProgress = ""; nextActivityImport = Date().addingTimeInterval(300) }
-            do {
-                let result = try await worker.value
-                guard !Task.isCancelled else { return }
-                activity = result.0; localUsage = result.1; localUsageError = nil
-                await persistence.cacheImport(result.0, localUsage: result.1)
-            } catch is CancellationError { }
-            catch { localUsageError = error.localizedDescription }
+            defer {
+                localUsageLoading = false; activityWorker = nil; activityControl = nil; activityImportID = nil
+                activityProgress = ""; nextActivityImport = Date().addingTimeInterval(300)
+            }
+            do { try await worker.value }
+            catch is CancellationError { }
+            catch { if activityImportID == importID { localUsageError = error.localizedDescription } }
         }
     }
+    nonisolated private static func refreshCatalog() async {
+        if UserDefaults.standard.object(forKey: "catalogUpdates") as? Bool ?? true { _ = await ModelCatalog.shared.refreshIfNeeded() }
+    }
+    private func publishActivity(_ report: ActivityReport, local: LocalUsageReport?, importID: UUID, control: ActivityImport.Control) async {
+        guard activityImportID == importID, !isShuttingDown, !isPaused else { return }
+        do { try control.check() } catch { return }
+        activity = report; localUsage = local; localUsageError = nil
+        activityProgress = report.sources?.contains { $0.phase == .checking } == true
+            ? tr("Lokale Daten verfügbar · SSH-Quellen werden geprüft …") : tr("Nutzungsdaten verfügbar.")
+        await persistence.cacheImport(report, localUsage: local, control: control)
+    }
+
     func addSSHHost(_ host: String) async throws {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard SSHActivity.isValidHost(host) else { throw ProviderFailure.invalidData(tr("Bitte einen SSH-Alias wie workstation oder user@host eingeben.")) }
@@ -531,7 +541,10 @@ final class AppStore {
         let previous = activityTask
         Task { await previous?.value; loadLocalUsage() }
     }
-    func cancelActivityImport() { activityImportID = nil; activityWorker?.cancel(); activityTask?.cancel() }
+    func cancelActivityImport() {
+        activityImportID = nil; activityControl?.cancel(); activityWorker?.cancel(); activityTask?.cancel()
+        activity?.markCached()
+    }
     func selectActivityDirectory(format: ActivitySource) {
         guard !isDemo, ActivitySource.logFormats.contains(format) else { return }
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false

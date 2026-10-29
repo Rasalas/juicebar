@@ -139,6 +139,7 @@ import JuicebarCore
                            size: NSSize(width: 1280, height: 800), appearance: NSAppearance(named: .darkAqua)!,
                            to: directory.appendingPathComponent("store-\(Localization.language)-\(name).png"))
         }
+        try renderUsageFreshness(store: store, directory: directory)
         NSApp.appearance = NSAppearance(named: .aqua)
         try renderView(AboutView().buttonStyle(JuiceButtonStyle()).tint(Palette.accent).padding(24).frame(width: 640).background(Color(nsColor: .windowBackgroundColor)),
                        size: NSSize(width: 640, height: 360), appearance: NSAppearance(named: .aqua)!, to: directory.appendingPathComponent("about.png"))
@@ -388,6 +389,23 @@ import JuicebarCore
         .environment(\.colorScheme, .dark)
         try renderView(view, size: NSSize(width: traySize.width + 28, height: traySize.height + 56),
                        appearance: appearance, to: url)
+    }
+    private static func renderUsageFreshness(store: AppStore, directory: URL) throws {
+        let previous = store.activity
+        defer { store.activity = previous }
+        store.activity?.sources = [
+            .init(id: "local", label: tr("Logs dieses Macs"), tools: [.claude], phase: .success, lastSuccess: store.now),
+            .init(id: "ssh|build", label: "build", phase: .stale, lastSuccess: store.now.addingTimeInterval(-7200)),
+            .init(id: "ssh|laptop", label: "laptop", phase: .checking, lastSuccess: store.now.addingTimeInterval(-86400))
+        ]
+        for (dark, width) in [(false, 1060.0), (true, 840.0)] {
+            let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
+            NSApp.appearance = appearance
+            let view = DashboardView(store: store, page: .usage).frame(width: width, height: 900)
+                .environment(\.colorScheme, dark ? .dark : .light)
+            try renderView(view, size: NSSize(width: width, height: 900), appearance: appearance,
+                to: directory.appendingPathComponent("usage-freshness-\(Localization.language)-\(dark ? "dark-narrow" : "light").png"))
+        }
     }
     private static func renderView<V: View>(_ view: V, size: NSSize, appearance: NSAppearance, to url: URL) throws {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)

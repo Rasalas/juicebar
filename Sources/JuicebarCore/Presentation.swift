@@ -202,7 +202,12 @@ public struct ActivityReport: Codable, Sendable {
     public var activeHours: [ActivityHours]?
     public var notices: [String]
     public var warnings: [String]
+    /// Assembly time only. Per-source successful observations live in `sources`.
     public var observedAt: Date
+    /// nil in older caches: freshness is unknown.
+    public var sources: [ActivitySourceHealth]?
+    /// Catalog used by this report, which can precede a concurrent signed-catalog refresh.
+    public var pricingVerifiedOn: String?
     public init(events: [ActivityEvent], notices: [String] = [], warnings: [String] = [], now: Date = Date(), calendar: Calendar = .current) {
         var builder = Builder(now: now, calendar: calendar)
         for event in events { builder.add(event) }
