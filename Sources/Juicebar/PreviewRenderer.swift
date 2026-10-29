@@ -250,7 +250,7 @@ import JuicebarCore
         }
         store.failures["demo-go"] = ProviderFailure.authentication.localizedDescription
         for mode in QuotaDisplay.allCases {
-            store.settings.quotaDisplay = mode
+            store.editSettings { $0.quotaDisplay = mode }
             let view = TrayView(store: store, maximumHeight: 1000)
                 .environment(\.colorScheme, .dark).background(Color(nsColor: .windowBackgroundColor))
             try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: NSAppearance(named: .darkAqua)!,
@@ -258,9 +258,9 @@ import JuicebarCore
         }
         // Alert states in the menu bar, in both appearances and both menu styles.
         for style in TrayStyle.allCases {
-            store.settings.trayStyle = style
-            store.settings.selectedTrayAccount = style == .focused ? "demo-claude" : nil
-            store.settings.selectedTrayWindow = style == .focused ? "seven_day" : nil
+            store.editSettings { $0.trayStyle = style }
+            store.editSettings { $0.selectedTrayAccount = style == .focused ? "demo-claude" : nil }
+            store.editSettings { $0.selectedTrayWindow = style == .focused ? "seven_day" : nil }
             let meters = store.trayMeters
             let statuses = meters.map { meter in
                 meter.window.flatMap { window in store.snapshots[meter.account.id].map { QuotaStatus.assess(window: window, snapshot: $0, history: store.history[meter.account.id] ?? [], now: now) } } ?? .unavailable
@@ -271,7 +271,7 @@ import JuicebarCore
                                    to: directory.appendingPathComponent("menu-alert-\(style.rawValue)-\(dark ? "dark" : "light").png"))
             }
         }
-        store.settings = MonitorSettings()
+        store.editSettings { $0 = MonitorSettings() }
         let light = TrayView(store: store, maximumHeight: 1000).environment(\.colorScheme, .light).background(Color(nsColor: .windowBackgroundColor))
         NSApp.appearance = NSAppearance(named: .aqua)
         try renderView(light, size: NSHostingView(rootView: light).fittingSize, appearance: NSAppearance(named: .aqua)!,
@@ -317,9 +317,9 @@ import JuicebarCore
         reportedStore.snapshots = [reportedAccount.id: reported]
         reportedStore.history = [reportedAccount.id: DemoData.history(for: reported, now: now)]
         reportedStore.activity = nil
-        reportedStore.settings.quietEnabled = false
+        reportedStore.editSettings { $0.quietEnabled = false }
         for mode in QuotaDisplay.allCases {
-            store.settings.quotaDisplay = mode
+            store.editSettings { $0.quotaDisplay = mode }
             for dark in [false, true] {
                 let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
                 NSApp.appearance = appearance
@@ -376,7 +376,7 @@ import JuicebarCore
                 let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
                 NSApp.appearance = appearance
                 for mode in QuotaDisplay.allCases {
-                    store.settings.quotaDisplay = mode
+                    store.editSettings { $0.quotaDisplay = mode }
                     let view = TrayView(store: store, maximumHeight: 1000).environment(\.colorScheme, dark ? .dark : .light)
                         .background(Color(nsColor: .windowBackgroundColor))
                     try renderView(view, size: NSHostingView(rootView: view).fittingSize, appearance: appearance,

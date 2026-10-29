@@ -23,15 +23,15 @@ struct PreferencesView: View {
                         }
                     }
                     Divider()
-                    JuiceSegments(title: tr("Balken & Zahlen"), selection: Binding(get: { store.settings.displayMode }, set: { store.settings.quotaDisplay = $0 }), options: QuotaDisplay.allCases.map { ($0.label, $0) }, showsTitle: true)
+                    JuiceSegments(title: tr("Balken & Zahlen"), selection: Binding(get: { store.settings.displayMode }, set: { value in store.editSettings { $0.quotaDisplay = value } }), options: QuotaDisplay.allCases.map { ($0.label, $0) }, showsTitle: true)
                     Text(tr("Standard: Der Vorrat läuft leer. Balken und Menüleistenlinien lassen sich alternativ auf verbraucht umstellen.")).font(.caption).foregroundStyle(.secondary)
                     Divider()
                     Text(tr("Menüleiste")).font(.headline)
-                    JuiceMenuPicker(title: tr("Anzeige"), selection: Binding(get: { store.settings.menuStyle }, set: { store.settings.trayStyle = $0 }), options: TrayStyle.allCases.map { ($0.label, $0) })
+                    JuiceMenuPicker(title: tr("Anzeige"), selection: Binding(get: { store.settings.menuStyle }, set: { value in store.editSettings { $0.trayStyle = value } }), options: TrayStyle.allCases.map { ($0.label, $0) })
                     if store.settings.menuStyle == .lines {
                         Toggle(tr("Neue Limits automatisch in der Menüleiste anzeigen"), isOn: Binding(
                             get: { store.settings.showsNewTrayLimits },
-                            set: { store.settings.setNewTrayLimitsVisible($0, accounts: store.accounts, snapshots: store.snapshots) }
+                            set: { value in store.editSettings { $0.setNewTrayLimitsVisible(value, accounts: store.accounts, snapshots: store.snapshots) } }
                         ))
                         Text(tr("Die Auswahl unten bleibt dabei erhalten. Die Übersicht zeigt weiterhin alle erkannten Limits."))
                             .font(.caption).foregroundStyle(.secondary)
@@ -42,7 +42,7 @@ struct PreferencesView: View {
                                     ForEach(QuotaOrder.visibleWindows(snapshot.windows, provider: account.provider)) { window in
                                         Toggle(tr(window.title), isOn: Binding(
                                             get: { store.settings.showsTrayLimit(account: account, windowID: window.id) },
-                                            set: { store.settings.setTrayLimit(accountID: account.id, windowID: window.id, visible: $0) }
+                                            set: { value in store.editSettings { $0.setTrayLimit(accountID: account.id, windowID: window.id, visible: value) } }
                                         ))
                                     }
                                 } else {
@@ -52,9 +52,9 @@ struct PreferencesView: View {
                         }
                     }
                     if store.settings.menuStyle == .focused {
-                        JuiceMenuPicker(title: tr("Angezeigtes Konto"), selection: Binding(get: { store.settings.selectedTrayAccount ?? "" }, set: { store.settings.selectedTrayAccount = $0.isEmpty ? nil : $0; store.settings.selectedTrayWindow = nil }), options: [(tr("Höchster aktueller Verbrauch"), "")] + store.accounts.filter(\.enabled).map { ($0.displayName, $0.id) })
+                        JuiceMenuPicker(title: tr("Angezeigtes Konto"), selection: Binding(get: { store.settings.selectedTrayAccount ?? "" }, set: { value in store.editSettings { $0.selectedTrayAccount = value.isEmpty ? nil : value; $0.selectedTrayWindow = nil } }), options: [(tr("Höchster aktueller Verbrauch"), "")] + store.accounts.filter(\.enabled).map { ($0.displayName, $0.id) })
                         if let id = store.settings.selectedTrayAccount, let snapshot = store.snapshots[id] {
-                            JuiceMenuPicker(title: tr("Kontingent"), selection: Binding(get: { store.settings.selectedTrayWindow ?? "" }, set: { store.settings.selectedTrayWindow = $0.isEmpty ? nil : $0 }), options: [(tr("Automatisch"), "")] + QuotaOrder.visibleWindows(snapshot.windows, provider: store.accounts.first { $0.id == id }?.provider ?? .codex).map { ($0.title, $0.id) })
+                            JuiceMenuPicker(title: tr("Kontingent"), selection: Binding(get: { store.settings.selectedTrayWindow ?? "" }, set: { value in store.editSettings { $0.selectedTrayWindow = value.isEmpty ? nil : value } }), options: [(tr("Automatisch"), "")] + QuotaOrder.visibleWindows(snapshot.windows, provider: store.accounts.first { $0.id == id }?.provider ?? .codex).map { ($0.title, $0.id) })
                         }
                     }
                     MenuBarLegend()
@@ -63,7 +63,7 @@ struct PreferencesView: View {
             Panel {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(tr("Hintergrund")).font(.headline)
-                    JuiceMenuPicker(title: tr("Aktualisieren"), selection: $store.settings.refreshSeconds, options: [(tr("Jede Minute"), 60.0), (tr("Alle 3 Minuten"), 180.0), (tr("Alle 5 Minuten"), 300.0)])
+                    JuiceMenuPicker(title: tr("Aktualisieren"), selection: store.setting(\.refreshSeconds), options: [(tr("Jede Minute"), 60.0), (tr("Alle 3 Minuten"), 180.0), (tr("Alle 5 Minuten"), 300.0)])
                     Text(tr("Bleibt der Stand unverändert oder ist der Stromsparmodus an, fragt Juicebars bis zu dreimal seltener ab. API-Kosten höchstens alle 5 Minuten. Bei Fehlern wartet Juicebars länger; beim Ruhezustand stoppt die laufende Abfrage.")).font(.caption).foregroundStyle(.secondary)
                     Toggle(tr("Beim Anmelden starten"), isOn: $loginEnabled).disabled(store.isDemo).onChange(of: loginEnabled) { _, enabled in
                         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; loginError = nil }

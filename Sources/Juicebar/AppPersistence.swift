@@ -28,6 +28,12 @@ struct AccountCommit: Sendable {
     var clearedHistory: Bool
 }
 
+struct ConfigurationRecovery: Sendable {
+    var keys: Set<String>
+    var accounts: [AccountConfiguration]?
+    var changes: [ConfigurationWrite] = []
+}
+
 enum AccountMutation: Sendable {
     case save(AccountConfiguration, secret: String, removeSavedKey: Bool)
     case remove(String)
@@ -224,22 +230,31 @@ final class AppPersistence: @unchecked Sendable {
         }
     }
 
-    func recoverConfiguration() async throws -> Set<String> {
+    func recoverConfiguration() async throws -> ConfigurationRecovery {
         try await perform { [self] in
             let keys = try database!.recoverUnreadablePreferences()
-            if keys.contains("accounts") { configuration.accounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)] }
-            if keys.contains("settings") { configuration.settings = MonitorSettings() }
-            if keys.contains("manual-resets") { configuration.manualResets = [] }
-            if keys.contains("reset-redemptions") { configuration.resetRedemptionKeys = [:] }
-            return keys
+            var result = ConfigurationRecovery(keys: keys)
+            if keys.contains("accounts") {
+                configuration.accounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)]
+                result.accounts = configuration.accounts
+            }
+            if keys.contains("settings") { configuration.settings = MonitorSettings(); result.changes.append(.settings(configuration.settings)) }
+            if keys.contains("manual-resets") { configuration.manualResets = []; result.changes.append(.manualResets(configuration.manualResets)) }
+            if keys.contains("reset-redemptions") { configuration.resetRedemptionKeys = [:]; result.changes.append(.resetRedemptions(configuration.resetRedemptionKeys)) }
+            if keys.contains("opencode-path") { configuration.localDatabasePath = ""; result.changes.append(.localDatabasePath(configuration.localDatabasePath)) }
+            if keys.contains("ssh-hosts") { configuration.sshHosts = []; result.changes.append(.sshHosts(configuration.sshHosts)) }
+            if keys.contains("activity-roots") { configuration.activityRoots = []; result.changes.append(.activityRoots(configuration.activityRoots)) }
+            return result
         }
     }
 
     func drain() async { _ = try? await perform {} }
 
     deinit {
-        // The last reference to the connection also dies on its owning worker.
-        let connection = database
-        worker.async { withExtendedLifetime(connection) {} }
+        // Transfer ownership without a local strong reference that could outlive a fast worker.
+        // The retained reference is released only on the connection's owning worker.
+        let connection = database.map(Unmanaged.passRetained)
+        database = nil
+        worker.async { connection?.release() }
     }
 }

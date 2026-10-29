@@ -151,6 +151,126 @@ final class StorageIntegrationTests: XCTestCase {
         AppStore(directory: directory, credentials: IsolatedCredentials(), notifications: NotificationFixture())
     }
 
+    private var customSettings: MonitorSettings {
+        var value = MonitorSettings()
+        value.soundEnabled = false; value.notificationsEnabled = true
+        value.threshold = 83; value.refreshSeconds = 600
+        value.selectedTrayAccount = "synthetic-account"; value.selectedTrayWindow = "weekly"
+        value.expiryHours = [36, 6]; value.quietStart = 21
+        return value
+    }
+
+    func testStartupSnoozePreservesSavedFieldsAndDrainsOnImmediateShutdown() async throws {
+        let (directory, _) = try fixture()
+        let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
+        var expected = customSettings
+        try db.write(expected, key: "settings")
+        let worker = DispatchQueue(label: "fixture.startup-snooze"), gate = WorkerGate(worker)
+        defer { gate.open() }
+        let store = store(directory, worker: worker)
+        store.snooze()
+        expected.snoozedUntil = try XCTUnwrap(store.settings.snoozedUntil)
+        XCTAssertEqual(store.pendingStorageOperations, 1, "Snooze reserves its write before returning")
+        let shutdown = Task { await store.shutDown() }
+        gate.open(); await shutdown.value
+        XCTAssertEqual(store.settings, expected)
+        XCTAssertEqual(try db.read(MonitorSettings.self, key: "settings"), expected)
+        let restarted = storeForRestart(directory)
+        await restarted.waitUntilReady()
+        XCTAssertEqual(restarted.settings, expected)
+        await restarted.shutDown()
+    }
+
+    func testSeveralStartupBindingEditsPreserveUntouchedFieldsAndTheirOrder() async throws {
+        let (directory, _) = try fixture()
+        let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
+        var expected = customSettings
+        try db.write(expected, key: "settings")
+        let worker = DispatchQueue(label: "fixture.startup-bindings"), gate = WorkerGate(worker)
+        defer { gate.open() }
+        let store = store(directory, worker: worker)
+        // Explicitly selecting the provisional default must still override a different saved value.
+        store.setting(\.soundEnabled).wrappedValue = true
+        let first = Task { await store.persistSettings() }
+        try await waitUntil { store.pendingStorageOperations == 1 }
+        store.setting(\.threshold).wrappedValue = 65
+        store.editSettings { $0.selectedTrayAccount = nil; $0.selectedTrayWindow = nil }
+        let second = Task { await store.persistSettings() }
+        try await waitUntil { store.pendingStorageOperations == 2 }
+        gate.open(); await first.value; await second.value; await store.shutDown()
+        expected.soundEnabled = true; expected.threshold = 65
+        expected.selectedTrayAccount = nil; expected.selectedTrayWindow = nil
+        XCTAssertEqual(store.settings, expected)
+        XCTAssertEqual(try db.read(MonitorSettings.self, key: "settings"), expected)
+    }
+
+    func testFailedStartupSnoozeRestoresLoadedSettings() async throws {
+        let (directory, _) = try fixture()
+        let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
+        let expected = customSettings
+        try db.write(expected, key: "settings")
+        try execute("CREATE TRIGGER reject_settings BEFORE INSERT ON preferences WHEN NEW.id = 'settings' BEGIN SELECT RAISE(ABORT, 'fixture'); END", at: directory)
+        let worker = DispatchQueue(label: "fixture.failed-startup-setting"), gate = WorkerGate(worker)
+        defer { gate.open() }
+        let store = store(directory, worker: worker)
+        store.snooze()
+        gate.open(); await store.shutDown()
+        XCTAssertNotNil(store.storageError)
+        XCTAssertEqual(store.settings, expected)
+        XCTAssertEqual(try db.read(MonitorSettings.self, key: "settings"), expected)
+    }
+
+    func testRelativeStartupEditsAreAppliedOncePerSavedSnapshot() async throws {
+        let (directory, _) = try fixture()
+        let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
+        var expected = customSettings
+        try db.write(expected, key: "settings")
+        let worker = DispatchQueue(label: "fixture.relative-startup-edits"), gate = WorkerGate(worker)
+        defer { gate.open() }
+        let store = store(directory, worker: worker)
+        store.editSettings { $0.threshold += 1 }
+        let first = Task { await store.persistSettings() }
+        try await waitUntil { store.pendingStorageOperations == 1 }
+        store.editSettings { $0.threshold += 2 }
+        let second = Task { await store.persistSettings() }
+        try await waitUntil { store.pendingStorageOperations == 2 }
+        gate.open(); await first.value; await second.value; await store.shutDown()
+        expected.threshold += 3
+        XCTAssertEqual(store.settings, expected)
+        XCTAssertEqual(try db.read(MonitorSettings.self, key: "settings"), expected)
+    }
+
+    func testRecoveryPublishesTheSameDefaultsUsedByTheNextAccountCommit() async throws {
+        let (directory, account) = try fixture()
+        let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
+        for key in ["accounts", "settings", "manual-resets", "ssh-hosts", "activity-roots", "reset-redemptions"] {
+            try db.write("incompatible", key: key)
+        }
+        try db.write(123, key: "opencode-path")
+        let store = storeForRestart(directory)
+        store.isPaused = true
+        await store.waitUntilReady()
+        XCTAssertTrue(store.hasRecoverableStorageError)
+        await store.recoverStoredConfiguration()
+        let recoveredAccounts = store.accounts
+        XCTAssertEqual(recoveredAccounts.map(\.id), ["default-codex", "default-claude"])
+        XCTAssertEqual(store.settings, MonitorSettings())
+        XCTAssertTrue(store.manualResets.isEmpty); XCTAssertTrue(store.sshHosts.isEmpty)
+        XCTAssertTrue(store.activityRoots.isEmpty); XCTAssertEqual(store.localDatabasePath, "")
+        XCTAssertFalse(store.hasRecoverableStorageError)
+        try await store.saveAccount(account, secret: "")
+        XCTAssertEqual(store.accounts, recoveredAccounts + [account])
+        XCTAssertTrue(store.manualResets.isEmpty)
+        await store.shutDown()
+        let restarted = storeForRestart(directory)
+        await restarted.waitUntilReady()
+        XCTAssertEqual(restarted.accounts, recoveredAccounts + [account])
+        XCTAssertEqual(restarted.settings, store.settings)
+        XCTAssertTrue(restarted.manualResets.isEmpty); XCTAssertTrue(restarted.sshHosts.isEmpty)
+        XCTAssertTrue(restarted.activityRoots.isEmpty); XCTAssertEqual(restarted.localDatabasePath, "")
+        await restarted.shutDown()
+    }
+
     func testSettingsEditedDuringBootstrapSurvivePublicationAndRestart() async throws {
         let (directory, _) = try fixture()
         let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
@@ -159,7 +279,7 @@ final class StorageIntegrationTests: XCTestCase {
         let worker = DispatchQueue(label: "fixture.settings"), gate: WorkerGate
         gate = WorkerGate(worker); defer { gate.open() }
         let store = store(directory, worker: worker)
-        store.settings.soundEnabled = true
+        store.setting(\.soundEnabled).wrappedValue = true
         let pending = Task { await store.persistSettings() }
         await Task.yield()
         gate.open(); await pending.value
@@ -176,7 +296,7 @@ final class StorageIntegrationTests: XCTestCase {
         let worker = DispatchQueue(label: "fixture.unscheduled-setting"), gate: WorkerGate
         gate = WorkerGate(worker); defer { gate.open() }
         let store = store(directory, worker: worker)
-        store.settings.soundEnabled = true
+        store.setting(\.soundEnabled).wrappedValue = true
         // An observed binding can change before SwiftUI's onChange submits persistence.
         gate.open(); await store.waitUntilReady()
         XCTAssertTrue(store.settings.soundEnabled)
@@ -310,7 +430,7 @@ final class StorageIntegrationTests: XCTestCase {
         let store = store(directory, worker: DispatchQueue(label: "fixture.notification"), notifications: notifications,
                           registry: ProviderRegistry(overrides: [.codex: provider]))
         await store.waitUntilReady()
-        store.settings.notificationsEnabled = true; store.settings.quietEnabled = false
+        store.editSettings { $0.notificationsEnabled = true; $0.quietEnabled = false }
         await store.persistSettings()
         await notifications.setFailures(delivery: true)
         store.refresh(force: true); await provider.waitUntilCalled()
@@ -377,7 +497,7 @@ final class StorageIntegrationTests: XCTestCase {
         let store = store(directory, worker: DispatchQueue(label: "fixture.delivered"), notifications: notifications,
                           registry: ProviderRegistry(overrides: [.codex: provider]))
         await store.waitUntilReady()
-        store.settings.notificationsEnabled = true; store.settings.quietEnabled = false; await store.persistSettings()
+        store.editSettings { $0.notificationsEnabled = true; $0.quietEnabled = false }; await store.persistSettings()
         store.refresh(force: true); await provider.waitUntilCalled()
         await provider.finish(AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture",
             windows: [.init(id: "primary", title: "5h", usedPercent: 95, resetsAt: Date().addingTimeInterval(3600), duration: 18000)]))

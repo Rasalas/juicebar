@@ -14,7 +14,7 @@ struct ManualReset: Codable, Identifiable, Sendable {
 final class AppStore {
     static let shared = AppStore(demo: CommandLine.arguments.contains("--demo"))
     var accounts: [AccountConfiguration] = []
-    var settings = MonitorSettings() { didSet { settingsRevision += 1 } }
+    private(set) var settings = MonitorSettings()
     var snapshots: [String: AccountSnapshot] = [:]
     var failures: [String: String] = [:]
     var refreshingAccountIDs: Set<String> = []
@@ -51,9 +51,10 @@ final class AppStore {
     @ObservationIgnored private let notifications: any AppNotifications
     var isLoading = true
     var pendingStorageOperations = 0
-    @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var bootstrapTask: Task<MonitorSettings, Never>?
     @ObservationIgnored private var mutationTail: Task<Void, Never>?
     @ObservationIgnored private var settingsRevision = 0
+    @ObservationIgnored private var startupSettingsEdits: [(inout MonitorSettings) -> Void] = []
     @ObservationIgnored private var resetTasks: [UUID: Task<CodexResetResult, Error>] = [:]
     @ObservationIgnored private var notificationTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShuttingDown = false
@@ -95,7 +96,9 @@ final class AppStore {
             // Edits submitted during startup wait for this publication. No defaults are written.
             if !isDemo {
                 accounts = loaded.configuration.accounts
-                if settingsRevision == 0 { settings = loaded.configuration.settings }
+                settings = loaded.configuration.settings
+                for edit in startupSettingsEdits { edit(&settings) }
+                startupSettingsEdits = []
                 durableSettings = loaded.configuration.settings
                 manualResets = loaded.configuration.manualResets
                 resetRedemptionKeys = loaded.configuration.resetRedemptionKeys
@@ -107,14 +110,19 @@ final class AppStore {
             }
             isLoading = false
             if timer != nil, !isShuttingDown { refresh(); refreshActivityIfNeeded() }
+            return loaded.configuration.settings
         }
     }
 
-    func waitUntilReady() async { await bootstrapTask?.value }
+    func waitUntilReady() async { _ = await bootstrapTask?.value }
 
     /// Reserve a place before suspending. UI cancellation never cancels an accepted commit or
     /// its publication. All configuration read/modify/write operations use this lane.
     private func mutate<T>(finishingAcceptedAction: Bool = false, _ action: @escaping @MainActor () async throws -> T) async throws -> T {
+        try await enqueueMutation(finishingAcceptedAction: finishingAcceptedAction, action).value
+    }
+
+    private func enqueueMutation<T>(finishingAcceptedAction: Bool = false, _ action: @escaping @MainActor () async throws -> T) throws -> Task<T, Error> {
         guard !isShuttingDown || finishingAcceptedAction else { throw CancellationError() }
         let previous = mutationTail
         pendingStorageOperations += 1
@@ -125,7 +133,7 @@ final class AppStore {
             return try await action()
         }
         mutationTail = Task { _ = try? await operation.value }
-        return try await operation.value
+        return operation
     }
 
     func start() {
@@ -286,7 +294,7 @@ final class AppStore {
         await trackNotification { [self] in
             do {
                 let allowed = try await notifications.requestAuthorization()
-                settings.notificationsEnabled = allowed
+                editSettings { $0.notificationsEnabled = allowed }
                 await persistSettings(finishingAcceptedAction: true)
                 await updateNotificationStatus()
                 if allowed { refresh(force: true) }
@@ -321,37 +329,68 @@ final class AppStore {
     }
     func recoverStoredConfiguration() async {
         do { try await mutate { [self] in
-            let keys = try await persistence.recoverConfiguration()
-            if keys.contains("accounts") {
+            let recovered = try await persistence.recoverConfiguration()
+            if let accounts = recovered.accounts {
                 scheduler.cancelAll()
-                accounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)]
+                self.accounts = accounts
                 snapshots = [:]; history = [:]; failures = [:]
                 refreshPolicy = AccountRefreshPolicy()
             }
-            if keys.contains("settings") { settings = MonitorSettings(); durableSettings = settings }
-            if keys.contains("manual-resets") { manualResets = [] }
-            if keys.contains("opencode-path") { localDatabasePath = "" }
-            if keys.contains("ssh-hosts") { sshHosts = [] }
-            if keys.contains("activity-roots") { activityRoots = [] }
-            if keys.contains("reset-redemptions") { resetRedemptionKeys = [:] }
+            for change in recovered.changes {
+                switch change {
+                case let .settings(value): settings = value; durableSettings = value
+                case let .manualResets(value): manualResets = value
+                case let .localDatabasePath(value): localDatabasePath = value
+                case let .sshHosts(value): sshHosts = value
+                case let .activityRoots(value): activityRoots = value
+                case let .resetRedemptions(value): resetRedemptionKeys = value
+                }
+            }
             hasRecoverableStorageError = false
-            storageError = tr("Zurückgesetzt: {0}. Die Originaldaten bleiben gesichert.", keys.sorted().joined(separator: ", "))
+            storageError = tr("Zurückgesetzt: {0}. Die Originaldaten bleiben gesichert.", recovered.keys.sorted().joined(separator: ", "))
         } } catch { storageError = error.localizedDescription }
+    }
+
+    /// Record the user's operation, including an explicit choice equal to the provisional default.
+    /// During bootstrap it is replayed against loaded settings, preserving untouched fields.
+    func editSettings(_ edit: @escaping (inout MonitorSettings) -> Void) {
+        if isLoading { startupSettingsEdits.append(edit) }
+        edit(&settings)
+        settingsRevision += 1
+    }
+
+    func setting<Value>(_ keyPath: WritableKeyPath<MonitorSettings, Value>) -> Binding<Value> {
+        Binding(get: { self.settings[keyPath: keyPath] }, set: { value in
+            self.editSettings { $0[keyPath: keyPath] = value }
+        })
     }
 
     func persistSettings() async { await persistSettings(finishingAcceptedAction: false) }
 
     private func persistSettings(finishingAcceptedAction: Bool) async {
+        if let pending = enqueueSettingsSave(finishingAcceptedAction: finishingAcceptedAction) { _ = try? await pending.value }
+    }
+
+    @discardableResult
+    private func enqueueSettingsSave(finishingAcceptedAction: Bool = false) -> Task<Void, Error>? {
         let value = settings
+        let startupEdits = isLoading ? startupSettingsEdits : nil
         settingsRevision += 1
         let revision = settingsRevision
-        do { try await mutate(finishingAcceptedAction: finishingAcceptedAction) { [self] in
-            do { try await persistence.writeConfiguration(.settings(value)); durableSettings = value }
+        do { return try enqueueMutation(finishingAcceptedAction: finishingAcceptedAction) { [self] in
+            var updated = value
+            if let startupEdits, let loaded = await bootstrapTask?.value {
+                // These edits are cumulative snapshots. Rebase each on the original load,
+                // not on an earlier write that may already contain the same relative edit.
+                updated = loaded
+                for edit in startupEdits { edit(&updated) }
+            }
+            do { try await persistence.writeConfiguration(.settings(updated)); durableSettings = updated }
             catch {
                 if revision == settingsRevision { settings = durableSettings }
                 storageError = error.localizedDescription
             }
-        } } catch { storageError = error.localizedDescription }
+        } } catch { storageError = error.localizedDescription; return nil }
     }
     private func invalidateAccount(_ id: String) {
         scheduler.invalidate(id: id)
@@ -426,7 +465,11 @@ final class AppStore {
         } } catch { storageError = error.localizedDescription }
     }
     func openAccount(_ account: AccountConfiguration) { NSWorkspace.shared.open(account.provider.accountURL) }
-    func snooze() { settings.snoozedUntil = Date().addingTimeInterval(3600); Task { await persistSettings() } }
+    func snooze() {
+        let until = Date().addingTimeInterval(3600)
+        editSettings { $0.snoozedUntil = until }
+        enqueueSettingsSave()
+    }
     func refreshActivityIfNeeded() {
         nextActivityImport = min(nextActivityImport, Date().addingTimeInterval(300))
         guard !isLoading, !isShuttingDown, !isPaused, Date() >= nextActivityImport else { return }

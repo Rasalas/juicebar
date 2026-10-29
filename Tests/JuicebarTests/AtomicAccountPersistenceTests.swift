@@ -356,7 +356,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
     func testManualResetsSSHHostsAndSettingsRollBackOnWriteFailure() async throws {
         let (store, database, account, directory, _) = try await fixture()
         await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
-        store.settings.soundEnabled.toggle(); await store.persistSettings()
+        store.editSettings { $0.soundEnabled.toggle() }; await store.persistSettings()
         let resetIDs = store.manualResets.map(\.id), settings = store.settings
         try database.write(["fixture-host"], key: "ssh-hosts"); store.sshHosts = ["fixture-host"]
         try execute("CREATE TRIGGER fail_settings BEFORE INSERT ON preferences WHEN NEW.id IN ('manual-resets','ssh-hosts','settings') BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
@@ -368,7 +368,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         await store.removeSSHHost("fixture-host")
         XCTAssertEqual(store.sshHosts, ["fixture-host"])
         XCTAssertEqual(try database.read([String].self, key: "ssh-hosts"), ["fixture-host"])
-        store.settings.soundEnabled.toggle(); await store.persistSettings()
+        store.editSettings { $0.soundEnabled.toggle() }; await store.persistSettings()
         XCTAssertEqual(store.settings, settings)
         XCTAssertEqual(try database.read(MonitorSettings.self, key: "settings"), settings)
         XCTAssertNotNil(store.storageError)
