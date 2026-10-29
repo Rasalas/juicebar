@@ -464,19 +464,28 @@ final class AppStore {
         committed = true
     }
 
-    private func publishRestoredCredentials(_ id: String) {
+    private func publishRestoredCredentials(_ id: String, preservingCooldown: Bool = false) {
         let recovered = credentialRecovery.remove(id) != nil
         if recovered, storageError == CredentialRecoveryFailure().localizedDescription { storageError = nil }
+        // mutateAccount already invalidated in-flight generations. Metadata edits must
+        // keep the provider's deadline and its visible failure until retry is allowed.
+        if preservingCooldown, !recovered, refreshPolicy.retryAllowedAt(id: id, now: Date()) != nil { return }
         // Keep the fresh-reset requirement until an actual provider read succeeds.
         invalidateAccount(id)
     }
 
     private func commitAccount(_ mutation: AccountMutation, id: String) async throws {
         try await mutateAccount(id) { [self] in
+            let preservesCooldown: Bool
+            if case let .save(updated, secret, removeKey) = mutation, let previous = accounts.first(where: { $0.id == id }) {
+                preservesCooldown = secret.isEmpty && !removeKey && previous.provider == updated.provider
+                    && previous.executablePath == updated.executablePath && previous.profileDirectory == updated.profileDirectory
+                    && previous.useLocalCredentials == updated.useLocalCredentials
+            } else { preservesCooldown = false }
             let commit = try await persistence.commitAccount(mutation)
             let rootsChanged = ActivityLogs.defaultRoots(accounts: accounts, additional: activityRoots)
                 != ActivityLogs.defaultRoots(accounts: commit.accounts, additional: activityRoots)
-            publishRestoredCredentials(id)
+            publishRestoredCredentials(id, preservingCooldown: preservesCooldown)
             accounts = commit.accounts; manualResets = commit.manualResets
             if commit.clearedHistory { snapshots[id] = nil; history[id] = [] }
             if !accounts.contains(where: { $0.id == id }) {

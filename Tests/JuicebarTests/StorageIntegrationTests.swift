@@ -120,7 +120,7 @@ final class StorageIntegrationTests: XCTestCase {
     private func store(_ directory: URL, worker: DispatchQueue, notifications: NotificationFixture = NotificationFixture(),
                        registry: ProviderRegistry = ProviderRegistry()) -> AppStore {
         let persistence = AppPersistence(directory: directory, demo: false, credentials: IsolatedCredentials(), workerTarget: worker)
-        return AppStore(directory: directory, credentials: IsolatedCredentials(), registry: registry, notifications: notifications, persistence: persistence)
+        return AppStore(directory: directory, credentials: IsolatedCredentials(), registry: registry, notifications: notifications, persistence: persistence, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
     }
 
     private func waitUntil(_ predicate: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
@@ -163,7 +163,7 @@ final class StorageIntegrationTests: XCTestCase {
     }
 
     private func storeForRestart(_ directory: URL) -> AppStore {
-        AppStore(directory: directory, credentials: IsolatedCredentials(), notifications: NotificationFixture())
+        AppStore(directory: directory, credentials: IsolatedCredentials(), notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
     }
 
     private var customSettings: MonitorSettings {
@@ -517,7 +517,7 @@ final class StorageIntegrationTests: XCTestCase {
     func testCoordinatedCredentialWriteWaitsOffMainActorAndPublishesDespiteCancellation() async throws {
         let (directory, account) = try fixture()
         let credentials = DelayedCredentials()
-        let store = AppStore(directory: directory, credentials: credentials, notifications: NotificationFixture())
+        let store = AppStore(directory: directory, credentials: credentials, notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         var edited = account; edited.label = "Durably saved"
         let save = Task { try await store.saveAccount(edited, secret: "fixture-secret") }
@@ -565,7 +565,7 @@ final class StorageIntegrationTests: XCTestCase {
         let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try db.save(snapshot)
         let redeemer = ResetFake(hold: true, includesFreshLimits: false)
-        let store = AppStore(directory: directory, resetRedeemer: redeemer, credentials: IsolatedCredentials(), notifications: NotificationFixture())
+        let store = AppStore(directory: directory, resetRedeemer: redeemer, credentials: IsolatedCredentials(), notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         let reset = Task { try await store.redeemReset(benefit, for: account, expectedIdentity: snapshot.identity) }
         await redeemer.waitUntilCalled()
