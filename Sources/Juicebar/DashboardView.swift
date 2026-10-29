@@ -160,7 +160,7 @@ struct DashboardView: View {
                         Image(systemName: "bell.badge").font(.system(size: 23, weight: .light)).foregroundStyle(Palette.accent)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(tr("Rechtzeitig Bescheid wissen")).font(.body.weight(.semibold))
-                            Text(tr("Warnungen ab {0} % verbraucht, bei hohem Tempo und für ablaufende Reset-Gutschriften.", Int(store.settings.threshold))).font(.callout).foregroundStyle(.secondary)
+                            Text(tr("Warnungen ab {0} % verbraucht, bei hohem Tempo und für ablaufende Reset-Gutschriften.", QuotaNumbers.integerText(store.settings.threshold))).font(.callout).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button(tr("Einrichten")) { page = .alerts }.buttonStyle(JuiceButtonStyle())

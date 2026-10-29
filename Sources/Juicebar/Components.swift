@@ -110,7 +110,7 @@ struct QuotaBar: View {
         .popover(isPresented: $showingDetails, arrowEdge: .bottom) { details.font(.subheadline).padding(12) }
         .help(detailText)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, Int(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : "")
+        .accessibilityLabel(tr("{0}, {1} Prozent {2}{3}", window.title, QuotaNumbers.integerText(displayed.rounded()), mode == .remaining ? tr("übrig") : tr("verbraucht"), expired ? tr(", Wert abgelaufen") : "")
                             + (reachTitle.isEmpty ? "" : ". \(reachTitle)"))
         .accessibilityValue(([statusTitle] + detailRows.map { "\($0.0): \($0.1)" } + [detailExplanation]).filter { !$0.isEmpty }.joined(separator: ". "))
     }
@@ -118,7 +118,7 @@ struct QuotaBar: View {
         HStack(alignment: .firstTextBaseline) {
             Text(tr(window.title)).font((compact ? Font.callout : .body).weight(.medium))
             Spacer()
-            Text(expired ? "—" : "\(Int(displayed.rounded()))")
+            Text(expired ? "—" : "\(QuotaNumbers.integerText(displayed.rounded()))")
                 .font(.system(size: compact ? 18 : 27, weight: .medium, design: .rounded)).monospacedDigit()
             if !expired { Text(mode == .remaining ? tr("% übrig") : tr("% verbraucht")).font(compact ? .caption : .subheadline).foregroundStyle(.secondary) }
         }
@@ -128,7 +128,7 @@ struct QuotaBar: View {
             ZStack(alignment: .topLeading) {
                 Capsule().fill(color.opacity(0.12)).frame(height: 6).offset(y: compact ? 7 : 12)
                 Capsule().fill(expired ? Color.secondary : color)
-                    .frame(width: max(0, proxy.size.width * min(displayed, 100) / 100), height: 6)
+                    .frame(width: proxy.size.width * (displayed.isFinite ? min(max(displayed, 0), 100) / 100 : 0), height: 6)
                     .offset(y: compact ? 7 : 12)
                 if !expired, let ideal = window.idealPercent(at: now), window.usedPercent - ideal > 1 {
                     // Usage ahead of the even pace, between fill end and diamond in either display mode.
@@ -213,26 +213,26 @@ struct QuotaBar: View {
     }
     private var targetValue: String {
         guard let target = weeklyTarget else { return "" }
-        let left = Int(target.targetRemainingShort.rounded())
+        let left = target.targetRemainingShort.rounded()
         guard left >= 1 else { return tr("voll nutzen") }
-        return mode == .remaining ? tr("≈ {0} % übrig", left) : tr("≈ {0} % verbraucht", 100 - left)
+        return mode == .remaining ? tr("≈ {0} % übrig", QuotaNumbers.integerText(left)) : tr("≈ {0} % verbraucht", QuotaNumbers.integerText(100 - left))
     }
     private var reachTitle: String {
         if let plan = workWeek {
-            let amount = Int(plan.todayRemaining.rounded())
+            let amount = QuotaNumbers.integerText(plan.todayRemaining.rounded())
             return plan.isWorkday ? tr("Heute noch ≈ {0} %", amount) : tr("Puffer: ≈ {0} %", amount)
         }
         if let workRemaining {
             if workPlan?.isWorkday == false {
-                return tr("Puffer: ≈ {0} %", Int(max(0, 100 - window.usedPercent - workRemaining).rounded()))
+                return tr("Puffer: ≈ {0} %", QuotaNumbers.integerText(max(0, 100 - window.usedPercent - workRemaining).rounded()))
             }
-            let value = Int(mode.value(used: 100 - workRemaining).rounded())
+            let value = QuotaNumbers.integerText(mode.value(used: 100 - workRemaining).rounded())
             return mode == .remaining ? tr("Tagesziel: ≈ {0} % übrig", value) : tr("Tagesziel: ≈ {0} % verbraucht", value)
         }
         if weeklyTarget != nil { return tr("Wochenziel: {0}", targetValue) }
         guard let reach = weeklyReach else { return "" }
-        let expiring = Int(reach.expiring.rounded())
-        if expiring >= 1 { return tr("≈ {0} % verfallen", expiring) }
+        let expiring = reach.expiring.rounded()
+        if expiring >= 1 { return tr("≈ {0} % verfallen", QuotaNumbers.integerText(expiring)) }
         return tr("Braucht {0} von {1} Fenstern", windowCount(reach.windowsNeeded), windowCount(reach.windowsAvailable))
     }
     private func windowCount(_ value: Double) -> String {
@@ -245,18 +245,18 @@ struct QuotaBar: View {
     private var detailRows: [(String, String)] {
         var rows: [(String, String)] = []
         if !expired, let ideal = window.idealPercent(at: now) {
-            rows.append((tr("Bei gleichmäßigem Verbrauch"), tr("{0} %", Int(mode.value(used: ideal).rounded()))))
+            rows.append((tr("Bei gleichmäßigem Verbrauch"), tr("{0} %", QuotaNumbers.integerText(mode.value(used: ideal).rounded()))))
             if let recovery = window.paceRecovery(at: now) {
                 rows.append((tr("Ohne weitere Nutzung im Soll"), pointInTime(recovery)))
             } else {
-                rows.append((tr("Puffer zum Soll"), tr("{0} Prozentpunkte", Int((ideal - window.usedPercent).rounded()))))
+                rows.append((tr("Puffer zum Soll"), tr("{0} Prozentpunkte", QuotaNumbers.integerText((ideal - window.usedPercent).rounded()))))
             }
         }
         if weeklyTarget != nil { rows.append((tr("Wochenziel"), targetValue)) }
         if let workRemaining {
-            rows.append((tr("Arbeitsplan"), mode == .remaining ? tr("≈ {0} % übrig", Int(workRemaining.rounded())) : tr("≈ {0} % verbraucht", Int((100 - workRemaining).rounded()))))
+            rows.append((tr("Arbeitsplan"), mode == .remaining ? tr("≈ {0} % übrig", QuotaNumbers.integerText(workRemaining.rounded())) : tr("≈ {0} % verbraucht", QuotaNumbers.integerText((100 - workRemaining).rounded()))))
             if let plan = workWeek {
-                rows.append((plan.isWorkday ? tr("Heute noch") : tr("Puffer"), tr("≈ {0} %", Int(plan.todayRemaining.rounded()))))
+                rows.append((plan.isWorkday ? tr("Heute noch") : tr("Puffer"), tr("≈ {0} %", QuotaNumbers.integerText(plan.todayRemaining.rounded()))))
                 if let additional = plan.additionalWindows, additional >= 0.05 { rows.append((tr("Außerhalb der Arbeitszeit"), outsideWorkText(additional))) }
             }
         }
@@ -265,8 +265,8 @@ struct QuotaBar: View {
             rows.append((tr("Ein volles 5-Stunden-Fenster"), tr("≈ {0} % dieses Limits", share)))
             rows.append((tr("Nutzbare Fenster bis Reset"), windowCount(reach.windowsAvailable)))
             rows.append((tr("Benötigte Fenster"), windowCount(reach.windowsNeeded)))
-            rows.append((tr("Geschätzt noch nutzbar"), tr("≈ {0} % dieses Limits", Int(min(reach.remainingLong, reach.capacity).rounded()))))
-            if reach.expiring >= 0.5 { rows.append((tr("Verfällt trotz voller Nutzung"), tr("≈ {0} %", Int(reach.expiring.rounded())))) }
+            rows.append((tr("Geschätzt noch nutzbar"), tr("≈ {0} % dieses Limits", QuotaNumbers.integerText(min(reach.remainingLong, reach.capacity).rounded()))))
+            if reach.expiring >= 0.5 { rows.append((tr("Verfällt trotz voller Nutzung"), tr("≈ {0} %", QuotaNumbers.integerText(reach.expiring.rounded())))) }
         }
         switch status {
         case .projectedPaceCrossing(let date) where !expired: rows.append((tr("Soll erreicht voraussichtlich"), pointInTime(date)))
@@ -413,7 +413,8 @@ struct ExpiryPattern: View {
 }
 
 func pointInTime(_ date: Date) -> String {
-    date.formatted(Date.FormatStyle(locale: Localization.locale).weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+    guard QuotaNumbers.date(date) != nil else { return tr("unbekannt") }
+    return date.formatted(Date.FormatStyle(locale: Localization.locale).weekday(.abbreviated).day().month(.abbreviated).hour().minute())
 }
 
 func relativeTime(_ date: Date, now: Date = Date()) -> String {
@@ -423,9 +424,10 @@ func relativeTime(_ date: Date, now: Date = Date()) -> String {
 
 func updatedText(_ date: Date?, now: Date) -> String {
     guard let date else { return tr("Noch nicht abgerufen") }
-    let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
+    guard QuotaNumbers.date(date) != nil else { return tr("unbekannt") }
+    let minutes = (max(0, now.timeIntervalSince(date)) / 60).rounded(.towardZero)
     if minutes < 1 { return tr("Gerade aktualisiert") }
-    if minutes < 60 { return tr("Stand vor {0} Min.", minutes) }
+    if minutes < 60 { return tr("Stand vor {0} Min.", QuotaNumbers.integerText(minutes)) }
     return tr("Stand {0}", date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)))
 }
 
