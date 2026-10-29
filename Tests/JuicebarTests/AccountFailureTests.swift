@@ -52,7 +52,7 @@ private final class FailureURLProtocol: URLProtocol {
         let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try db.write([account], key: "accounts")
         try db.save(AccountSnapshot(configurationID: account.id, identity: "fixture", source: "fixture"))
-        let store = AppStore(directory: directory, credentials: FailureCredentials(), registry: ProviderRegistry(overrides: [kind: provider]), notifications: NotificationFixture(), persistence: AppPersistence(directory: directory, demo: false, credentials: FailureCredentials(), workerTarget: worker))
+        let store = AppStore(directory: directory, credentials: FailureCredentials(), registry: ProviderRegistry(overrides: [kind: provider]), notifications: NotificationFixture(), persistence: AppPersistence(directory: directory, demo: false, credentials: FailureCredentials(), workerTarget: worker), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         addTeardownBlock { await store.shutDown() }
         return (store, account)
@@ -209,6 +209,32 @@ private final class FailureURLProtocol: URLProtocol {
         let calls = await provider.calls
         XCTAssertEqual(calls, 1)
         XCTAssertEqual(store.failures[account.id], .provider(.rateLimited(120)))
+    }
+
+    func testMetadataEditsPreserveProviderCooldownAndCredentialChangeAllowsRetry() async throws {
+        let provider = FailureProvider(.rateLimited(120))
+        let (store, account) = try await fixture(provider)
+        store.refresh(force: true)
+        try await waitUntil { !store.isRefreshing }
+        guard case .waiting(let until) = store.failureRecoveryState(for: account) else { return XCTFail("Missing cooldown") }
+        var edited = account
+        for edit in ["label", "budget", "disable", "enable"] {
+            switch edit {
+            case "label": edited.label = "Renamed"
+            case "budget": edited.monthlyBudget = 100
+            case "disable": edited.enabled = false
+            default: edited.enabled = true
+            }
+            try await store.saveAccount(edited, secret: "")
+            store.refresh(force: true)
+            try await waitUntil { !store.isRefreshing }
+            let calls = await provider.calls
+            XCTAssertEqual(calls, 1, edit)
+            XCTAssertEqual(store.failures[account.id], .provider(.rateLimited(120)))
+            if edited.enabled { XCTAssertEqual(store.failureRecoveryState(for: edited), .waiting(until: until)) }
+        }
+        try await store.saveAccount(edited, secret: "synthetic-replacement-key")
+        try await waitUntil { await provider.calls == 2 && !store.isRefreshing }
     }
 
     func testSuccessfulRetryPublishesFreshValueAndClearsFailure() async throws {

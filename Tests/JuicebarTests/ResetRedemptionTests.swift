@@ -48,7 +48,7 @@ final class ResetRedemptionTests: XCTestCase {
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try database.write([account], key: "accounts"); try database.save(snapshot)
         if corruptKeys { try database.write("incompatible", key: "reset-redemptions") }
-        let store = AppStore(directory: directory, resetRedeemer: fake)
+        let store = AppStore(directory: directory, resetRedeemer: fake, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         return (store, account, benefit, directory)
     }
@@ -61,7 +61,7 @@ final class ResetRedemptionTests: XCTestCase {
         XCTAssertFalse(store.redeemingResetAccounts.contains(account.id))
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         XCTAssertEqual(try database.read([String: String].self, key: "reset-redemptions")?.count, 1)
-        let restarted = AppStore(directory: directory, resetRedeemer: fake)
+        let restarted = AppStore(directory: directory, resetRedeemer: fake, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await restarted.waitUntilReady()
         let result = try await restarted.redeemReset(benefit, for: account, expectedIdentity: identity)
         XCTAssertEqual(result.outcome, .reset)

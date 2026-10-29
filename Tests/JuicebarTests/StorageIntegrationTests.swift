@@ -31,10 +31,25 @@ actor NotificationFixture: AppNotifications {
     var holdDelivery = false
     private var delivery: CheckedContinuation<Void, Never>?
     private var deliveryWaiters: [CheckedContinuation<Void, Never>] = []
-    func permission() -> NotificationPermission {
+    private var permissionHeld = false
+    private var permissions: [CheckedContinuation<Void, Never>] = []
+    private var permissionWaiters: [CheckedContinuation<Void, Never>] = []
+    func permission() async -> NotificationPermission {
         statusReads += 1
+        if permissionHeld {
+            await withCheckedContinuation { continuation in
+                permissions.append(continuation)
+                permissionWaiters.forEach { $0.resume() }; permissionWaiters = []
+            }
+        }
         return NotificationPermission(authorization: .authorized, banner: true, sound: true)
     }
+    func holdPermission() { permissionHeld = true }
+    func waitUntilReadingPermission() async {
+        if !permissions.isEmpty { return }
+        await withCheckedContinuation { permissionWaiters.append($0) }
+    }
+    func finishPermission() { permissionHeld = false; permissions.forEach { $0.resume() }; permissions = [] }
     func requestAuthorization() throws -> Bool {
         if failAuthorization { throw ProviderFailure.unavailable("Fixture authorization failure") }
         return true
@@ -105,7 +120,7 @@ final class StorageIntegrationTests: XCTestCase {
     private func store(_ directory: URL, worker: DispatchQueue, notifications: NotificationFixture = NotificationFixture(),
                        registry: ProviderRegistry = ProviderRegistry()) -> AppStore {
         let persistence = AppPersistence(directory: directory, demo: false, credentials: IsolatedCredentials(), workerTarget: worker)
-        return AppStore(directory: directory, credentials: IsolatedCredentials(), registry: registry, notifications: notifications, persistence: persistence)
+        return AppStore(directory: directory, credentials: IsolatedCredentials(), registry: registry, notifications: notifications, persistence: persistence, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
     }
 
     private func waitUntil(_ predicate: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
@@ -148,7 +163,7 @@ final class StorageIntegrationTests: XCTestCase {
     }
 
     private func storeForRestart(_ directory: URL) -> AppStore {
-        AppStore(directory: directory, credentials: IsolatedCredentials(), notifications: NotificationFixture())
+        AppStore(directory: directory, credentials: IsolatedCredentials(), notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
     }
 
     private var customSettings: MonitorSettings {
@@ -451,6 +466,37 @@ final class StorageIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(try db.warnings().map(\.id)), Set(store.warnings.map(\.id)))
     }
 
+    func testWarningRechecksSnoozeAndNotificationSettingsAfterPermission() async throws {
+        for edit in ["snooze", "disabled", "silent"] {
+            let (directory, account) = try fixture(enabled: true)
+            let provider = HeldUsage(), notifications = NotificationFixture()
+            let store = store(directory, worker: DispatchQueue(label: "fixture.warning-settings"), notifications: notifications,
+                              registry: ProviderRegistry(overrides: [.codex: provider]))
+            await store.waitUntilReady()
+            store.editSettings { $0.notificationsEnabled = true; $0.quietEnabled = false; $0.soundEnabled = true }
+            await store.persistSettings()
+            await notifications.holdPermission()
+            store.refresh(force: true); await provider.waitUntilCalled()
+            await provider.finish(AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture",
+                windows: [.init(id: "primary", title: "5h", usedPercent: 95, resetsAt: Date().addingTimeInterval(3600), duration: 18000)]))
+            await notifications.waitUntilReadingPermission()
+            if edit == "snooze" { store.snooze() }
+            else if edit == "disabled" { store.editSettings { $0.notificationsEnabled = false } }
+            else { store.editSettings { $0.soundEnabled = false } }
+            await notifications.finishPermission()
+            try await waitUntil { !store.isRefreshing }
+            let deliveries = await notifications.deliveries
+            if edit == "silent" {
+                XCTAssertEqual(deliveries.count, 1)
+                XCTAssertEqual(deliveries.first?.sound, false)
+            } else {
+                XCTAssertTrue(deliveries.isEmpty, edit)
+                XCTAssertTrue(store.warnings.isEmpty, "Suppressed warnings remain eligible later")
+            }
+            await store.shutDown()
+        }
+    }
+
     func testNotificationLifecycleAndExplicitFailuresNeverNeedTheSystemCenter() async throws {
         let (directory, _) = try fixture()
         let notifications = NotificationFixture()
@@ -471,7 +517,7 @@ final class StorageIntegrationTests: XCTestCase {
     func testCoordinatedCredentialWriteWaitsOffMainActorAndPublishesDespiteCancellation() async throws {
         let (directory, account) = try fixture()
         let credentials = DelayedCredentials()
-        let store = AppStore(directory: directory, credentials: credentials, notifications: NotificationFixture())
+        let store = AppStore(directory: directory, credentials: credentials, notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         var edited = account; edited.label = "Durably saved"
         let save = Task { try await store.saveAccount(edited, secret: "fixture-secret") }
@@ -519,7 +565,7 @@ final class StorageIntegrationTests: XCTestCase {
         let db = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try db.save(snapshot)
         let redeemer = ResetFake(hold: true, includesFreshLimits: false)
-        let store = AppStore(directory: directory, resetRedeemer: redeemer, credentials: IsolatedCredentials(), notifications: NotificationFixture())
+        let store = AppStore(directory: directory, resetRedeemer: redeemer, credentials: IsolatedCredentials(), notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         let reset = Task { try await store.redeemReset(benefit, for: account, expectedIdentity: snapshot.identity) }
         await redeemer.waitUntilCalled()

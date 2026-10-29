@@ -31,7 +31,7 @@ final class AppStorePersistenceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try database.write("incompatible", key: "accounts")
-        let store = AppStore(directory: directory)
+        let store = AppStore(directory: directory, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         XCTAssertTrue(store.accounts.isEmpty)
         XCTAssertTrue(store.hasRecoverableStorageError)
@@ -49,7 +49,7 @@ final class AppStorePersistenceTests: XCTestCase {
     func testMissingAccountsUseDefaultsWithoutRecoveryError() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-empty-store-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = AppStore(directory: directory)
+        let store = AppStore(directory: directory, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         XCTAssertEqual(store.accounts.map(\.id), CLISetupHelp.detectedDefaultAccounts().map(\.id))
         XCTAssertFalse(store.hasRecoverableStorageError)
@@ -116,7 +116,7 @@ final class AppStorePersistenceTests: XCTestCase {
         try database.write("old format", key: "activity-report-v2")
         try database.write("old format", key: "local-usage-v2")
         try database.write("/fixture/opencode.db", key: "opencode-path")
-        let store = AppStore(directory: directory)
+        let store = AppStore(directory: directory, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         XCTAssertNil(store.activity)
         XCTAssertNil(store.localUsage)
@@ -128,7 +128,7 @@ final class AppStorePersistenceTests: XCTestCase {
     func testDeliveredWarningCountsAsSentWhenSavingFails() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-warning-store-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = AppStore(directory: directory)
+        let store = AppStore(directory: directory, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         var connection: OpaquePointer?
         XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("usage.sqlite").path, &connection), SQLITE_OK)

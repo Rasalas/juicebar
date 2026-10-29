@@ -50,7 +50,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         try database.save(AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture"))
         let credentials = CredentialFake()
         credentials.values[account.id] = "fixture-old-key"
-        let store = AppStore(directory: directory, resetRedeemer: resetRedeemer, credentials: credentials, registry: registry, notifications: NotificationFixture())
+        let store = AppStore(directory: directory, resetRedeemer: resetRedeemer, credentials: credentials, registry: registry, notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         if paused { store.isPaused = true }
         return (store, database, account, directory, credentials)
@@ -366,7 +366,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertNil(credentials.values[account.id])
         XCTAssertEqual(store.history[account.id]?.map(\.identity), [original.identity, next.identity])
         XCTAssertEqual(try database.history(account: account.id).map(\.identity), [original.identity, next.identity])
-        let restarted = AppStore(directory: directory, credentials: credentials, registry: registry, notifications: NotificationFixture())
+        let restarted = AppStore(directory: directory, credentials: credentials, registry: registry, notifications: NotificationFixture(), activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await restarted.waitUntilReady()
         XCTAssertEqual(restarted.quotaHistory(for: account.id).map(\.identity), [original.identity, next.identity])
         let window = QuotaWindow(id: "weekly", title: "Week", usedPercent: 10, duration: 604800)
@@ -455,7 +455,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         let (_, database, account, directory, credentials) = try await fixture()
         try database.write("incompatible", key: "manual-resets")
         try database.write("incompatible", key: "ssh-hosts")
-        let store = AppStore(directory: directory, credentials: credentials)
+        let store = AppStore(directory: directory, credentials: credentials, activityReader: { _, _, _ in }, activityCatalogRefresh: {})
         await store.waitUntilReady()
         store.isPaused = true
         await store.removeAccount(account)

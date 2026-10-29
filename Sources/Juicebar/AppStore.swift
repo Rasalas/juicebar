@@ -298,13 +298,13 @@ final class AppStore {
         let eventIDs = Set(events.map(\.id))
         pendingWarningIDs.formUnion(eventIDs)
         defer { pendingWarningIDs.subtract(eventIDs) }
-        let notification = AppNotification(id: events[0].id, title: account.displayName,
-                                           body: events.map(\.message).joined(separator: "\n"),
-                                           sound: settings.soundEnabled, accountID: account.id)
         do {
             let permission = await notifications.permission()
             guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
-            guard permission.allowsDelivery else { return }
+            guard permission.allowsDelivery, settings.notificationsEnabled, !settings.isQuiet(at: Date()) else { return }
+            let notification = AppNotification(id: events[0].id, title: account.displayName,
+                                               body: events.map(\.message).joined(separator: "\n"),
+                                               sound: settings.soundEnabled, accountID: account.id)
             try await notifications.deliver(notification)
         } catch {
             guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
@@ -464,22 +464,34 @@ final class AppStore {
         committed = true
     }
 
-    private func publishRestoredCredentials(_ id: String) {
+    private func publishRestoredCredentials(_ id: String, preservingCooldown: Bool = false) {
         let recovered = credentialRecovery.remove(id) != nil
         if recovered, storageError == CredentialRecoveryFailure().localizedDescription { storageError = nil }
+        // mutateAccount already invalidated in-flight generations. Metadata edits must
+        // keep the provider's deadline and its visible failure until retry is allowed.
+        if preservingCooldown, !recovered, refreshPolicy.retryAllowedAt(id: id, now: Date()) != nil { return }
         // Keep the fresh-reset requirement until an actual provider read succeeds.
         invalidateAccount(id)
     }
 
     private func commitAccount(_ mutation: AccountMutation, id: String) async throws {
         try await mutateAccount(id) { [self] in
+            let preservesCooldown: Bool
+            if case let .save(updated, secret, removeKey) = mutation, let previous = accounts.first(where: { $0.id == id }) {
+                preservesCooldown = secret.isEmpty && !removeKey && previous.provider == updated.provider
+                    && previous.executablePath == updated.executablePath && previous.profileDirectory == updated.profileDirectory
+                    && previous.useLocalCredentials == updated.useLocalCredentials
+            } else { preservesCooldown = false }
             let commit = try await persistence.commitAccount(mutation)
-            publishRestoredCredentials(id)
+            let rootsChanged = ActivityLogs.defaultRoots(accounts: accounts, additional: activityRoots)
+                != ActivityLogs.defaultRoots(accounts: commit.accounts, additional: activityRoots)
+            publishRestoredCredentials(id, preservingCooldown: preservesCooldown)
             accounts = commit.accounts; manualResets = commit.manualResets
             if commit.clearedHistory { snapshots[id] = nil; history[id] = [] }
             if !accounts.contains(where: { $0.id == id }) {
                 resetAccountsAwaitingRefresh.remove(id); snapshots[id] = nil; history[id] = nil
             }
+            if rootsChanged { reloadActivitySources() }
         }
     }
 
@@ -603,24 +615,31 @@ final class AppStore {
         saveActivityRoots { $0.filter { $0.id != root.id } }
     }
     private func saveActivityRoots(_ updated: @escaping ([ActivityLogs.Root]) -> [ActivityLogs.Root]) {
-        Task {
-            do { try await mutate { [self] in
-                let roots = updated(activityRoots)
-                try await persistence.writeConfiguration(.activityRoots(roots))
-                activityRoots = roots; reloadActivitySources()
-            } } catch { storageError = error.localizedDescription }
+        enqueueActivitySourceChange { [self] in
+            let roots = updated(activityRoots)
+            try await persistence.writeConfiguration(.activityRoots(roots))
+            activityRoots = roots
+        }
+    }
+    /// Reserve UI-accepted source changes before returning so shutdown can drain them.
+    private func enqueueActivitySourceChange(_ change: @escaping @MainActor () async throws -> Void) {
+        do { _ = try enqueueMutation { [self] in
+            do { try await change(); reloadActivitySources() }
+            catch { storageError = error.localizedDescription }
+        } } catch { storageError = error.localizedDescription }
+    }
+    func setLocalDatabasePath(_ path: String) {
+        guard !isDemo else { return }
+        enqueueActivitySourceChange { [self] in
+            try await persistence.writeConfiguration(.localDatabasePath(path))
+            localDatabasePath = path
         }
     }
     func selectLocalDatabase() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.message = tr("OpenCode-Datenbank nur lesend öffnen")
         if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                do { try await mutate { [self] in
-                    try await persistence.writeConfiguration(.localDatabasePath(url.path))
-                    localDatabasePath = url.path; reloadActivitySources()
-                } } catch { storageError = error.localizedDescription }
-            }
+            setLocalDatabasePath(url.path)
         }
     }
     /// Period-normalized history, rebuilt only after `history` changes.
