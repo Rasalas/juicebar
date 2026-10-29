@@ -50,7 +50,12 @@ final class LogDateParserTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else {
             throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure date parsing")
         }
-        let timestamps = (0..<100_000).map { index in
+        let ciProfile = ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK_PROFILE"] == "ci"
+        #if DEBUG
+        XCTAssertFalse(ciProfile, "The CI benchmark profile requires swift test -c release")
+        #endif
+        let count = ciProfile ? 10_000 : 100_000
+        let timestamps = (0..<count).map { index in
             String(format: "2026-10-%02dT%02d:%02d:%02d.%03dZ", 1 + index / 86_400,
                    index / 3_600 % 24, index / 60 % 60, index % 60, index % 1_000)
         }
@@ -74,7 +79,10 @@ final class LogDateParserTests: XCTestCase {
         XCTAssertTrue(baseline.dates.allSatisfy { $0 != nil })
         XCTAssertEqual(optimized.dates, baseline.dates)
         XCTAssertEqual(optimized.checksum, baseline.checksum)
-        print("BENCHMARK date parsing 100000 distinct: legacyCPU=\(baseline.cpu)s legacyWall=\(baseline.wall)s optimizedCPU=\(optimized.cpu)s optimizedWall=\(optimized.wall)s checksum=\(optimized.checksum) processPeakRSS=\(resources().rss) bytes")
+        if ciProfile {
+            XCTAssertLessThan(optimized.cpu, baseline.cpu * 0.5 + 0.02, "Canonical log dates must use the fast parser")
+        }
+        print("BENCHMARK date parsing \(count) distinct: legacyCPU=\(baseline.cpu)s legacyWall=\(baseline.wall)s optimizedCPU=\(optimized.cpu)s optimizedWall=\(optimized.wall)s checksum=\(optimized.checksum) processPeakRSS=\(resources().rss) bytes")
     }
 
     private func legacyParser() -> (String) -> Date? {

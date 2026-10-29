@@ -16,6 +16,12 @@ enum JuicebarEntry {
             }
             dispatchMain()
         }
+        if CommandLine.arguments.contains("--verify-quota-accessibility") {
+            _ = NSApplication.shared
+            let result = QuotaAccessibilityVerification.run(interactive: CommandLine.arguments.contains("--interactive"))
+            print(result.message)
+            exit(result.exitCode(strict: CommandLine.arguments.contains("--strict")))
+        }
         if CommandLine.arguments.contains("--verify-tray-layout") {
             _ = NSApplication.shared
             do { try PreviewRenderer.verifyTrayLayout() }

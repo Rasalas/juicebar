@@ -1,5 +1,6 @@
 import XCTest
 import CSQLite
+import CryptoKit
 import Darwin
 @testable import JuicebarCore
 
@@ -8,6 +9,27 @@ import Darwin
 
 /// Opt-in measurements use synthetic data only. Thresholds are generous and catch only order-of-magnitude regressions.
 final class ActivityPerformanceTests: XCTestCase {
+    private var ciProfile: Bool { ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK_PROFILE"] == "ci" }
+
+    override func setUpWithError() throws {
+        #if DEBUG
+        if ciProfile { throw BenchmarkConfigurationError.releaseRequired }
+        #endif
+    }
+    private enum BenchmarkConfigurationError: Error { case releaseRequired }
+
+    /// Identity plus bytes detects even an atomic rewrite with unchanged content or coarse timestamps.
+    private func cacheSnapshot(_ directory: URL) throws -> [String: String] {
+        let fm = FileManager.default
+        let files = try XCTUnwrap(fm.enumerator(at: directory, includingPropertiesForKeys: nil))
+        var result: [String: String] = [:]
+        for case let file as URL in files where file.pathExtension == "plist" {
+            let attributes = try fm.attributesOfItem(atPath: file.path)
+            result[file.path] = "\(attributes[.systemFileNumber]!)|\(attributes[.modificationDate]!)|\(SHA256.hash(data: try Data(contentsOf: file)))"
+        }
+        return result
+    }
+
     private func resources() -> (cpu: Double, rss: Int) {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)
@@ -38,7 +60,7 @@ final class ActivityPerformanceTests: XCTestCase {
     // Steady state of the five-minute import: many logs and an OpenCode database, nothing changed.
     func testUnchangedImport() throws {
         guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else { throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure imports") }
-        let fileCount = ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK_FILES"].flatMap(Int.init) ?? 1000
+        let fileCount = ciProfile ? 64 : (ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK_FILES"].flatMap(Int.init) ?? 1000)
         let fm = FileManager.default, root = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
         let logs = root.appendingPathComponent("claude/projects")
         try fm.createDirectory(at: logs, withIntermediateDirectories: true)
@@ -61,11 +83,24 @@ final class ActivityPerformanceTests: XCTestCase {
         XCTAssertEqual(sqlite3_exec(db, "COMMIT", nil, nil, nil), SQLITE_OK)
         let roots = [ActivityLogs.Root(source: .claude, url: logs)], directory = root.appendingPathComponent("state")
         var passes: [(wall: Double, cpu: Double)] = []
+        var snapshot: [String: String] = [:]
         for label in ["cold", "unchanged", "unchanged again"] {
             passes.append(try measure("\(label) import of \(fileCount) logs and 20,000 OpenCode rows") {
                 let report = try ActivityImport.read(roots: roots, databasePath: dbFile.path, hosts: [], directory: directory, now: now).0
                 XCTAssertEqual(report.days.reduce(0) { $0 + $1.responses }, fileCount * 50 + 20000)
             })
+            if ciProfile {
+                let current = try cacheSnapshot(directory)
+                XCTAssertFalse(current.isEmpty)
+                if label == "cold" { snapshot = current }
+                else { XCTAssertEqual(current, snapshot, "Unchanged imports must not rewrite their metadata caches") }
+            }
+        }
+        if ciProfile {
+            // Process CPU excludes runner descheduling. Compare to this host's cold import,
+            // with a 20 ms noise allowance, rather than a hardware-specific wall-clock limit.
+            XCTAssertLessThan(passes[2].cpu, passes[0].cpu * 0.5 + 0.02, "Unchanged import must reuse parsed logs and SQLite results")
+            return
         }
         // Release, 1,000 files: 0.77 s CPU before (cache decoding and archive rewrite), 0.08 s after.
         XCTAssertLessThan(passes[2].cpu, 0.6 * Double(fileCount) / 1000, "Unchanged imports must not decode or rewrite caches")
@@ -80,19 +115,24 @@ final class ActivityPerformanceTests: XCTestCase {
         defer { try? fm.removeItem(at: root) }
         let now = Date(), stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-60))
         let file = logs.appendingPathComponent("session.jsonl")
-        try claudeLog(file: 0, rows: 0..<20000, stamp: stamp, content: 2000).write(to: file)
+        let rowCount = ciProfile ? 6000 : 20000
+        try claudeLog(file: 0, rows: 0..<rowCount, stamp: stamp, content: 2000).write(to: file)
         let size = try XCTUnwrap(fm.attributesOfItem(atPath: file.path)[.size] as? Int)
         let roots = [ActivityLogs.Root(source: .claude, url: logs)]
-        _ = try measure("cold parse of \(size / 1_048_576) MiB log") {
-            XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, 20000)
+        let cold = try measure("cold parse of \(size / 1_048_576) MiB log") {
+            XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, rowCount)
         }
         var appended: (wall: Double, cpu: Double) = (0, 0)
         for round in 1...3 {
             let handle = try FileHandle(forWritingTo: file)
-            try handle.seekToEnd(); try handle.write(contentsOf: try claudeLog(file: 0, rows: (20000 + (round - 1) * 10)..<(20000 + round * 10), stamp: stamp, content: 2000)); try handle.close()
+            try handle.seekToEnd(); try handle.write(contentsOf: try claudeLog(file: 0, rows: (rowCount + (round - 1) * 10)..<(rowCount + round * 10), stamp: stamp, content: 2000)); try handle.close()
             appended = try measure("append round \(round)") {
-                XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, 20000 + round * 10)
+                XCTAssertEqual(try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now).events.count, rowCount + round * 10)
             }
+        }
+        if ciProfile {
+            XCTAssertLessThan(appended.cpu, cold.cpu * 0.5 + 0.02, "Appending ten rows must not parse the entire log again")
+            return
         }
         // Release: 1.7 s CPU before (full re-parse), 0.21 s after.
         XCTAssertLessThan(appended.cpu, 0.5, "Appending must not re-parse the whole log")
