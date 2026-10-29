@@ -39,6 +39,8 @@ For strict foreground AX execution in an existing interactive macOS session, use
 
 Even a successful AX semantics probe does not prove VoiceOver focus order, keyboard navigation or spoken interaction. Those require separate human VoiceOver validation on the supported OS versions. This work does not claim that evidence.
 
+Local verification on 29 October used macOS 27.0.1, arm64 and Swift 6.4, after integrating `ccbbe38`. The full suite passed 268 Swift tests with seven optional skips; the three selected release benchmarks passed without skips. All 13 collector tests, seven validation-script tests, workflow lint, source packaging, direct-download compilation, deployment-target checks, four tray layout variants and synthetic restart persistence passed. The offscreen quota AX probe returned unavailable, while strict mode returned failure as required. Foreground AX, human VoiceOver interaction and macOS 14 runtime execution remain unverified. No installed app, real provider, credentials, notifications or user data were used.
+
 ## Juicebars 0.1.17 release, 23 October
 
 A negative weekly allowance was clamped to zero before conversion into the five-hour work-plan target. Once the weekly reserve was exceeded, that made the short marker follow the actual remaining balance and falsely appear on target. The conversion now retains the signed difference and clamps only the final percentage. The reported 50% short/21% weekly state reaches a 100% short target, while smaller overruns preserve the previous short-window allowance.
