@@ -34,11 +34,26 @@ class PerformanceResultsTests(unittest.TestCase):
 
 
 class DeploymentTargetTests(unittest.TestCase):
-    def record(self, version="14.0", platform="MACOS"):
-        return f"cmd LC_BUILD_VERSION\n platform {platform}\n minos {version}\n sdk 27.0\n"
+    def record(self, version="14.0", platform="MACOS", architecture=None):
+        header = "fixture (architecture " + architecture + ")" if architecture else "fixture"
+        return f"{header}:\nLoad command 1\n      cmd LC_BUILD_VERSION\n platform {platform}\n minos {version}\n sdk 27.0\n"
 
     def test_accepts_macos14_in_every_architecture(self):
-        deployment.check_build_versions(self.record() + self.record("14.0.0"))
+        deployment.check_build_versions(self.record())
+        deployment.check_build_versions(self.record(architecture="arm64") + self.record("14.0.0", architecture="x86_64"))
+
+    def test_rejects_universal_slice_without_build_version(self):
+        valid = self.record(architecture="arm64")
+        missing = "fixture (architecture x86_64):\n"
+        for output in [valid + missing, missing + valid, missing, "fixture:\n"]:
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                deployment.check_build_versions(output)
+
+    def test_rejects_duplicate_commands_and_unframed_output(self):
+        command = self.record().split("fixture:\n")[1]
+        for output in [command, "fixture:\n" + command + command]:
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                deployment.check_build_versions(output)
 
     def test_rejects_missing_wrong_platform_and_raised_minimum(self):
         for output in ["", self.record(platform="IOS"), self.record("15.0"),

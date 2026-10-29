@@ -38,9 +38,14 @@ enum QuotaAccessibilityVerification {
         } ? .verified : .invalid
     }
 
+    static func fixture(now: Date, language: String = Localization.language) -> QuotaWindow {
+        QuotaWindow(id: "accessibility", title: Localization.text("Woche", language: language),
+                    usedPercent: 50, resetsAt: now.addingTimeInterval(3600), duration: 7200)
+    }
+
     @MainActor static func run(interactive: Bool) -> Result {
         let now = Date(timeIntervalSince1970: 1_800_000_000), reset = now.addingTimeInterval(3600)
-        let quota = QuotaWindow(id: "accessibility", title: "Woche", usedPercent: 50, resetsAt: reset, duration: 7200)
+        let quota = fixture(now: now)
         let host = NSHostingView(rootView: QuotaBar(window: quota, color: .blue, now: now).padding(16).frame(width: 380, height: 160))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 160),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)

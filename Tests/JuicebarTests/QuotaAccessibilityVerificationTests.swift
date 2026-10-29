@@ -1,8 +1,21 @@
 import XCTest
+import JuicebarCore
 @testable import Juicebar
 
 final class QuotaAccessibilityVerificationTests: XCTestCase {
     private typealias Probe = QuotaAccessibilityVerification
+
+    func testFixtureTitleMatchesExposedSemanticsInBothLanguages() {
+        for (language, title) in [("en", "Week"), ("de", "Woche")] {
+            let quota = Probe.fixture(now: Date(timeIntervalSince1970: 1_800_000_000), language: language)
+            XCTAssertEqual(quota.title, title)
+            // QuotaBar inserts the already localized model title into its AX label.
+            let label = Localization.text("{0}, {1} Prozent {2}{3}",
+                                          arguments: [quota.title, "50", "", ""], language: language)
+            XCTAssertEqual(Probe.evaluate([.init(label: label, value: "12:00 pace")],
+                                          title: title, reset: "12:00", pace: "pace"), .verified)
+        }
+    }
 
     func testUnavailableTreeNeverReportsSuccess() {
         let result = Probe.evaluate([], title: "Week", reset: "12:00", pace: "Expected")

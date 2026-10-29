@@ -14,14 +14,15 @@ def require_macos14(value):
 
 
 def check_build_versions(output):
-    # vtool emits one LC_BUILD_VERSION block for each Mach-O architecture.
-    commands = re.findall(r"^\s*cmd\s+(\S+)", output, re.MULTILINE)
-    if not commands or any(command != "LC_BUILD_VERSION" for command in commands):
-        raise ValueError("Expected LC_BUILD_VERSION in every executable architecture")
-    blocks = output.split("cmd LC_BUILD_VERSION")[1:]
-    if len(blocks) != len(commands):
-        raise ValueError("No LC_BUILD_VERSION found in executable")
-    for block in blocks:
+    # vtool prints a file header for thin binaries and a header per universal slice,
+    # even when a slice contains no build-version command. Check those empty slices too.
+    slices = re.split(r"^[^\s][^\n]*:[ \t]*\n", output, flags=re.MULTILINE)
+    if len(slices) < 2 or slices[0].strip():
+        raise ValueError("Expected a vtool header for every executable architecture")
+    for block in slices[1:]:
+        commands = re.findall(r"^\s*cmd\s+(\S+)", block, re.MULTILINE)
+        if commands != ["LC_BUILD_VERSION"]:
+            raise ValueError("Expected one LC_BUILD_VERSION in every executable architecture")
         platform = re.search(r"^\s*platform\s+(\S+)", block, re.MULTILINE)
         minimum = re.search(r"^\s*minos\s+(\S+)", block, re.MULTILINE)
         if not platform or platform[1] != "MACOS" or not minimum:
