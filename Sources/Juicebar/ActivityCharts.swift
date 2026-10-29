@@ -35,22 +35,34 @@ struct ActivityDailyChart: View {
     @FocusState private var focused: Bool
     private var selected: Date? { UsageSelection.nearest(selection, in: dates) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let sources = ActivitySource.allCases.filter { source in days.contains { $0.source == source } }
+        let totals = Dictionary(grouping: days, by: \.day).values.map { $0.reduce(0) { $0 + (metric.plottedValue($1) ?? 0) } }
+        return VStack(alignment: .leading, spacing: 12) {
             if days.isEmpty {
                 Text(tr("Für diese Auswahl sind keine lokalen Nutzungsdaten vorhanden.")).foregroundStyle(.secondary)
             } else {
-                Chart(days) { day in
-                    if let value = metric.plottedValue(day) {
-                        BarMark(x: .value(tr("Tag"), day.day, unit: .day), y: .value(tr(metric.rawValue), value))
-                            .foregroundStyle(by: .value(tr("Werkzeug"), day.source.name))
+                if !days.contains(where: { metric.plottedValue($0) != nil }) {
+                    Text(tr("Für diese Messgröße sind keine Werte bekannt.")).font(.caption).foregroundStyle(.secondary)
+                }
+                Chart {
+                    ForEach(days) { day in
+                        if let value = metric.plottedValue(day) {
+                            BarMark(x: .value(tr("Tag"), day.day, unit: .day), y: .value(tr(metric.rawValue), value))
+                                .foregroundStyle(by: .value(tr("Werkzeug"), day.source.name))
+                            if value == 0 {
+                                PointMark(x: .value(tr("Tag"), day.day, unit: .day), y: .value(tr(metric.rawValue), value))
+                                    .foregroundStyle(by: .value(tr("Werkzeug"), day.source.name)).symbolSize(30)
+                            }
+                        }
                     }
-                    if day.id == days.first?.id, let selected {
+                    if let selected {
                         RuleMark(x: .value(tr("Ausgewählter Tag"), Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: selected) ?? selected))
                             .foregroundStyle(Palette.accent).lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                             .accessibilityHidden(true)
                     }
                 }
-                .chartForegroundStyleScale(domain: ActivitySource.allCases.map(\.name), range: ActivitySource.allCases.map(activityColor))
+                .chartForegroundStyleScale(domain: sources.map(\.name), range: sources.map(activityColor))
+                .chartYScale(domain: 0...max(1, totals.max() ?? 0))
                 .chartXScale(domain: (dates.first ?? Date())...(Calendar.current.date(byAdding: .day, value: 1, to: dates.last ?? Date())!))
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in

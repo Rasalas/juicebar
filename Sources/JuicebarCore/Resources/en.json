@@ -544,5 +544,6 @@
   "{0} Tokens": "{0} tokens",
   "{0} archivierte Nachrichten": "{0} archived messages",
   "Claude-Kosten nicht rekonstruierbar": "Claude costs cannot be reconstructed",
-  "API-Gegenwert": "API equivalent"
+  "API-Gegenwert": "API equivalent",
+  "Für diese Messgröße sind keine Werte bekannt.": "No known values for this metric."
 }
