@@ -106,6 +106,42 @@ final class ActivityPerformanceTests: XCTestCase {
         XCTAssertLessThan(passes[2].cpu, 0.6 * Double(fileCount) / 1000, "Unchanged imports must not decode or rewrite caches")
     }
 
+    // A restart must populate the compact cache even while every SSH host is not due.
+    func testColdRemoteSnapshotsAreReused() async throws {
+        guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else { throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure imports") }
+        let fm = FileManager.default, root = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        let archives = root.appendingPathComponent("activity-sources"), now = Date()
+        try fm.createDirectory(at: archives, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let hosts = (0..<(ciProfile ? 4 : 12)).map { "synthetic-\($0)" }, rows = ciProfile ? 12000 : 15000
+        let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+        for host in hosts {
+            var state = SSHActivity.State()
+            state.carried = (0..<rows).map { ActivityEvent(id: "\(host)-\($0)", source: .pi, date: now.addingTimeInterval(-60), model: "fixture", tokens: 10) }
+            state.observedAt = now; state.complete = true
+            try encoder.encode(state).write(to: archives.appendingPathComponent("ssh-\(stableID("ssh|\(host)")).plist"))
+        }
+        let request = ActivityImport.Request(roots: [], databasePath: root.appendingPathComponent("absent.db").path, hosts: hosts, directory: root, now: now, refreshRemote: false)
+        var passes: [Double] = [], snapshot: [String: String] = [:]
+        for pass in 0..<3 {
+            let start = Date(), before = resources()
+            try await ActivityImport.readProgressively(request, collectors: .init(remote: { _, _, _ in
+                XCTFail("Complete recent archives must not contact SSH")
+                throw ProviderFailure.unavailable("Unexpected synthetic collection")
+            })) { report, _ in
+                XCTAssertEqual(report.days.reduce(0) { $0 + $1.responses }, hosts.count * rows)
+                XCTAssertEqual(report.sources?.filter { $0.id.hasPrefix("ssh|") && $0.phase == .cached }.count, hosts.count)
+            }
+            let cpu = resources().cpu - before.cpu
+            passes.append(cpu)
+            print("BENCHMARK cold SSH cache pass \(pass): wall=\(Date().timeIntervalSince(start))s cpu=\(cpu)s peakRSS=\(resources().rss)")
+            let current = try cacheSnapshot(root)
+            if pass == 0 { snapshot = current }
+            else { XCTAssertEqual(current, snapshot, "Reusing SSH snapshots must not rewrite their archives") }
+        }
+        XCTAssertLessThan(passes[2], passes[0] * 0.5 + 0.02, "Not-due SSH snapshots must stay compact after the first cold read")
+    }
+
     // An active session grows by a few lines between imports.
     func testAppendToLargeLog() throws {
         guard ProcessInfo.processInfo.environment["JUICEBAR_BENCHMARK"] == "1" else { throw XCTSkip("Set JUICEBAR_BENCHMARK=1 to measure imports") }

@@ -255,6 +255,80 @@ final class ActivityImportSchedulingTests: XCTestCase {
         XCTAssertEqual(missing.0.sources?.first?.phase, .unavailable, "A success timestamp cannot substitute for a readable fallback")
     }
 
+    func testMissingLogRootRequiresReadableAttributedFallbackAfterRestart() throws {
+        let fm = FileManager.default, root = try directory().resolvingSymlinksInPath(), state = root.appendingPathComponent("state")
+        let missing = ActivityLogs.Root(source: .claude, url: root.appendingPathComponent("removed"))
+        let healthy = ActivityLogs.Root(source: .claude, url: root.appendingPathComponent("healthy"))
+        for (source, tokens) in [(missing, 20), (healthy, 30)] {
+            try fm.createDirectory(at: source.url, withIntermediateDirectories: true)
+            let row = #"{"type":"assistant","timestamp":"\#(ISO8601DateFormatter().string(from: now))","message":{"id":"\#(tokens)","model":"fixture","usage":{"input_tokens":\#(tokens)}}}"# + "\n"
+            try Data(row.utf8).write(to: source.url.appendingPathComponent("usage.jsonl"))
+        }
+        func read(_ state: URL, at: Date) throws -> ActivityReport {
+            try ActivityImport.read(roots: [missing, healthy], databasePath: root.appendingPathComponent("absent.db").path,
+                                    hosts: [], directory: state, now: at).0
+        }
+        _ = try ActivityImport.read(roots: [missing], databasePath: root.appendingPathComponent("absent.db").path,
+                                    hosts: [], directory: state, now: now)
+        let caches = try fm.contentsOfDirectory(at: state.appendingPathComponent("activity-cache"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(caches.count, 1)
+        let key = try XCTUnwrap(caches.first).lastPathComponent
+        XCTAssertEqual(try read(state, at: now).days.reduce(0) { $0 + $1.tokens }, 50)
+        try fm.removeItem(at: missing.url)
+        for variant in ["valid", "corrupt", "legacy"] {
+            let cold = root.appendingPathComponent(variant)
+            try fm.copyItem(at: state, to: cold)
+            let cache = cold.appendingPathComponent("activity-cache/\(key)")
+            if variant == "corrupt" { try Data("corrupt synthetic cache".utf8).write(to: cache, options: .atomic) }
+            if variant == "legacy" {
+                var plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: cache), format: nil) as? [String: Any])
+                plist.removeValue(forKey: "rootID")
+                try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0).write(to: cache, options: .atomic)
+            }
+            for offset in [60.0, 120.0] {
+                let report = try read(cold, at: now.addingTimeInterval(offset))
+                let health = report.sources?.first { $0.id == stableID(missing.id) }
+                XCTAssertEqual(health?.phase, variant == "valid" ? .stale : .unavailable, variant)
+                XCTAssertEqual(health?.lastSuccess, now)
+                XCTAssertEqual(report.days.reduce(0) { $0 + $1.tokens }, variant == "corrupt" ? 30 : 50)
+                XCTAssertEqual(report.sources?.first { $0.id == stableID(healthy.id) }?.phase, .success)
+                if variant == "legacy" { XCTAssertTrue(report.sources?.contains { $0.phase == .unknown && $0.includes(.claude) } == true) }
+            }
+        }
+        let expired = try read(state, at: now.addingTimeInterval(91 * 86400))
+        XCTAssertEqual(expired.sources?.first { $0.id == stableID(missing.id) }?.phase, .unavailable)
+    }
+
+    func testColdNotDueRemoteCacheDetectsAtomicArchiveReplacement() async throws {
+        let root = try directory(), archives = root.appendingPathComponent("activity-sources"), reports = Reports()
+        try FileManager.default.createDirectory(at: archives, withIntermediateDirectories: true)
+        let file = archives.appendingPathComponent("ssh-\(stableID("ssh|a")).plist")
+        var state = SSHActivity.State()
+        state.carried = [event(cost: 1)]; state.observedAt = now; state.complete = true
+        let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+        try encoder.encode(state).write(to: file, options: .atomic)
+        var request = request(root, hosts: ["a"]); request.refreshRemote = false
+        let collectors = ActivityImport.Collectors(remote: { _, _, _ in
+            XCTFail("The synthetic host is not due")
+            throw ProviderFailure.unavailable("Unexpected synthetic collection")
+        })
+        for _ in 0..<2 {
+            try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        }
+        let cached = await reports.values.last
+        XCTAssertEqual(cached?.days.first?.apiCost, 1)
+        // Equal-sized corrections with an unchanged timestamp still have a new file identity.
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        state.carried = [event(cost: 2)]
+        try encoder.encode(state).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.modificationDate: try XCTUnwrap(attributes[.modificationDate])], ofItemAtPath: file.path)
+        try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        let corrected = await reports.values.last
+        XCTAssertEqual(corrected?.days.first?.apiCost, 2)
+        XCTAssertEqual(corrected?.days.first?.tokens, 100)
+        XCTAssertEqual(corrected?.sources?.first { $0.id == "ssh|a" }?.phase, .cached)
+    }
+
     func testMissingKiloRootDoesNotAdvanceSuccessfulObservationAndRemovalRetainsHistory() throws {
         let root = try directory(), file = root.appendingPathComponent("kilo.db"), state = root.appendingPathComponent("state")
         var db: OpaquePointer?
