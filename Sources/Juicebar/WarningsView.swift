@@ -15,10 +15,10 @@ struct WarningsView: View {
                         }
                         Spacer()
                         if store.settings.notificationsEnabled {
-                            Button(tr("Deaktivieren")) { store.settings.notificationsEnabled = false }
+                            Button(tr("Deaktivieren")) { store.editSettings { $0.notificationsEnabled = false } }
                         } else { Button(tr("Aktivieren")) { Task { await store.enableNotifications() } }.buttonStyle(JuiceButtonStyle(prominent: true)).disabled(store.isDemo) }
                     }
-                    Toggle(tr("Hinweiston abspielen"), isOn: $store.settings.soundEnabled)
+                    Toggle(tr("Hinweiston abspielen"), isOn: store.setting(\.soundEnabled))
                     Text(tr("Nur in der Mitteilungszentrale sichtbar? macOS kann Banner und Ton während einer Bildschirmfreigabe oder bei aktivem Fokus unterdrücken, auch wenn beides für Juicebars erlaubt ist.")).font(.caption).foregroundStyle(.secondary)
                     Button(tr("macOS-Mitteilungseinstellungen öffnen")) { store.openNotificationSettings() }.disabled(store.isDemo)
                     HStack {
@@ -26,7 +26,7 @@ struct WarningsView: View {
                         Button(tr("1 Stunde stummschalten")) { store.snooze() }
                         if let until = store.settings.snoozedUntil, until > store.now {
                             Text(tr("Stumm bis {0}", until.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(Localization.locale)))).font(.caption).foregroundStyle(.secondary)
-                            Button(tr("Aufheben")) { store.settings.snoozedUntil = nil }
+                            Button(tr("Aufheben")) { store.editSettings { $0.snoozedUntil = nil } }
                         }
                     }
                 }
@@ -35,33 +35,35 @@ struct WarningsView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     Text(tr("Verbrauch")).font(.headline)
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle(tr("Bei Erreichen einer Verbrauchsschwelle"), isOn: $store.settings.thresholdEnabled)
+                        Toggle(tr("Bei Erreichen einer Verbrauchsschwelle"), isOn: store.setting(\.thresholdEnabled))
                         HStack {
-                            Slider(value: $store.settings.threshold, in: 10...95, step: 5).accessibilityValue(tr("{0} % verbraucht", QuotaNumbers.integerText(store.settings.threshold)))
+                            Slider(value: store.setting(\.threshold), in: 10...95, step: 5).accessibilityValue(tr("{0} % verbraucht", QuotaNumbers.integerText(store.settings.threshold)))
                             Text(tr("bei {0} % verbraucht", QuotaNumbers.integerText(store.settings.threshold))).monospacedDigit().frame(minWidth: 130, alignment: .trailing)
                         }.disabled(!store.settings.thresholdEnabled)
                         Text(tr("Die Schwelle zählt immer den Verbrauch, auch wenn Balken den verbleibenden Rest zeigen.")).font(.caption).foregroundStyle(.secondary)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle(tr("Bei zu hohem Verbrauch für den bisherigen Zeitraum"), isOn: $store.settings.paceEnabled)
-                        Stepper(tr("Toleranz: {0} Prozentpunkte", QuotaNumbers.integerText(store.settings.paceBuffer)), value: $store.settings.paceBuffer, in: 0...40, step: 5).disabled(!store.settings.paceEnabled)
+                        Toggle(tr("Bei zu hohem Verbrauch für den bisherigen Zeitraum"), isOn: store.setting(\.paceEnabled))
+                        Stepper(tr("Toleranz: {0} Prozentpunkte", QuotaNumbers.integerText(store.settings.paceBuffer)), value: store.setting(\.paceBuffer), in: 0...40, step: 5).disabled(!store.settings.paceEnabled)
                         Text(tr("Beispiel: Nach der halben Woche wären 50 % gleichmäßig. Mit 10 Punkten Toleranz warnt Juicebars oberhalb von 60 %.")).font(.caption).foregroundStyle(.secondary)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle(tr("Bei voraussichtlicher Ausschöpfung vor dem Reset"), isOn: $store.settings.forecastEnabled)
-                        Stepper(tr("Vorwarnzeit: {0} Stunden", store.settings.forecastHours.formatted(.number.locale(Localization.locale))), value: $store.settings.forecastHours, in: 0.5...12, step: 0.5).disabled(!store.settings.forecastEnabled)
+                        Toggle(tr("Bei voraussichtlicher Ausschöpfung vor dem Reset"), isOn: store.setting(\.forecastEnabled))
+                        Stepper(tr("Vorwarnzeit: {0} Stunden", store.settings.forecastHours.formatted(.number.locale(Localization.locale))), value: store.setting(\.forecastHours), in: 0.5...12, step: 0.5).disabled(!store.settings.forecastEnabled)
                         Text(tr("Schätzung aus aktuellen Messpunkten. Nach Pausen, bei unbekannten Zeitfenstern und ohne ausreichend Verlauf erscheint keine Prognose.")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
             Panel {
                 VStack(alignment: .leading, spacing: 16) {
-                    Toggle(tr("An ablaufende Reset-Gutschriften erinnern"), isOn: $store.settings.expiryEnabled).font(.headline)
+                    Toggle(tr("An ablaufende Reset-Gutschriften erinnern"), isOn: store.setting(\.expiryEnabled)).font(.headline)
                     ForEach([72.0, 24.0, 3.0], id: \.self) { hours in
                         Toggle(hours == 72 ? tr("3 Tage vorher") : hours == 24 ? tr("1 Tag vorher") : tr("3 Stunden vorher"), isOn: Binding(get: { store.settings.expiryHours.contains(hours) }, set: { enabled in
-                            store.settings.expiryHours.removeAll { $0 == hours }; if enabled { store.settings.expiryHours.append(hours) }
+                            store.editSettings { settings in
+                                settings.expiryHours.removeAll { $0 == hours }; if enabled { settings.expiryHours.append(hours) }
+                            }
                         })).disabled(!store.settings.expiryEnabled)
                     }
                     Text(tr("Bei später Erkennung zählt die dringendste Stufe. Ohne bekanntes Ablaufdatum wird keine Frist erfunden.")).font(.caption).foregroundStyle(.secondary)
@@ -69,10 +71,10 @@ struct WarningsView: View {
             }
             Panel {
                 VStack(alignment: .leading, spacing: 14) {
-                    Toggle(tr("Nachtruhe"), isOn: $store.settings.quietEnabled).font(.headline)
+                    Toggle(tr("Nachtruhe"), isOn: store.setting(\.quietEnabled)).font(.headline)
                     HStack {
-                        JuiceMenuPicker(title: tr("Von"), selection: $store.settings.quietStart, options: hourOptions)
-                        JuiceMenuPicker(title: tr("Bis"), selection: $store.settings.quietEnd, options: hourOptions)
+                        JuiceMenuPicker(title: tr("Von"), selection: store.setting(\.quietStart), options: hourOptions)
+                        JuiceMenuPicker(title: tr("Bis"), selection: store.setting(\.quietEnd), options: hourOptions)
                     }.disabled(!store.settings.quietEnabled)
                     Text(tr("Während der Nachtruhe und im Ruhezustand gibt es keine Warnungen. Noch gültige Hinweise werden danach geprüft.")).font(.caption).foregroundStyle(.secondary)
                 }
@@ -90,7 +92,7 @@ struct WarningsView: View {
                     }
                 }
             }
-        }.onChange(of: store.settings) { _, _ in store.persistSettings() }
+        }.onChange(of: store.settings) { _, _ in Task { await store.persistSettings() } }
     }
     /// Follows the user's 12- or 24-hour clock.
     private var hourOptions: [(String, Int)] {

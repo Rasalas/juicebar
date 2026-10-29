@@ -468,7 +468,7 @@ struct AccountFailureView: View {
                 Button(tr("Einrichten")) { DashboardWindow.shared.show(store: store, page: .accounts, editing: account.id) }
                 Button(tr("Deaktivieren")) {
                     var disabled = account; disabled.enabled = false
-                    do { try store.saveAccount(disabled, secret: "") } catch { store.storageError = error.localizedDescription }
+                    Task { do { try await store.saveAccount(disabled, secret: "") } catch { store.storageError = error.localizedDescription } }
                 }.help(tr("Verbrauch für dieses Konto nicht mehr abrufen"))
             }.buttonStyle(JuiceButtonStyle())
         }

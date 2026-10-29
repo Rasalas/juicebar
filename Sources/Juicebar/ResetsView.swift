@@ -49,7 +49,7 @@ struct ResetsView: View {
                         VStack(alignment: .trailing, spacing: 12) {
                             redemptionButton(account: account, benefit: benefit)
                             Button(tr("Beim Anbieter öffnen")) { store.openAccount(account) }
-                            if benefit.isManual { Button(tr("Entfernen"), role: .destructive) { store.removeReset(benefit.id) }.buttonStyle(JuiceButtonStyle()) }
+                            if benefit.isManual { Button(tr("Entfernen"), role: .destructive) { Task { await store.removeReset(benefit.id) } }.buttonStyle(JuiceButtonStyle()) }
                         }
                     }
                 }
@@ -137,7 +137,7 @@ struct AddResetView: View {
                 DatePicker(tr("Läuft ab"), selection: $expiry, in: Date()...)
             }
             HStack { Spacer(); Button(tr("Abbrechen")) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(tr("Frist speichern")) { store.addReset(accountID: accountID, title: title, scope: scope.isEmpty ? tr("Manuelle Erinnerung") : scope, expiry: expiry); dismiss() }
+                Button(tr("Frist speichern")) { Task { await store.addReset(accountID: accountID, title: title, scope: scope.isEmpty ? tr("Manuelle Erinnerung") : scope, expiry: expiry); dismiss() } }
                     .buttonStyle(JuiceButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(accountID.isEmpty || title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }.padding(28).frame(width: 480).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear { accountID = store.accounts.first?.id ?? "" }

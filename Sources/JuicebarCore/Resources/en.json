@@ -1,4 +1,6 @@
 {
+  "Gespeicherte Daten werden geladen …": "Loading saved data …",
+  "Wird gespeichert …": "Saving …",
   "Key behalten": "Keep key",
   "Der Key wird erst beim Speichern entfernt. Konto und Verlauf bleiben erhalten.": "The key will only be removed when you save. Your account and history are kept.",
   "Bitte den gespeicherten Key entweder ersetzen oder entfernen.": "Please either replace or remove the saved key.",

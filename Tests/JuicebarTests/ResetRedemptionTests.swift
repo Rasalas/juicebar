@@ -36,7 +36,7 @@ actor ResetFake: CodexResetRedeeming {
 
 @MainActor
 final class ResetRedemptionTests: XCTestCase {
-    private func fixture(_ fake: ResetFake, corruptKeys: Bool = false) throws -> (AppStore, AccountConfiguration, ResetBenefit, URL) {
+    private func fixture(_ fake: ResetFake, corruptKeys: Bool = false) async throws -> (AppStore, AccountConfiguration, ResetBenefit, URL) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-reset-store-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -48,11 +48,13 @@ final class ResetRedemptionTests: XCTestCase {
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try database.write([account], key: "accounts"); try database.save(snapshot)
         if corruptKeys { try database.write("incompatible", key: "reset-redemptions") }
-        return (AppStore(directory: directory, resetRedeemer: fake), account, benefit, directory)
+        let store = AppStore(directory: directory, resetRedeemer: fake)
+        await store.waitUntilReady()
+        return (store, account, benefit, directory)
     }
     func testUnconfirmedAttemptReusesPersistedKeyAfterRestartAndStoresFreshLimits() async throws {
         let fake = ResetFake(failFirst: true)
-        let (store, account, benefit, directory) = try fixture(fake)
+        let (store, account, benefit, directory) = try await fixture(fake)
         let identity = try XCTUnwrap(store.snapshots[account.id]?.identity)
         do { _ = try await store.redeemReset(benefit, for: account, expectedIdentity: identity); XCTFail("First response is deliberately lost") }
         catch {}
@@ -60,6 +62,7 @@ final class ResetRedemptionTests: XCTestCase {
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         XCTAssertEqual(try database.read([String: String].self, key: "reset-redemptions")?.count, 1)
         let restarted = AppStore(directory: directory, resetRedeemer: fake)
+        await restarted.waitUntilReady()
         let result = try await restarted.redeemReset(benefit, for: account, expectedIdentity: identity)
         XCTAssertEqual(result.outcome, .reset)
         let keys = await fake.keys
@@ -71,7 +74,7 @@ final class ResetRedemptionTests: XCTestCase {
     }
     func testManualExpiredStaleAndChangedLoginsNeverReachTheService() async throws {
         let fake = ResetFake()
-        let (store, account, benefit, _) = try fixture(fake)
+        let (store, account, benefit, _) = try await fixture(fake)
         let original = try XCTUnwrap(store.snapshots[account.id])
         var stale = original; stale.observedAt = .distantPast
         var unknown = original; unknown.identity = AccountIdentity.fallback(for: account)
@@ -89,7 +92,7 @@ final class ResetRedemptionTests: XCTestCase {
     }
     func testBusyAccountRejectsAnotherCreditAndRemovedAccountDoesNotReappear() async throws {
         let fake = ResetFake(hold: true)
-        let (store, account, benefit, _) = try fixture(fake)
+        let (store, account, benefit, _) = try await fixture(fake)
         let identity = try XCTUnwrap(store.snapshots[account.id]?.identity)
         let first = Task { try await store.redeemReset(benefit, for: account, expectedIdentity: identity) }
         await fake.waitUntilCalled()
@@ -106,7 +109,7 @@ final class ResetRedemptionTests: XCTestCase {
     }
     func testUnreadableAttemptStorageCannotLoseAnIdempotencyKeyOrMutateTheAccount() async throws {
         let fake = ResetFake()
-        let (store, account, benefit, _) = try fixture(fake, corruptKeys: true)
+        let (store, account, benefit, _) = try await fixture(fake, corruptKeys: true)
         let identity = try XCTUnwrap(store.snapshots[account.id]?.identity)
         do { _ = try await store.redeemReset(benefit, for: account, expectedIdentity: identity); XCTFail("Persisting the key must succeed before sending") }
         catch {}
@@ -116,7 +119,7 @@ final class ResetRedemptionTests: XCTestCase {
     }
     func testConfirmedResetWithoutFreshLimitsWaitsForRefreshRatherThanOfferingAnotherRedemption() async throws {
         let fake = ResetFake(includesFreshLimits: false)
-        let (store, account, benefit, _) = try fixture(fake)
+        let (store, account, benefit, _) = try await fixture(fake)
         let identity = try XCTUnwrap(store.snapshots[account.id]?.identity)
         let result = try await store.redeemReset(benefit, for: account, expectedIdentity: identity)
         XCTAssertEqual(result.outcome, .reset)
@@ -130,6 +133,7 @@ final class ResetRedemptionTests: XCTestCase {
     }
     func testDemoRedemptionWorksWithoutAnExecutable() async throws {
         let store = AppStore(demo: true)
+        await store.waitUntilReady()
         let index = try XCTUnwrap(store.accounts.firstIndex { $0.provider == .codex })
         store.accounts[index].executablePath = "/fixture/no-live-cli"
         let account = store.accounts[index]

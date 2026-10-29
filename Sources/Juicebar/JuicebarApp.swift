@@ -10,9 +10,11 @@ enum JuicebarEntry {
         signal(SIGPIPE, SIG_IGN)
         if CommandLine.arguments.contains("--verify-activity-persistence") {
             _ = NSApplication.shared
-            do { try PreviewRenderer.verifyActivityPersistence() }
-            catch { fputs("Activity persistence failed: \(error.localizedDescription)\n", stderr); exit(1) }
-            return
+            Task {
+                do { try await PreviewRenderer.verifyActivityPersistence(); exit(0) }
+                catch { fputs("Activity persistence failed: \(error.localizedDescription)\n", stderr); exit(1) }
+            }
+            dispatchMain()
         }
         if CommandLine.arguments.contains("--verify-quota-accessibility") {
             _ = NSApplication.shared
