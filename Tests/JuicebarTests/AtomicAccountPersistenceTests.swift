@@ -36,7 +36,7 @@ private struct UsageFake: UsageProvider {
 @MainActor
 final class AtomicAccountPersistenceTests: XCTestCase {
     private func fixture(provider: ProviderKind = .opencodeGo, enabled: Bool = false, paused: Bool = true,
-                         registry: ProviderRegistry = ProviderRegistry(), resetRedeemer: (any CodexResetRedeeming)? = nil) throws -> (AppStore, HistoryDatabase, AccountConfiguration, URL, CredentialFake) {
+                         registry: ProviderRegistry = ProviderRegistry(), resetRedeemer: (any CodexResetRedeeming)? = nil) async throws -> (AppStore, HistoryDatabase, AccountConfiguration, URL, CredentialFake) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-atomic-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -47,6 +47,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         let credentials = CredentialFake()
         credentials.values[account.id] = "fixture-old-key"
         let store = AppStore(directory: directory, resetRedeemer: resetRedeemer, credentials: credentials, registry: registry)
+        await store.waitUntilReady()
         if paused { store.isPaused = true }
         return (store, database, account, directory, credentials)
     }
@@ -58,12 +59,12 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(sqlite3_exec(connection, sql, nil, nil, nil), SQLITE_OK)
     }
 
-    func testFailedSaveKeepsVisibleAccountAndHistory() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testFailedSaveKeepsVisibleAccountAndHistory() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let snapshot = store.snapshots[account.id], history = store.history[account.id]
         try execute("CREATE TRIGGER fail_accounts BEFORE INSERT ON preferences WHEN NEW.id='accounts' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
         var edited = account; edited.label = "Edited"; edited.profileDirectory = "/fixture/other-profile"
-        XCTAssertThrowsError(try store.saveAccount(edited, secret: "fixture-new-key"))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: "fixture-new-key"))
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(store.snapshots[account.id], snapshot)
         XCTAssertEqual(store.history[account.id], history)
@@ -73,22 +74,22 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(credentials.mutations, 0)
     }
 
-    func testFailedNewAccountSaveDoesNotAppendOrCreateCredential() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testFailedNewAccountSaveDoesNotAppendOrCreateCredential() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         try execute("CREATE TRIGGER fail_accounts BEFORE INSERT ON preferences WHEN NEW.id='accounts' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
         let new = AccountConfiguration(id: "new-fixture", provider: .opencodeGo, enabled: false)
-        XCTAssertThrowsError(try store.saveAccount(new, secret: "fixture-new-key"))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(new, secret: "fixture-new-key"))
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
         XCTAssertNil(credentials.values[new.id])
         XCTAssertEqual(credentials.mutations, 0)
     }
 
-    func testFailedRemovalKeepsVisibleAccountAndHistory() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testFailedRemovalKeepsVisibleAccountAndHistory() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let snapshot = store.snapshots[account.id], history = store.history[account.id]
         try execute("CREATE TRIGGER fail_accounts BEFORE INSERT ON preferences WHEN NEW.id='accounts' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
-        store.removeAccount(account)
+        await store.removeAccount(account)
         XCTAssertNotNil(store.storageError)
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(store.snapshots[account.id], snapshot)
@@ -99,14 +100,14 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(credentials.mutations, 0)
     }
 
-    func testFailedSecondPreferenceWriteRollsBackAccountRemovalAndResets() throws {
-        let (store, database, account, directory, credentials) = try fixture()
-        store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
+    func testFailedSecondPreferenceWriteRollsBackAccountRemovalAndResets() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
+        await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
         let resetIDs = store.manualResets.map(\.id)
         store.failures[account.id] = "Previous failure"
         store.resetAccountsAwaitingRefresh.insert(account.id)
         try execute("CREATE TRIGGER fail_resets BEFORE INSERT ON preferences WHEN NEW.id='manual-resets' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
-        store.removeAccount(account)
+        await store.removeAccount(account)
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
         XCTAssertEqual(store.manualResets.map(\.id), resetIDs)
@@ -116,16 +117,16 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(credentials.mutations, 0)
     }
 
-    func testCredentialReadAndWriteFailuresLeaveSQLAndVisibleStateUnchanged() throws {
-        let (store, database, account, _, credentials) = try fixture()
+    func testCredentialReadAndWriteFailuresLeaveSQLAndVisibleStateUnchanged() async throws {
+        let (store, database, account, _, credentials) = try await fixture()
         var edited = account; edited.label = "Edited"
         let history = store.history[account.id]
         credentials.failRead = true
-        XCTAssertThrowsError(try store.saveAccount(edited, secret: "fixture-new-key"))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: "fixture-new-key"))
         credentials.failRead = false; credentials.failSave = true
-        XCTAssertThrowsError(try store.saveAccount(edited, secret: "fixture-new-key"))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: "fixture-new-key"))
         credentials.failSave = false; credentials.failRemove = true
-        store.removeAccount(account)
+        await store.removeAccount(account)
         XCTAssertNotNil(store.storageError)
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
@@ -141,15 +142,15 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         return { try? self.execute("DROP TRIGGER IF EXISTS fail_commit; DROP TABLE IF EXISTS fixture_child; DROP TABLE IF EXISTS fixture_parent", directory: directory) }
     }
 
-    func testFailedCommitRestoresReplacedAndNewCredentials() throws {
+    func testFailedCommitRestoresReplacedAndNewCredentials() async throws {
         for hadKey in [true, false] {
-            let (store, database, account, directory, credentials) = try fixture()
+            let (store, database, account, directory, credentials) = try await fixture()
             if !hadKey { credentials.values[account.id] = nil }
             let removeCommitFailure = try failCommit(directory: directory, credentials: credentials)
             defer { removeCommitFailure() }
             var edited = account; edited.label = "Edited"; edited.profileDirectory = "/fixture/new-profile"
             let history = store.history[account.id]
-            XCTAssertThrowsError(try store.saveAccount(edited, secret: "fixture-new-key"))
+            await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: "fixture-new-key"))
             XCTAssertEqual(store.accounts, [account])
             XCTAssertEqual(store.history[account.id], history)
             XCTAssertEqual(try database.history(account: account.id), history)
@@ -159,11 +160,11 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         }
     }
 
-    func testFailedCommitRestoresRemovedKeyAndRetainsAccount() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testFailedCommitRestoresRemovedKeyAndRetainsAccount() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let removeCommitFailure = try failCommit(directory: directory, credentials: credentials)
         defer { removeCommitFailure() }
-        store.removeAccount(account)
+        await store.removeAccount(account)
         XCTAssertNotNil(store.storageError)
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
@@ -171,39 +172,41 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(credentials.mutations, 2)
     }
 
-    func testFailedCompensationRetainsBackupAndRetriesBeforeAnotherAccountAction() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testFailedCompensationRetainsBackupAndRetriesBeforeAnotherAccountAction() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let removeCommitFailure = try failCommit(directory: directory, credentials: credentials, failCompensation: true)
         var edited = account; edited.label = "Edited"
-        XCTAssertThrowsError(try store.saveAccount(edited, secret: "fixture-new-key"))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: "fixture-new-key"))
         removeCommitFailure()
         XCTAssertNotNil(store.failures[account.id])
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(credentials.values[account.id], "fixture-new-key")
-        XCTAssertThrowsError(try store.saveAccount(edited, secret: ""))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: ""))
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
         credentials.failSave = false
-        try store.saveAccount(edited, secret: "")
+        try await store.saveAccount(edited, secret: "")
         XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
         XCTAssertEqual(store.accounts, [edited])
         XCTAssertNil(store.failures[account.id])
         XCTAssertNil(store.storageError)
     }
 
-    func testPresenceAndOrdinaryEditsDoNotReadSecretsAndKeyRemovalRetainsHistory() throws {
-        let (store, database, account, _, credentials) = try fixture()
+    func testPresenceAndOrdinaryEditsDoNotReadSecretsAndKeyRemovalRetainsHistory() async throws {
+        let (store, database, account, _, credentials) = try await fixture()
         let history = store.history[account.id], snapshot = store.snapshots[account.id]
-        store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
+        await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
         let resets = store.manualResets.map(\.id)
-        XCTAssertTrue(store.hasSavedKey(for: account))
+        let savedKey = await store.hasSavedKey(for: account)
+        XCTAssertTrue(savedKey)
         var edited = account; edited.label = "Edited"
-        try store.saveAccount(edited, secret: "")
+        try await store.saveAccount(edited, secret: "")
         XCTAssertEqual(credentials.reads, 0)
         store.failures[account.id] = "Old credential failure"
         store.resetAccountsAwaitingRefresh.insert(account.id)
-        try store.removeSavedKey(for: edited)
+        try await store.removeSavedKey(for: edited)
         XCTAssertNil(credentials.values[account.id])
-        XCTAssertFalse(store.hasSavedKey(for: edited))
+        let savedKeyAfter = await store.hasSavedKey(for: edited)
+        XCTAssertFalse(savedKeyAfter)
         XCTAssertEqual(store.accounts, [edited])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [edited])
         XCTAssertEqual(store.history[account.id], history)
@@ -215,17 +218,17 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertTrue(store.resetAccountsAwaitingRefresh.contains(account.id), "Editing credentials cannot replace a required fresh observation")
     }
 
-    func testFailedSavedKeyRemovalPreservesKeyAndRefreshState() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testFailedSavedKeyRemovalPreservesKeyAndRefreshState() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let history = store.history[account.id]
         store.failures[account.id] = "Previous failure"
         try execute("CREATE TRIGGER fail_accounts BEFORE INSERT ON preferences WHEN NEW.id='accounts' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
-        XCTAssertThrowsError(try store.removeSavedKey(for: account))
+        await XCTAssertThrowsErrorAsync(try await store.removeSavedKey(for: account))
         XCTAssertEqual(credentials.mutations, 0)
         XCTAssertEqual(store.failures[account.id], "Previous failure")
         try execute("DROP TRIGGER fail_accounts", directory: directory)
         credentials.failRemove = true
-        XCTAssertThrowsError(try store.removeSavedKey(for: account))
+        await XCTAssertThrowsErrorAsync(try await store.removeSavedKey(for: account))
         XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
         XCTAssertEqual(store.history[account.id], history)
         XCTAssertEqual(try database.history(account: account.id), history)
@@ -234,9 +237,9 @@ final class AtomicAccountPersistenceTests: XCTestCase {
     func testKeyRemovalRefreshPreservesHistoryFromPreviousLoginAcrossRestart() async throws {
         let next = AccountSnapshot(configurationID: "fixture", identity: "fixture-local-key", source: "fixture")
         let registry = ProviderRegistry(overrides: [.opencodeGo: UsageFake(snapshot: next)])
-        let (store, database, account, directory, credentials) = try fixture(enabled: true, paused: false, registry: registry)
+        let (store, database, account, directory, credentials) = try await fixture(enabled: true, paused: false, registry: registry)
         let original = try XCTUnwrap(store.snapshots[account.id])
-        try store.removeSavedKey(for: account)
+        try await store.removeSavedKey(for: account)
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while store.snapshots[account.id]?.identity != next.identity && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(5))
@@ -247,23 +250,24 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(store.history[account.id]?.map(\.identity), [original.identity, next.identity])
         XCTAssertEqual(try database.history(account: account.id).map(\.identity), [original.identity, next.identity])
         let restarted = AppStore(directory: directory, credentials: credentials, registry: registry)
+        await restarted.waitUntilReady()
         XCTAssertEqual(restarted.quotaHistory(for: account.id).map(\.identity), [original.identity, next.identity])
         let window = QuotaWindow(id: "weekly", title: "Week", usedPercent: 10, duration: 604800)
         XCTAssertNotEqual(QuotaPeriod.key(window: window, snapshot: original), QuotaPeriod.key(window: window, snapshot: next),
                           "The chart must not join measurements from different logins")
     }
 
-    func testSavingKeyRemovalCommitsOtherEditsTogetherAndKeepsHistory() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testSavingKeyRemovalCommitsOtherEditsTogetherAndKeepsHistory() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let history = store.history[account.id]
         var edited = account; edited.label = "Edited"; edited.useLocalCredentials = false
         let removeCommitFailure = try failCommit(directory: directory, credentials: credentials)
-        XCTAssertThrowsError(try store.saveAccount(edited, secret: "", removeSavedKey: true))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(edited, secret: "", removeSavedKey: true))
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
         removeCommitFailure()
-        try store.saveAccount(edited, secret: "", removeSavedKey: true)
+        try await store.saveAccount(edited, secret: "", removeSavedKey: true)
         XCTAssertEqual(store.accounts, [edited])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [edited])
         XCTAssertNil(credentials.values[account.id])
@@ -273,7 +277,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
 
     func testInFlightResetCannotClearCredentialRecoveryFailure() async throws {
         let fake = ResetFake(hold: true)
-        let (store, _, account, directory, credentials) = try fixture(provider: .codex, enabled: true, resetRedeemer: fake)
+        let (store, _, account, directory, credentials) = try await fixture(provider: .codex, enabled: true, resetRedeemer: fake)
         let benefit = ResetBenefit(id: "fixture-credit", title: "Fixture", scope: "Codex")
         let snapshot = AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture",
                                        windows: [.init(id: "primary", title: "5h", usedPercent: 90, duration: 18000)], benefits: [benefit])
@@ -282,7 +286,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         await fake.waitUntilCalled()
         let removeCommitFailure = try failCommit(directory: directory, credentials: credentials, failCompensation: true)
         defer { removeCommitFailure() }
-        XCTAssertThrowsError(try store.saveAccount(account, secret: "fixture-new-key"))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(account, secret: "fixture-new-key"))
         let failure = try XCTUnwrap(store.failures[account.id])
         await fake.finish()
         _ = try await pending.value
@@ -294,35 +298,35 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertFalse(store.canRedeemReset(benefit, for: account))
         store.resetAccountsAwaitingRefresh.insert(account.id)
         removeCommitFailure(); credentials.failSave = false
-        try store.saveAccount(account, secret: "")
+        try await store.saveAccount(account, secret: "")
         XCTAssertNil(store.failures[account.id])
         XCTAssertTrue(store.resetAccountsAwaitingRefresh.contains(account.id))
         XCTAssertFalse(store.canRedeemReset(benefit, for: account), "Restoring credentials must not reoffer a confirmed credit before refresh")
     }
 
-    func testSavedKeyRemovalCommitFailureRestoresKeyAndPreservesHistory() throws {
-        let (store, database, account, directory, credentials) = try fixture()
+    func testSavedKeyRemovalCommitFailureRestoresKeyAndPreservesHistory() async throws {
+        let (store, database, account, directory, credentials) = try await fixture()
         let history = store.history[account.id]
         let removeCommitFailure = try failCommit(directory: directory, credentials: credentials)
         defer { removeCommitFailure() }
-        XCTAssertThrowsError(try store.removeSavedKey(for: account))
+        await XCTAssertThrowsErrorAsync(try await store.removeSavedKey(for: account))
         XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(store.history[account.id], history)
         XCTAssertEqual(try database.history(account: account.id), history)
     }
 
-    func testSuccessfulSaveAndRemovalCommitRelatedState() throws {
-        let (store, database, account, _, credentials) = try fixture()
-        store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date())
+    func testSuccessfulSaveAndRemovalCommitRelatedState() async throws {
+        let (store, database, account, _, credentials) = try await fixture()
+        await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date())
         var edited = account; edited.profileDirectory = "/fixture/new-profile"
-        try store.saveAccount(edited, secret: "fixture-new-key")
+        try await store.saveAccount(edited, secret: "fixture-new-key")
         XCTAssertEqual(store.accounts, [edited])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [edited])
         XCTAssertTrue(try database.history(account: account.id).isEmpty)
         XCTAssertNil(store.snapshots[account.id])
         XCTAssertEqual(credentials.values[account.id], "fixture-new-key")
-        store.removeAccount(edited)
+        await store.removeAccount(edited)
         XCTAssertTrue(store.accounts.isEmpty)
         XCTAssertTrue(store.manualResets.isEmpty)
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [])
@@ -330,40 +334,41 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertNil(credentials.values[account.id])
     }
 
-    func testUnreadableRelatedPreferencesRemainProtected() throws {
-        let (_, database, account, directory, credentials) = try fixture()
+    func testUnreadableRelatedPreferencesRemainProtected() async throws {
+        let (_, database, account, directory, credentials) = try await fixture()
         try database.write("incompatible", key: "manual-resets")
         try database.write("incompatible", key: "ssh-hosts")
         let store = AppStore(directory: directory, credentials: credentials)
+        await store.waitUntilReady()
         store.isPaused = true
-        store.removeAccount(account)
+        await store.removeAccount(account)
         XCTAssertEqual(store.accounts, [account])
         XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
         XCTAssertEqual(credentials.reads, 0)
-        store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date())
+        await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date())
         XCTAssertTrue(store.manualResets.isEmpty)
-        XCTAssertThrowsError(try store.addSSHHost("fixture-host"))
+        await XCTAssertThrowsErrorAsync(try await store.addSSHHost("fixture-host"))
         XCTAssertTrue(store.sshHosts.isEmpty)
         XCTAssertEqual(try database.read(String.self, key: "manual-resets"), "incompatible")
         XCTAssertEqual(try database.read(String.self, key: "ssh-hosts"), "incompatible")
     }
 
-    func testManualResetsSSHHostsAndSettingsRollBackOnWriteFailure() throws {
-        let (store, database, account, directory, _) = try fixture()
-        store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
-        store.settings.soundEnabled.toggle(); store.persistSettings()
+    func testManualResetsSSHHostsAndSettingsRollBackOnWriteFailure() async throws {
+        let (store, database, account, directory, _) = try await fixture()
+        await store.addReset(accountID: account.id, title: "Fixture", scope: "Fixture", expiry: Date().addingTimeInterval(100))
+        store.settings.soundEnabled.toggle(); await store.persistSettings()
         let resetIDs = store.manualResets.map(\.id), settings = store.settings
         try database.write(["fixture-host"], key: "ssh-hosts"); store.sshHosts = ["fixture-host"]
         try execute("CREATE TRIGGER fail_settings BEFORE INSERT ON preferences WHEN NEW.id IN ('manual-resets','ssh-hosts','settings') BEGIN SELECT RAISE(ABORT, 'fixture failure'); END", directory: directory)
-        store.addReset(accountID: account.id, title: "Another", scope: "Fixture", expiry: Date())
-        store.removeReset(try XCTUnwrap(resetIDs.first))
+        await store.addReset(accountID: account.id, title: "Another", scope: "Fixture", expiry: Date())
+        await store.removeReset(try XCTUnwrap(resetIDs.first))
         XCTAssertEqual(store.manualResets.map(\.id), resetIDs)
         XCTAssertEqual(try database.read([ManualReset].self, key: "manual-resets")?.map(\.id), resetIDs)
-        XCTAssertThrowsError(try store.addSSHHost("another-fixture"))
-        store.removeSSHHost("fixture-host")
+        await XCTAssertThrowsErrorAsync(try await store.addSSHHost("another-fixture"))
+        await store.removeSSHHost("fixture-host")
         XCTAssertEqual(store.sshHosts, ["fixture-host"])
         XCTAssertEqual(try database.read([String].self, key: "ssh-hosts"), ["fixture-host"])
-        store.settings.soundEnabled.toggle(); store.persistSettings()
+        store.settings.soundEnabled.toggle(); await store.persistSettings()
         XCTAssertEqual(store.settings, settings)
         XCTAssertEqual(try database.read(MonitorSettings.self, key: "settings"), settings)
         XCTAssertNotNil(store.storageError)

@@ -27,6 +27,7 @@ struct TrayView: View {
         let reaches = rows.flatMap(\.windows).compactMap(\.reach)
         let plans = rows.flatMap(\.windows).compactMap(\.workPlan)
         TrayLayout(maximumHeight: maximumHeight - 32) {
+            if store.isLoading { Text(tr("Gespeicherte Daten werden geladen …")).font(.caption).foregroundStyle(.secondary) }
             HStack(spacing: 8) {
                 Button { DashboardWindow.shared.show(store: store) } label: {
                     HStack(spacing: 7) {
@@ -35,7 +36,7 @@ struct TrayView: View {
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).help(tr("Juicebars öffnen")).accessibilityLabel(tr("Juicebars öffnen"))
                 Spacer()
-                if store.isRefreshing { ProgressView().controlSize(.small) }
+                if store.isRefreshing || store.isLoading { ProgressView().controlSize(.small) }
                 Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 14, height: 14) }
                     .disabled(store.isPaused || store.isDemo).help(tr("Aktualisieren")).accessibilityLabel(tr("Aktualisieren"))
                 Menu {

@@ -5,21 +5,22 @@ import CSQLite
 
 @MainActor
 final class AppStorePersistenceTests: XCTestCase {
-    func testWorkScheduleIsOptInAndOnlyChangesTheSelectedAccount() throws {
+    func testWorkScheduleIsOptInAndOnlyChangesTheSelectedAccount() async throws {
         let store = AppStore(demo: true)
+        await store.waitUntilReady()
         var account = try XCTUnwrap(store.accounts.first { $0.provider == .claude })
         let original = store.snapshots[account.id]
         XCTAssertTrue(store.workPlan(for: account).isEmpty)
         XCTAssertFalse(store.weeklyReach(for: account).isEmpty)
         account.workSchedule = WorkSchedule(isEnabled: true)
-        try store.saveAccount(account, secret: "")
+        try await store.saveAccount(account, secret: "")
         XCTAssertEqual(store.accounts.first { $0.id == account.id }?.workSchedule, account.workSchedule)
         XCTAssertEqual(store.snapshots[account.id], original)
         XCTAssertFalse(store.workPlan(for: account).isEmpty)
         XCTAssertTrue(store.weeklyReach(for: account).isEmpty)
         XCTAssertTrue(store.accounts.filter { $0.id != account.id }.allSatisfy { $0.workSchedule == nil })
         account.workSchedule?.isEnabled = false
-        try store.saveAccount(account, secret: "")
+        try await store.saveAccount(account, secret: "")
         XCTAssertTrue(store.workPlan(for: account).isEmpty)
         XCTAssertFalse(store.weeklyReach(for: account).isEmpty)
     }
@@ -31,13 +32,14 @@ final class AppStorePersistenceTests: XCTestCase {
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
         try database.write("incompatible", key: "accounts")
         let store = AppStore(directory: directory)
+        await store.waitUntilReady()
         XCTAssertTrue(store.accounts.isEmpty)
         XCTAssertTrue(store.hasRecoverableStorageError)
         XCTAssertTrue(store.storageError?.contains("accounts") == true)
-        XCTAssertThrowsError(try store.saveAccount(AccountConfiguration(id: "new", provider: .codex), secret: ""))
+        await XCTAssertThrowsErrorAsync(try await store.saveAccount(AccountConfiguration(id: "new", provider: .codex), secret: ""))
         XCTAssertTrue(store.accounts.isEmpty)
         XCTAssertEqual(try database.read(String.self, key: "accounts"), "incompatible")
-        store.recoverStoredConfiguration()
+        await store.recoverStoredConfiguration()
         XCTAssertFalse(store.hasRecoverableStorageError)
         XCTAssertEqual(store.accounts.map(\.id), ["default-codex", "default-claude"])
         XCTAssertNil(try database.read(String.self, key: "accounts"))
@@ -48,19 +50,21 @@ final class AppStorePersistenceTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-empty-store-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = AppStore(directory: directory)
+        await store.waitUntilReady()
         XCTAssertEqual(store.accounts.map(\.id), CLISetupHelp.detectedDefaultAccounts().map(\.id))
         XCTAssertFalse(store.hasRecoverableStorageError)
         XCTAssertNil(store.storageError)
     }
 
-    func testFirstRunOnlyAddsInstalledCLIs() {
+    func testFirstRunOnlyAddsInstalledCLIs() async throws {
         XCTAssertEqual(CLISetupHelp.detectedDefaultAccounts { _ in true }.map(\.id), ["default-codex", "default-claude"])
         XCTAssertEqual(CLISetupHelp.detectedDefaultAccounts { $0 == "claude" }.map(\.id), ["default-claude"])
         XCTAssertTrue(CLISetupHelp.detectedDefaultAccounts { _ in false }.isEmpty)
     }
 
-    func testClockTickOnlyPublishesNewMinutes() {
+    func testClockTickOnlyPublishesNewMinutes() async throws {
         let store = AppStore(demo: true)
+        await store.waitUntilReady()
         let minute = (store.now.timeIntervalSinceReferenceDate / 60).rounded(.down) * 60
         store.now = Date(timeIntervalSinceReferenceDate: minute)
         store.tick(at: Date(timeIntervalSinceReferenceDate: minute + 59))
@@ -69,8 +73,9 @@ final class AppStorePersistenceTests: XCTestCase {
         XCTAssertEqual(store.now, Date(timeIntervalSinceReferenceDate: minute + 60))
     }
 
-    func testQuotaHistoryCacheFollowsHistoryChanges() throws {
+    func testQuotaHistoryCacheFollowsHistoryChanges() async throws {
         let store = AppStore(demo: true)
+        await store.waitUntilReady()
         let id = try XCTUnwrap(store.history.keys.sorted().first)
         let count = store.quotaHistory(for: id).count
         XCTAssertEqual(count, store.history[id]?.count)
@@ -79,7 +84,7 @@ final class AppStorePersistenceTests: XCTestCase {
         XCTAssertEqual(store.quotaHistory(for: id).count, count + 1)
     }
 
-    func testRelativeTimeOmitsZeroUnits() {
+    func testRelativeTimeOmitsZeroUnits() async throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         XCTAssertEqual(relativeTime(now.addingTimeInterval(-5), now: now), tr("jetzt"))
         XCTAssertEqual(relativeTime(now.addingTimeInterval(20), now: now), tr("in {0}", tr("{0} Min.", 1)))
@@ -89,7 +94,7 @@ final class AppStorePersistenceTests: XCTestCase {
         XCTAssertEqual(relativeTime(now.addingTimeInterval(3 * 86400 + 7200), now: now), tr("in {0}", tr("{0} T. {1} Std.", 3, 2)))
     }
 
-    func testRemainingTimesUseOneWordingAtEveryRange() {
+    func testRemainingTimesUseOneWordingAtEveryRange() async throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         // A week or more keeps the short day unit and drops the hours.
         XCTAssertEqual(relativeTime(now.addingTimeInterval(8 * 86400 + 5 * 3600), now: now), tr("in {0}", tr("{0} T.", 8)))
@@ -112,6 +117,7 @@ final class AppStorePersistenceTests: XCTestCase {
         try database.write("old format", key: "local-usage-v2")
         try database.write("/fixture/opencode.db", key: "opencode-path")
         let store = AppStore(directory: directory)
+        await store.waitUntilReady()
         XCTAssertNil(store.activity)
         XCTAssertNil(store.localUsage)
         XCTAssertNil(store.storageError)
@@ -123,12 +129,13 @@ final class AppStorePersistenceTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-warning-store-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = AppStore(directory: directory)
+        await store.waitUntilReady()
         var connection: OpaquePointer?
         XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("usage.sqlite").path, &connection), SQLITE_OK)
         XCTAssertEqual(sqlite3_exec(connection, "DROP TABLE warnings", nil, nil, nil), SQLITE_OK)
         sqlite3_close(connection)
         let event = WarningEvent(id: "fixture-warning", accountID: "a", kind: .threshold, title: "A", message: "50 %", createdAt: Date())
-        store.recordDelivered([event])
+        await store.recordDelivered([event])
         XCTAssertEqual(store.warnings.map(\.id), ["fixture-warning"])
         XCTAssertNotNil(store.storageError)
     }

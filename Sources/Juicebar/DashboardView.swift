@@ -91,16 +91,20 @@ struct DashboardView: View {
                             if store.hasRecoverableStorageError {
                                 Text(tr("Die beschädigten Originaldaten bleiben gesichert. Nur betroffene Einstellungen werden zurückgesetzt."))
                                     .font(.caption).foregroundStyle(.secondary)
-                                Button(tr("Beschädigte Einstellungen zurücksetzen")) { store.recoverStoredConfiguration() }
+                                Button(tr("Beschädigte Einstellungen zurücksetzen")) { Task { await store.recoverStoredConfiguration() } }
                             }
                         }
-                        switch page {
-                        case .overview: overview
-                        case .usage: UsageView(store: store)
-                        case .resets: ResetsView(store: store)
-                        case .alerts: WarningsView(store: store)
-                        case .accounts: AccountsView(store: store)
-                        case .settings: PreferencesView(store: store)
+                        if store.isLoading { ProgressView(tr("Gespeicherte Daten werden geladen …")) }
+                        else {
+                            if store.pendingStorageOperations > 0 { ProgressView(tr("Wird gespeichert …")).controlSize(.small) }
+                            switch page {
+                            case .overview: overview
+                            case .usage: UsageView(store: store)
+                            case .resets: ResetsView(store: store)
+                            case .alerts: WarningsView(store: store)
+                            case .accounts: AccountsView(store: store)
+                            case .settings: PreferencesView(store: store)
+                            }
                         }
                     }.padding(28).frame(maxWidth: 1060, alignment: .leading).frame(maxWidth: .infinity)
                 }

@@ -84,7 +84,7 @@ struct PreferencesView: View {
                 }
             }
             AboutView()
-        }.onChange(of: store.settings) { _, _ in store.persistSettings() }
+        }.onChange(of: store.settings) { _, _ in Task { await store.persistSettings() } }
     }
     private func relaunch() {
         // Wait until this instance has exited so two menu bar items never overlap.

@@ -16,7 +16,7 @@ struct SSHSourcesView: View {
                         Image(systemName: "desktopcomputer").foregroundStyle(.secondary)
                         Text(value).font(.body.monospaced().weight(.medium))
                         Spacer()
-                        Button(tr("Entfernen")) { store.removeSSHHost(value) }.disabled(store.localUsageLoading || store.isDemo)
+                        Button(tr("Entfernen")) { Task { await store.removeSSHHost(value) } }.disabled(store.localUsageLoading || store.isDemo)
                     }
                 }
                 HStack {
@@ -29,7 +29,9 @@ struct SSHSourcesView: View {
         }
     }
     private func add() {
-        do { try store.addSSHHost(host); host = ""; error = nil }
-        catch { self.error = error.localizedDescription }
+        Task {
+            do { try await store.addSSHHost(host); host = ""; error = nil }
+            catch { self.error = error.localizedDescription }
+        }
     }
 }

@@ -37,7 +37,7 @@ struct AccountsView: View {
                     Text(tr("OpenCode Go kann den vorhandenen lokalen API-Key verwenden. Für Zen gibt es derzeit keinen verifizierten Guthabenabruf; lokale Aktivität findest du unter Nutzung.")).font(.callout).foregroundStyle(.secondary)
                 }
             }
-        }.sheet(item: $editing) { AccountEditor(store: store, configuration: $0) }
+        }.disabled(store.isLoading).sheet(item: $editing) { AccountEditor(store: store, configuration: $0) }
             .onChange(of: navigation.editAccountID, initial: true) { _, id in
                 guard let id else { return }
                 navigation.editAccountID = nil
@@ -45,7 +45,7 @@ struct AccountsView: View {
             }
             .alert(tr("Konto entfernen?"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
                 Button(tr("Abbrechen"), role: .cancel) { removing = nil }
-                Button(tr("Entfernen"), role: .destructive) { if let account = removing { store.removeAccount(account) }; removing = nil }
+                Button(tr("Entfernen"), role: .destructive) { if let account = removing { Task { await store.removeAccount(account) } }; removing = nil }
             } message: { Text(tr("Der lokale Verlauf, manuelle Fristen und der von Juicebars gespeicherte Schlüssel dieses Kontos werden gelöscht. Deine Anbieter-Anmeldung bleibt bestehen.")) }
     }
 }
@@ -59,6 +59,7 @@ struct AccountEditor: View {
     @State private var error: String?
     @State private var hasStoredKey = false
     @State private var removeKeyOnSave = false
+    @State private var saving = false
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             Text(store.accounts.contains(where: { $0.id == configuration.id }) ? tr("Konto bearbeiten") : tr("Konto hinzufügen")).font(.title2.bold())
@@ -104,25 +105,31 @@ struct AccountEditor: View {
                     TextField(tr("Monatsbudget (USD)"), text: $budget, prompt: Text(tr("Optional, z. B. 50")))
                     Text(tr("Dein persönliches Warnbudget, kein Anbieter-Limit.")).font(.caption).foregroundStyle(.secondary)
                 }
-            }.formStyle(.grouped).frame(minHeight: 280)
+            }.disabled(saving).formStyle(.grouped).frame(minHeight: 280)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button(configuration.provider == .opencodeGo || configuration.provider == .opencodeZen ? tr("OpenCode-Konsole") : tr("Anbieter öffnen")) { store.openAccount(configuration) }
                 Spacer()
-                Button(tr("Abbrechen")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(tr("Abbrechen")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
+                if saving { ProgressView().controlSize(.small).accessibilityLabel(tr("Wird gespeichert …")) }
                 Button(tr("Speichern")) {
                     if !budget.isEmpty {
                         guard let amount = Double(budget.replacingOccurrences(of: ",", with: ".")), amount > 0, amount.isFinite else { error = tr("Bitte ein positives Monatsbudget eingeben."); return }
                         configuration.monthlyBudget = amount
                     } else { configuration.monthlyBudget = nil }
-                    do { try store.saveAccount(configuration, secret: secret.trimmingCharacters(in: .whitespacesAndNewlines), removeSavedKey: removeKeyOnSave); dismiss() }
-                    catch { self.error = error.localizedDescription }
+                    saving = true
+                    Task {
+                        defer { saving = false }
+                        do { try await store.saveAccount(configuration, secret: secret.trimmingCharacters(in: .whitespacesAndNewlines), removeSavedKey: removeKeyOnSave); dismiss() }
+                        catch { self.error = error.localizedDescription }
+                    }
                 }.buttonStyle(JuiceButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
-                    .disabled(configuration.workSchedule.map { $0.isEnabled && !$0.isValid } ?? false)
+                    .disabled(saving || (configuration.workSchedule.map { $0.isEnabled && !$0.isValid } ?? false))
             }
-        }.padding(28).frame(width: 600).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear {
+        }.interactiveDismissDisabled(saving).padding(28).frame(width: 600).buttonStyle(JuiceButtonStyle()).tint(Palette.accent).onAppear {
             budget = configuration.monthlyBudget.map { String($0) } ?? ""
-            hasStoredKey = store.hasSavedKey(for: configuration)
+        }.task {
+            hasStoredKey = await store.hasSavedKey(for: configuration)
         }
         .onChange(of: configuration.provider) { _, provider in
             if provider != .codex && provider != .claude && provider != .opencodeGo { configuration.workSchedule = nil }
@@ -157,7 +164,7 @@ struct CLISetupHelp: View {
     }
     private var command: String { Self.loginCommand(for: configuration.provider) ?? "" }
     /// A first run only adds the CLIs installed on this Mac, so nobody starts with errors for tools they don't use.
-    static func detectedDefaultAccounts(isInstalled: (String) -> Bool = { (try? ProcessClient.executable($0)) != nil }) -> [AccountConfiguration] {
+    nonisolated static func detectedDefaultAccounts(isInstalled: (String) -> Bool = { (try? ProcessClient.executable($0)) != nil }) -> [AccountConfiguration] {
         [(ProviderKind.codex, "codex"), (.claude, "claude")].filter { isInstalled($0.1) }
             .map { AccountConfiguration(id: "default-\($0.1)", provider: $0.0) }
     }

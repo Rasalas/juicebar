@@ -1,11 +1,10 @@
 import SwiftUI
 import AppKit
 import Observation
-import UserNotifications
 import ServiceManagement
 import JuicebarCore
 
-struct ManualReset: Codable, Identifiable {
+struct ManualReset: Codable, Identifiable, Sendable {
     var id: String { benefit.id }
     var accountID: String
     var benefit: ResetBenefit
@@ -14,8 +13,8 @@ struct ManualReset: Codable, Identifiable {
 @MainActor @Observable
 final class AppStore {
     static let shared = AppStore(demo: CommandLine.arguments.contains("--demo"))
-    var accounts: [AccountConfiguration]
-    var settings: MonitorSettings
+    var accounts: [AccountConfiguration] = []
+    var settings = MonitorSettings() { didSet { settingsRevision += 1 } }
     var snapshots: [String: AccountSnapshot] = [:]
     var failures: [String: String] = [:]
     var refreshingAccountIDs: Set<String> = []
@@ -48,11 +47,19 @@ final class AppStore {
     var notificationStatus = tr("Nicht aktiviert")
     var localDatabasePath = ""
     let isDemo: Bool
-    private let database: HistoryDatabase
-    @ObservationIgnored private let credentials: any CredentialStore
+    @ObservationIgnored private let persistence: AppPersistence
+    @ObservationIgnored private let notifications: any AppNotifications
+    var isLoading = true
+    var pendingStorageOperations = 0
+    @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var mutationTail: Task<Void, Never>?
+    @ObservationIgnored private var settingsRevision = 0
+    @ObservationIgnored private var resetTasks: [UUID: Task<CodexResetResult, Error>] = [:]
+    @ObservationIgnored private var notificationTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private var durableSettings = MonitorSettings()
-    private struct CredentialBackup { var secret: String? }
-    @ObservationIgnored private var credentialRecovery: [String: CredentialBackup] = [:]
+    @ObservationIgnored private var credentialRecovery: Set<String> = []
+    @ObservationIgnored private var pendingAccountMutations: [String: Int] = [:]
     private let registry: ProviderRegistry
     @ObservationIgnored private var refreshPolicy = AccountRefreshPolicy()
     private let scheduler = AccountRefreshScheduler()
@@ -61,64 +68,21 @@ final class AppStore {
     @ObservationIgnored private var pendingWarningIDs: Set<String> = []
     @ObservationIgnored private var quotaHistoryCache: [String: [AccountSnapshot]] = [:]
 
-    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil, credentials: any CredentialStore = KeychainCredentialStore(), registry: ProviderRegistry = ProviderRegistry()) {
-        self.credentials = credentials
-        self.registry = registry
+    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil, credentials: any CredentialStore = KeychainCredentialStore(), registry: ProviderRegistry = ProviderRegistry(), notifications: any AppNotifications = SystemAppNotifications(), persistence: AppPersistence? = nil) {
+        self.registry = registry; self.notifications = notifications
         isDemo = demo
         if let resetRedeemer { self.resetRedeemer = resetRedeemer }
         else if demo { self.resetRedeemer = DemoCodexResetCredits() }
         else { self.resetRedeemer = CodexResetCredits() }
-        let fm = FileManager.default
-        let directory = directory ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Juicebar", isDirectory: true)
+        let directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Juicebar", isDirectory: true)
         storageDirectory = directory
-        var startupError: String?
-        if demo { database = try! HistoryDatabase(path: ":memory:") }
-        else {
-            do {
-                try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-                database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
-            } catch {
-                database = try! HistoryDatabase(path: ":memory:")
-                startupError = tr("Der Verlauf ist nur für diese Sitzung verfügbar: {0}", error.localizedDescription)
-            }
-        }
-        if !demo { ModelCatalog.shared.configure(directory: directory) }
-        let persistedDatabase = database
-        func load<T: Decodable>(_ type: T.Type, key: String, missing: T, unreadable: T) -> T {
-            do { return try persistedDatabase.read(type, key: key) ?? missing }
-            catch {
-                startupError = [startupError, error.localizedDescription].compactMap { $0 }.joined(separator: "\n")
-                return unreadable
-            }
-        }
-        accounts = demo ? DemoData.accounts : load([AccountConfiguration].self, key: "accounts", missing: CLISetupHelp.detectedDefaultAccounts(), unreadable: [])
-        settings = load(MonitorSettings.self, key: "settings", missing: MonitorSettings(), unreadable: MonitorSettings())
-        manualResets = load([ManualReset].self, key: "manual-resets", missing: [], unreadable: [])
-        resetRedemptionKeys = load([String: String].self, key: "reset-redemptions", missing: [:], unreadable: [:])
-        localDatabasePath = load(String.self, key: "opencode-path", missing: "", unreadable: "")
-        sshHosts = load([String].self, key: "ssh-hosts", missing: [], unreadable: [])
-        activityRoots = load([ActivityLogs.Root].self, key: "activity-roots", missing: [], unreadable: [])
-        activity = try? database.readCache(ActivityReport.self, key: "activity-report-v2")
-        localUsage = try? database.readCache(LocalUsageReport.self, key: "local-usage-v2")
-        do { warnings = try database.warnings() } catch { startupError = error.localizedDescription }
-        storageError = startupError
-        hasRecoverableStorageError = !database.unreadablePreferenceKeys.isEmpty
-        settings.migrateLegacyRefreshDefault()
-        durableSettings = settings
-        let loadedSince = Date().addingTimeInterval(-HistoryRetention.loadedSpan)
-        for account in accounts {
-            do {
-                var values = try database.history(account: account.id, since: loadedSince, limit: HistoryRetention.maximumRows)
-                // An account unused for weeks still shows its last value.
-                if values.isEmpty { values = try database.history(account: account.id, limit: 1) }
-                history[account.id] = HistoryRetention.thinned(values, now: Date()); snapshots[account.id] = values.last
-            } catch { storageError = error.localizedDescription }
-        }
+        self.persistence = persistence ?? AppPersistence(directory: directory, demo: demo, credentials: credentials)
         scheduler.onChange = { [weak self] ids in
             guard let self else { return }
             if self.refreshingAccountIDs != ids { self.refreshingAccountIDs = ids }
         }
         if demo {
+            accounts = DemoData.accounts; isLoading = false
             for snapshot in DemoData.snapshots(now: now) {
                 snapshots[snapshot.configurationID] = snapshot
                 history[snapshot.configurationID] = DemoData.history(for: snapshot, now: now)
@@ -126,10 +90,46 @@ final class AppStore {
             lastChecked = now
             activity = DemoData.activity(now: now)
         }
+        bootstrapTask = Task { [self] in
+            let loaded = await self.persistence.bootstrap()
+            // Edits submitted during startup wait for this publication. No defaults are written.
+            if !isDemo {
+                accounts = loaded.configuration.accounts
+                if settingsRevision == 0 { settings = loaded.configuration.settings }
+                durableSettings = loaded.configuration.settings
+                manualResets = loaded.configuration.manualResets
+                resetRedemptionKeys = loaded.configuration.resetRedemptionKeys
+                localDatabasePath = loaded.configuration.localDatabasePath
+                sshHosts = loaded.configuration.sshHosts; activityRoots = loaded.configuration.activityRoots
+                history = loaded.history; snapshots = loaded.snapshots; warnings = loaded.warnings
+                activity = loaded.activity; localUsage = loaded.localUsage
+                storageError = loaded.error; hasRecoverableStorageError = loaded.hasUnreadablePreferences
+            }
+            isLoading = false
+            if timer != nil, !isShuttingDown { refresh(); refreshActivityIfNeeded() }
+        }
+    }
+
+    func waitUntilReady() async { await bootstrapTask?.value }
+
+    /// Reserve a place before suspending. UI cancellation never cancels an accepted commit or
+    /// its publication. All configuration read/modify/write operations use this lane.
+    private func mutate<T>(finishingAcceptedAction: Bool = false, _ action: @escaping @MainActor () async throws -> T) async throws -> T {
+        guard !isShuttingDown || finishingAcceptedAction else { throw CancellationError() }
+        let previous = mutationTail
+        pendingStorageOperations += 1
+        let operation = Task { @MainActor [self] in
+            await previous?.value
+            await waitUntilReady()
+            defer { pendingStorageOperations -= 1 }
+            return try await action()
+        }
+        mutationTail = Task { _ = try? await operation.value }
+        return try await operation.value
     }
 
     func start() {
-        guard timer == nil else { return }
+        guard !isShuttingDown, timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }; self.tick()
@@ -149,7 +149,7 @@ final class AppStore {
         })
         refresh()
         refreshActivityIfNeeded()
-        Task { await updateNotificationStatus() }
+        trackNotification { [self] in await updateNotificationStatus() }
     }
 
     /// Views show minutes at most, so a new `now` within the same minute would only redraw them.
@@ -157,12 +157,26 @@ final class AppStore {
         if Int(date.timeIntervalSinceReferenceDate / 60) != Int(now.timeIntervalSinceReferenceDate / 60) { now = date }
     }
 
-    func stop() { timer?.invalidate(); timer = nil; scheduler.cancelAll(); cancelActivityImport() }
-    func shutDown() async { stop(); await scheduler.waitUntilIdle(); await activityTask?.value }
+    func stop() {
+        timer?.invalidate(); timer = nil; scheduler.cancelAll(); cancelActivityImport()
+        for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        observers = []
+    }
+    func shutDown() async {
+        isShuttingDown = true
+        stop()
+        await waitUntilReady()
+        await scheduler.waitUntilIdle()
+        await activityTask?.value
+        for task in resetTasks.values { _ = try? await task.value }
+        for task in notificationTasks.values { await task.value }
+        await mutationTail?.value
+        await persistence.drain()
+    }
 
     func refresh(force: Bool = false, only accountID: String? = nil) {
-        guard !isDemo, !isPaused else { return }
-        let selected = accounts.filter { $0.enabled && credentialRecovery[$0.id] == nil && !redeemingResetAccounts.contains($0.id) && (accountID == nil || $0.id == accountID) }
+        guard !isLoading, !isShuttingDown, !isDemo, !isPaused else { return }
+        let selected = accounts.filter { $0.enabled && pendingAccountMutations[$0.id, default: 0] == 0 && !credentialRecovery.contains($0.id) && !redeemingResetAccounts.contains($0.id) && (accountID == nil || $0.id == accountID) }
         let schedulingNow = Date()
         refreshPolicy.clamp(now: schedulingNow)
         refreshPolicy.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -176,20 +190,25 @@ final class AppStore {
                 do {
                     var snapshot = try await registry.provider(for: account.provider).read(configuration: account, includeHistory: includeUsage)
                     guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
-                    let identity = AccountIdentity.reconcile(snapshot, previous: snapshots[account.id], configuration: account)
-                    snapshot = QuotaPeriod.normalizing(identity.snapshot, previous: snapshots[account.id])
-                    // Each row keeps its login identity. Charts separate their series and
-                    // forecasts filter by identity, so a fallback key need not erase old history.
-                    if snapshot.dailyUsage.isEmpty, let previous = snapshots[account.id], previous.identity == snapshot.identity {
-                        snapshot.dailyUsage = previous.dailyUsage
+                    try await mutate { [self] in
+                        guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(account) else { return }
+                        let identity = AccountIdentity.reconcile(snapshot, previous: snapshots[account.id], configuration: account)
+                        snapshot = QuotaPeriod.normalizing(identity.snapshot, previous: snapshots[account.id])
+                        // Each row keeps its login identity. Charts separate their series and
+                        // forecasts filter by identity, so a fallback key need not erase old history.
+                        if snapshot.dailyUsage.isEmpty, let previous = snapshots[account.id], previous.identity == snapshot.identity {
+                            snapshot.dailyUsage = previous.dailyUsage
+                        }
+                        do { try await persistence.saveObservation(snapshot) } catch { storageError = error.localizedDescription }
+                        guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(account) else { return }
+                        snapshots[account.id] = snapshot; failures[account.id] = nil
+                        resetAccountsAwaitingRefresh.remove(account.id)
+                        let previous = history[account.id]?.last
+                        history[account.id] = HistoryRetention.appending(snapshot, to: history[account.id] ?? [])
+                        refreshPolicy.succeeded(account: account, refreshSeconds: settings.refreshSeconds, includedHistory: includeUsage,
+                                                unchanged: !force && AccountRefreshPolicy.quotaUnchanged(from: previous, to: snapshot), now: Date())
                     }
-                    snapshots[account.id] = snapshot; failures[account.id] = nil
-                    resetAccountsAwaitingRefresh.remove(account.id)
-                    let previous = history[account.id]?.last
-                    history[account.id] = HistoryRetention.appending(snapshot, to: history[account.id] ?? [])
-                    do { try database.save(snapshot) } catch { storageError = error.localizedDescription }
-                    refreshPolicy.succeeded(account: account, refreshSeconds: settings.refreshSeconds, includedHistory: includeUsage,
-                                            unchanged: !force && AccountRefreshPolicy.quotaUnchanged(from: previous, to: snapshot), now: Date())
+                    guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(account) else { return }
                     await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
                 } catch is CancellationError { return }
                 catch {
@@ -201,13 +220,24 @@ final class AppStore {
             }
         }
         let manualChecks = selected.map { ($0, scheduler.generation(for: $0.id)) }
-        Task {
+        trackNotification { [self] in
             for (account, generation) in manualChecks {
                 guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { continue }
                 let snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: tr("Manuell"))
                 await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
             }
         }
+    }
+
+    @discardableResult
+    private func trackNotification(_ action: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let id = UUID()
+        let task = Task { [self] in
+            await action()
+            notificationTasks[id] = nil
+        }
+        notificationTasks[id] = task
+        return task
     }
 
     func withManualResets(_ snapshot: AccountSnapshot) -> AccountSnapshot {
@@ -226,70 +256,72 @@ final class AppStore {
         let eventIDs = Set(events.map(\.id))
         pendingWarningIDs.formUnion(eventIDs)
         defer { pendingWarningIDs.subtract(eventIDs) }
-        let content = UNMutableNotificationContent()
-        content.title = account.displayName
-        content.body = events.map(\.message).joined(separator: "\n")
-        if settings.soundEnabled { content.sound = .default }
-        content.userInfo = ["account": account.id]
+        let notification = AppNotification(id: events[0].id, title: account.displayName,
+                                           body: events.map(\.message).joined(separator: "\n"),
+                                           sound: settings.soundEnabled, accountID: account.id)
         do {
-            let permission = await UNUserNotificationCenter.current().notificationSettings()
+            let permission = await notifications.permission()
             guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
-            guard permission.authorizationStatus == .authorized || permission.authorizationStatus == .provisional else { return }
-            try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: events[0].id, content: content, trigger: nil))
+            guard permission.allowsDelivery else { return }
+            try await notifications.deliver(notification)
         } catch {
             guard scheduler.isCurrent(id: account.id, generation: generation), !isPaused, accounts.contains(account) else { return }
             storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", error.localizedDescription)
             return
         }
         // Delivered even if the Mac slept or the account changed meanwhile, so it must count as sent.
-        recordDelivered(events)
+        await recordDelivered(events)
     }
 
-    func recordDelivered(_ events: [WarningEvent]) {
-        var failure: Error?
-        for event in events {
-            warnings.insert(event, at: 0)
-            do { try database.saveWarning(event) } catch { failure = error }
-        }
-        if let failure { storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", failure.localizedDescription) }
+    func recordDelivered(_ events: [WarningEvent]) async {
+        await waitUntilReady()
+        // Delivery already happened. Keep deduplication even if persistence fails or shutdown began.
+        warnings.insert(contentsOf: events.reversed(), at: 0)
+        do { try await persistence.recordDelivered(events) }
+        catch { storageError = tr("Warnung konnte nicht gespeichert oder zugestellt werden. {0}", error.localizedDescription) }
     }
 
     func enableNotifications() async {
-        guard !isDemo else { return }
-        do {
-            let allowed = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-            settings.notificationsEnabled = allowed; persistSettings()
-            await updateNotificationStatus()
-            if allowed { refresh(force: true) }
-        } catch { notificationStatus = error.localizedDescription }
+        guard !isDemo, !isShuttingDown else { return }
+        await trackNotification { [self] in
+            do {
+                let allowed = try await notifications.requestAuthorization()
+                settings.notificationsEnabled = allowed
+                await persistSettings(finishingAcceptedAction: true)
+                await updateNotificationStatus()
+                if allowed { refresh(force: true) }
+            } catch { notificationStatus = error.localizedDescription }
+        }.value
     }
     func updateNotificationStatus() async {
         guard !isDemo else { notificationStatus = tr("Im Demo-Modus deaktiviert"); return }
-        let status = await UNUserNotificationCenter.current().notificationSettings()
-        switch status.authorizationStatus {
+        let status = await notifications.permission()
+        switch status.authorization {
         case .authorized:
-            let banner = status.alertSetting == .enabled && status.alertStyle != .none
-            notificationStatus = tr("Banner: {0} · macOS-Ton: {1}", banner ? tr("an") : tr("aus"), status.soundSetting == .enabled ? tr("an") : tr("aus"))
+            let banner = status.banner
+            notificationStatus = tr("Banner: {0} · macOS-Ton: {1}", banner ? tr("an") : tr("aus"), status.sound ? tr("an") : tr("aus"))
         case .provisional: notificationStatus = tr("Nur stille Zustellung erlaubt · Banner in macOS aktivieren")
         case .denied: notificationStatus = tr("In den macOS-Systemeinstellungen gesperrt")
-        default: notificationStatus = tr("Noch nicht freigegeben")
+        case .undetermined: notificationStatus = tr("Noch nicht freigegeben")
         }
     }
     func testNotification() async {
-        guard !isDemo else { return }
-        await updateNotificationStatus()
-        let content = UNMutableNotificationContent(); content.title = tr("Juicebars ist bereit")
-        content.body = settings.soundEnabled ? tr("Test für Banner und Hinweiston.") : tr("Test für Banner. Der Hinweiston ist in Juicebars ausgeschaltet.")
-        if settings.soundEnabled { content.sound = .default }
-        do { try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)) }
-        catch { notificationStatus = error.localizedDescription }
+        guard !isDemo, !isShuttingDown else { return }
+        await trackNotification { [self] in
+            await updateNotificationStatus()
+            let notification = AppNotification(id: UUID().uuidString, title: tr("Juicebars ist bereit"),
+                body: settings.soundEnabled ? tr("Test für Banner und Hinweiston.") : tr("Test für Banner. Der Hinweiston ist in Juicebars ausgeschaltet."),
+                sound: settings.soundEnabled)
+            do { try await notifications.deliver(notification) }
+            catch { notificationStatus = error.localizedDescription }
+        }.value
     }
     func openNotificationSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
     }
-    func recoverStoredConfiguration() {
-        do {
-            let keys = try database.recoverUnreadablePreferences()
+    func recoverStoredConfiguration() async {
+        do { try await mutate { [self] in
+            let keys = try await persistence.recoverConfiguration()
             if keys.contains("accounts") {
                 scheduler.cancelAll()
                 accounts = [AccountConfiguration(id: "default-codex", provider: .codex), AccountConfiguration(id: "default-claude", provider: .claude)]
@@ -301,14 +333,25 @@ final class AppStore {
             if keys.contains("opencode-path") { localDatabasePath = "" }
             if keys.contains("ssh-hosts") { sshHosts = [] }
             if keys.contains("activity-roots") { activityRoots = [] }
+            if keys.contains("reset-redemptions") { resetRedemptionKeys = [:] }
             hasRecoverableStorageError = false
             storageError = tr("Zurückgesetzt: {0}. Die Originaldaten bleiben gesichert.", keys.sorted().joined(separator: ", "))
-        } catch { storageError = error.localizedDescription }
+        } } catch { storageError = error.localizedDescription }
     }
 
-    func persistSettings() {
-        do { try database.write(settings, key: "settings"); durableSettings = settings }
-        catch { settings = durableSettings; storageError = error.localizedDescription }
+    func persistSettings() async { await persistSettings(finishingAcceptedAction: false) }
+
+    private func persistSettings(finishingAcceptedAction: Bool) async {
+        let value = settings
+        settingsRevision += 1
+        let revision = settingsRevision
+        do { try await mutate(finishingAcceptedAction: finishingAcceptedAction) { [self] in
+            do { try await persistence.writeConfiguration(.settings(value)); durableSettings = value }
+            catch {
+                if revision == settingsRevision { settings = durableSettings }
+                storageError = error.localizedDescription
+            }
+        } } catch { storageError = error.localizedDescription }
     }
     private func invalidateAccount(_ id: String) {
         scheduler.invalidate(id: id)
@@ -317,117 +360,80 @@ final class AppStore {
         refreshPolicy.remove(id: id)
     }
     /// Key presence uses attributes only. Editing an account never loads its saved secret.
-    func hasSavedKey(for account: AccountConfiguration) -> Bool {
-        !isDemo && accounts.contains { $0.id == account.id } && credentials.contains(account: account.id)
+    func hasSavedKey(for account: AccountConfiguration) async -> Bool {
+        await waitUntilReady()
+        guard !isDemo, accounts.contains(where: { $0.id == account.id }) else { return false }
+        return await persistence.hasSavedKey(account.id)
     }
 
-    private var credentialRecoveryMessage: String {
-        tr("Der Schlüssel konnte nach einem Speicherfehler nicht wiederhergestellt werden. Bitte die Kontoaktion erneut versuchen. Bis dahin wird dieses Konto nicht abgerufen.")
-    }
-
-    private func restoreCredentialIfNeeded(_ id: String) throws {
-        guard let backup = credentialRecovery[id] else { return }
-        if let secret = backup.secret { try credentials.save(secret, account: id) }
-        else { try credentials.remove(account: id) }
-        credentialRecovery[id] = nil
-        if failures[id] == credentialRecoveryMessage { failures[id] = nil }
-        if storageError == credentialRecoveryMessage { storageError = nil }
-    }
-
-    /// SQLite and Keychain cannot share a transaction. Write SQL first, change the credential
-    /// immediately before COMMIT, and restore the previous credential if COMMIT fails.
-    private func persistAccountChange(_ id: String, secret: String?,
-                                      persist: (_ beforeCommit: () throws -> Void) throws -> Void) throws {
-        try restoreCredentialIfNeeded(id)
-        var backup: CredentialBackup?
-        do {
-            try persist {
-                guard let secret, !isDemo else { return }
-                let previous = try credentials.read(account: id)
-                if secret.isEmpty { try credentials.remove(account: id) }
-                else { try credentials.save(secret, account: id) }
-                backup = CredentialBackup(secret: previous)
-            }
-        } catch {
-            if let backup {
-                credentialRecovery[id] = backup
-                do { try restoreCredentialIfNeeded(id) }
-                catch {
-                    // Keep the backup for a retry and prevent reads using the changed credential.
-                    scheduler.invalidate(id: id)
-                    let message = credentialRecoveryMessage
-                    failures[id] = message; storageError = message
-                    throw ProviderFailure.unavailable(message)
+    private func commitAccount(_ mutation: AccountMutation, id: String) async throws {
+        // Invalidate before suspension as well as at publication. A late provider response
+        // cannot write a measurement using credentials that are being replaced.
+        pendingAccountMutations[id, default: 0] += 1
+        var committed = false
+        defer {
+            pendingAccountMutations[id, default: 0] -= 1
+            if committed { refresh(force: true, only: id) }
+        }
+        scheduler.invalidate(id: id)
+        try await mutate { [self] in
+            scheduler.invalidate(id: id)
+            do {
+                let commit = try await persistence.commitAccount(mutation)
+                let recovered = credentialRecovery.remove(id) != nil
+                if recovered, storageError == CredentialRecoveryFailure().localizedDescription { storageError = nil }
+                invalidateAccount(id)
+                accounts = commit.accounts; manualResets = commit.manualResets
+                if commit.clearedHistory { snapshots[id] = nil; history[id] = [] }
+                if !accounts.contains(where: { $0.id == id }) {
+                    resetAccountsAwaitingRefresh.remove(id); snapshots[id] = nil; history[id] = nil
                 }
+            } catch {
+                if error is CredentialRecoveryFailure {
+                    credentialRecovery.insert(id); failures[id] = error.localizedDescription; storageError = error.localizedDescription
+                }
+                throw error
             }
-            throw error
         }
+        committed = true
     }
 
-    func saveAccount(_ account: AccountConfiguration, secret: String, removeSavedKey: Bool = false) throws {
-        try database.requireWritablePreference("accounts")
-        guard !removeSavedKey || secret.isEmpty else {
-            throw ProviderFailure.invalidData(tr("Bitte den gespeicherten Key entweder ersetzen oder entfernen."))
-        }
-        if let schedule = account.workSchedule, schedule.isEnabled, !schedule.isValid {
-            throw ProviderFailure.invalidData(tr("Arbeitstage und Arbeitszeit prüfen."))
-        }
-        let old = accounts.first { $0.id == account.id }
-        if let old, old.provider != account.provider {
-            throw ProviderFailure.unavailable(tr("Für einen anderen Anbieter bitte ein neues Konto hinzufügen."))
-        }
-        var updated = accounts
-        if let index = updated.firstIndex(where: { $0.id == account.id }) { updated[index] = account }
-        else { updated.append(account) }
-        let clearHistory = !removeSavedKey && (old.map { $0.profileDirectory != account.profileDirectory || $0.useLocalCredentials != account.useLocalCredentials || !secret.isEmpty } ?? false)
-        let credentialChange: String? = removeSavedKey ? "" : secret.isEmpty ? nil : secret
-        try persistAccountChange(account.id, secret: credentialChange) { beforeCommit in
-            try database.saveAccounts(updated, clearingHistoryFor: clearHistory ? account.id : nil, beforeCommit: beforeCommit)
-        }
-        invalidateAccount(account.id)
-        accounts = updated
-        if clearHistory { snapshots[account.id] = nil; history[account.id] = [] }
-        refresh(force: true, only: account.id)
+    func saveAccount(_ account: AccountConfiguration, secret: String, removeSavedKey: Bool = false) async throws {
+        try await commitAccount(.save(account, secret: secret, removeSavedKey: removeSavedKey), id: account.id)
     }
 
-    func removeAccount(_ account: AccountConfiguration) {
-        do {
-            let updated = accounts.filter { $0.id != account.id }
-            let resets = manualResets.filter { $0.accountID != account.id }
-            try persistAccountChange(account.id, secret: "") { beforeCommit in
-                try database.deleteAccount(account.id, accounts: updated, manualResets: resets, beforeCommit: beforeCommit)
-            }
-            invalidateAccount(account.id)
-            resetAccountsAwaitingRefresh.remove(account.id)
-            accounts = updated; manualResets = resets
-            snapshots[account.id] = nil; history[account.id] = nil
-        } catch { storageError = error.localizedDescription }
+    func removeAccount(_ account: AccountConfiguration) async {
+        do { try await commitAccount(.remove(account.id), id: account.id) }
+        catch { storageError = error.localizedDescription }
     }
 
     /// Removes only the Juicebars override. The account and its history remain available.
-    func removeSavedKey(for account: AccountConfiguration) throws {
-        guard let stored = accounts.first(where: { $0.id == account.id }) else { return }
-        try saveAccount(stored, secret: "", removeSavedKey: true)
+    func removeSavedKey(for account: AccountConfiguration) async throws {
+        try await commitAccount(.removeSavedKey(account.id), id: account.id)
     }
 
-    func addReset(accountID: String, title: String, scope: String, expiry: Date) {
+    func addReset(accountID: String, title: String, scope: String, expiry: Date) async {
         let reset = ManualReset(accountID: accountID, benefit: ResetBenefit(id: UUID().uuidString, title: title, scope: scope, expiresAt: expiry, isManual: true))
-        saveResets(manualResets + [reset])
+        do { try await mutate { [self] in
+            let resets = manualResets + [reset]
+            try await persistence.writeConfiguration(.manualResets(resets)); manualResets = resets
+        } } catch { storageError = error.localizedDescription }
     }
-    func removeReset(_ id: String) { saveResets(manualResets.filter { $0.id != id }) }
-    private func saveResets(_ resets: [ManualReset]) {
-        do { try database.write(resets, key: "manual-resets"); manualResets = resets }
-        catch { storageError = error.localizedDescription }
+    func removeReset(_ id: String) async {
+        do { try await mutate { [self] in
+            let resets = manualResets.filter { $0.id != id }
+            try await persistence.writeConfiguration(.manualResets(resets)); manualResets = resets
+        } } catch { storageError = error.localizedDescription }
     }
     func openAccount(_ account: AccountConfiguration) { NSWorkspace.shared.open(account.provider.accountURL) }
-    func snooze() { settings.snoozedUntil = Date().addingTimeInterval(3600); persistSettings() }
+    func snooze() { settings.snoozedUntil = Date().addingTimeInterval(3600); Task { await persistSettings() } }
     func refreshActivityIfNeeded() {
         nextActivityImport = min(nextActivityImport, Date().addingTimeInterval(300))
-        guard !isPaused, Date() >= nextActivityImport else { return }
+        guard !isLoading, !isShuttingDown, !isPaused, Date() >= nextActivityImport else { return }
         loadLocalUsage(refreshRemote: false)
     }
     func loadLocalUsage(refreshRemote: Bool = true) {
-        guard !localUsageLoading, !isDemo else { return }
+        guard !isLoading, !isShuttingDown, !isPaused, !localUsageLoading, !isDemo else { return }
         nextActivityImport = Date().addingTimeInterval(300)
         localUsageLoading = true; activityProgress = tr("Nutzungsdaten werden aktualisiert …")
         let importID = UUID()
@@ -456,26 +462,26 @@ final class AppStore {
                 let result = try await worker.value
                 guard !Task.isCancelled else { return }
                 activity = result.0; localUsage = result.1; localUsageError = nil
-                try database.write(localDatabasePath, key: "opencode-path")
-                // Caches only speed up the next launch; the next import rebuilds them.
-                try? database.write(result.0, key: "activity-report-v2")
-                if let localUsage { try? database.write(localUsage, key: "local-usage-v2") }
+                await persistence.cacheImport(result.0, localUsage: result.1)
             } catch is CancellationError { }
             catch { localUsageError = error.localizedDescription }
         }
     }
-    func addSSHHost(_ host: String) throws {
+    func addSSHHost(_ host: String) async throws {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard SSHActivity.isValidHost(host) else { throw ProviderFailure.invalidData(tr("Bitte einen SSH-Alias wie workstation oder user@host eingeben.")) }
-        guard !sshHosts.contains(host) else { return }
-        let hosts = sshHosts + [host]
-        try database.write(hosts, key: "ssh-hosts")
-        sshHosts = hosts; reloadActivitySources()
+        try await mutate { [self] in
+            guard !sshHosts.contains(host) else { return }
+            let hosts = sshHosts + [host]
+            try await persistence.writeConfiguration(.sshHosts(hosts))
+            sshHosts = hosts; reloadActivitySources()
+        }
     }
-    func removeSSHHost(_ host: String) {
-        let hosts = sshHosts.filter { $0 != host }
-        do { try database.write(hosts, key: "ssh-hosts"); sshHosts = hosts; reloadActivitySources() }
-        catch { storageError = error.localizedDescription }
+    func removeSSHHost(_ host: String) async {
+        do { try await mutate { [self] in
+            let hosts = sshHosts.filter { $0 != host }
+            try await persistence.writeConfiguration(.sshHosts(hosts)); sshHosts = hosts; reloadActivitySources()
+        } } catch { storageError = error.localizedDescription }
     }
     private func reloadActivitySources() {
         cancelActivityImport()
@@ -491,24 +497,31 @@ final class AppStore {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let root = ActivityLogs.Root(source: format, url: url.standardizedFileURL.resolvingSymlinksInPath())
         guard !activityRoots.contains(where: { $0.url == root.url }) else { return }
-        saveActivityRoots(activityRoots + [root])
+        saveActivityRoots { current in current.contains(where: { $0.url == root.url }) ? current : current + [root] }
     }
     func removeActivityRoot(_ root: ActivityLogs.Root) {
         guard !isDemo else { return }
-        saveActivityRoots(activityRoots.filter { $0.id != root.id })
+        saveActivityRoots { $0.filter { $0.id != root.id } }
     }
-    private func saveActivityRoots(_ roots: [ActivityLogs.Root]) {
-        do {
-            try database.write(roots, key: "activity-roots")
-            activityRoots = roots; reloadActivitySources()
-        } catch { storageError = error.localizedDescription }
+    private func saveActivityRoots(_ updated: @escaping ([ActivityLogs.Root]) -> [ActivityLogs.Root]) {
+        Task {
+            do { try await mutate { [self] in
+                let roots = updated(activityRoots)
+                try await persistence.writeConfiguration(.activityRoots(roots))
+                activityRoots = roots; reloadActivitySources()
+            } } catch { storageError = error.localizedDescription }
+        }
     }
     func selectLocalDatabase() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.message = tr("OpenCode-Datenbank nur lesend öffnen")
         if panel.runModal() == .OK, let url = panel.url {
-            do { try database.write(url.path, key: "opencode-path"); localDatabasePath = url.path; reloadActivitySources() }
-            catch { storageError = error.localizedDescription }
+            Task {
+                do { try await mutate { [self] in
+                    try await persistence.writeConfiguration(.localDatabasePath(url.path))
+                    localDatabasePath = url.path; reloadActivitySources()
+                } } catch { storageError = error.localizedDescription }
+            }
         }
     }
     /// Period-normalized history, rebuilt only after `history` changes.
@@ -552,7 +565,7 @@ final class AppStore {
 extension AppStore {
     func canRedeemReset(_ benefit: ResetBenefit, for account: AccountConfiguration) -> Bool {
         guard account.provider == .codex, account.enabled, accounts.contains(account), !benefit.isManual,
-              credentialRecovery[account.id] == nil,
+              !isLoading, pendingAccountMutations[account.id, default: 0] == 0, !credentialRecovery.contains(account.id),
               !redeemingResetAccounts.contains(account.id), !resetAccountsAwaitingRefresh.contains(account.id), failures[account.id] == nil,
               let snapshot = snapshots[account.id], snapshot.isFresh(at: Date()),
               snapshot.identity != AccountIdentity.fallback(for: account) else { return false }
@@ -562,6 +575,15 @@ extension AppStore {
     }
 
     func redeemReset(_ benefit: ResetBenefit, for account: AccountConfiguration, expectedIdentity: String) async throws -> CodexResetResult {
+        guard !isShuttingDown else { throw CancellationError() }
+        let id = UUID()
+        let task = Task { try await performRedeemReset(benefit, for: account, expectedIdentity: expectedIdentity) }
+        resetTasks[id] = task
+        defer { resetTasks[id] = nil }
+        return try await task.value
+    }
+
+    private func performRedeemReset(_ benefit: ResetBenefit, for account: AccountConfiguration, expectedIdentity: String) async throws -> CodexResetResult {
         guard !redeemingResetAccounts.contains(account.id) else {
             throw ProviderFailure.unavailable(tr("Einlösung läuft bereits."))
         }
@@ -570,32 +592,37 @@ extension AppStore {
         }
         let requestID = stableID("reset|\(account.id)|\(snapshot.identity)|\(benefit.id)")
         let key = resetRedemptionKeys[requestID] ?? UUID().uuidString
-        var keys = resetRedemptionKeys; keys[requestID] = key
         // Persist before sending anything. An interrupted attempt keeps this key across retries and restarts.
-        try database.write(keys, key: "reset-redemptions")
-        resetRedemptionKeys = keys
         redeemingResetAccounts.insert(account.id)
         invalidateAccount(account.id)
+        let generation = scheduler.generation(for: account.id)
         defer { redeemingResetAccounts.remove(account.id) }
+        try await mutate(finishingAcceptedAction: true) { [self] in
+            var keys = resetRedemptionKeys; keys[requestID] = key
+            try await persistence.writeConfiguration(.resetRedemptions(keys))
+            resetRedemptionKeys = keys
+        }
+        guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(account), !credentialRecovery.contains(account.id) else { throw CancellationError() }
         let result = try await resetRedeemer.redeem(configuration: account, expectedSnapshot: snapshot,
                                                     creditID: benefit.id, idempotencyKey: key)
-        resetRedemptionKeys.removeValue(forKey: requestID)
-        do { try database.write(resetRedemptionKeys, key: "reset-redemptions") }
-        catch { storageError = error.localizedDescription }
-        guard credentialRecovery[account.id] == nil else {
+        // Confirmation survives cancellation. Serialize it with account edits and removals.
+        try await mutate(finishingAcceptedAction: true) { [self] in
+            resetRedemptionKeys.removeValue(forKey: requestID)
+            do { try await persistence.writeConfiguration(.resetRedemptions(resetRedemptionKeys)) }
+            catch { storageError = error.localizedDescription }
+            guard accounts.contains(where: { $0.id == account.id }) else { return }
             resetAccountsAwaitingRefresh.insert(account.id)
-            return result
-        }
-        if accounts.contains(account), snapshots[account.id]?.identity == expectedIdentity,
-           var fresh = result.snapshot, fresh.configurationID == account.id, fresh.identity == expectedIdentity {
+            guard !credentialRecovery.contains(account.id), scheduler.isCurrent(id: account.id, generation: generation),
+                  accounts.contains(account), snapshots[account.id]?.identity == expectedIdentity,
+                  var fresh = result.snapshot, fresh.configurationID == account.id, fresh.identity == expectedIdentity else { return }
             fresh = QuotaPeriod.normalizing(fresh, previous: snapshots[account.id])
             if fresh.dailyUsage.isEmpty { fresh.dailyUsage = snapshot.dailyUsage }
+            do { try await persistence.saveObservation(fresh) } catch { storageError = error.localizedDescription }
+            guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(account) else { return }
             snapshots[account.id] = fresh; failures[account.id] = nil
+            resetAccountsAwaitingRefresh.remove(account.id)
             history[account.id] = HistoryRetention.appending(fresh, to: history[account.id] ?? [])
-            do { try database.save(fresh) } catch { storageError = error.localizedDescription }
             lastChecked = Date()
-        } else if accounts.contains(account), snapshots[account.id]?.identity == expectedIdentity {
-            resetAccountsAwaitingRefresh.insert(account.id)
         }
         return result
     }

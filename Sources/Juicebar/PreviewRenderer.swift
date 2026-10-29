@@ -3,7 +3,7 @@ import JuicebarCore
 
 /// Renders fixture views offscreen; never captures the user's desktop.
 @MainActor enum PreviewRenderer {
-    static func verifyActivityPersistence() throws {
+    static func verifyActivityPersistence() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -13,6 +13,7 @@ import JuicebarCore
         let root = ActivityLogs.Root(source: .pi, url: directory.appendingPathComponent("custom-sessions"))
         try database.write([root], key: "activity-roots")
         let reopened = AppStore(directory: directory)
+        await reopened.waitUntilReady()
         guard reopened.activity?.days.first?.tokens == 120, reopened.activity?.days.first?.apiCost ?? 0 > 0,
               reopened.activityRoots == [root] else {
             throw ProviderFailure.unavailable("Restart lost the cached usage and cost")

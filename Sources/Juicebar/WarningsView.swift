@@ -90,7 +90,7 @@ struct WarningsView: View {
                     }
                 }
             }
-        }.onChange(of: store.settings) { _, _ in store.persistSettings() }
+        }.onChange(of: store.settings) { _, _ in Task { await store.persistSettings() } }
     }
     /// Follows the user's 12- or 24-hour clock.
     private var hourOptions: [(String, Int)] {
