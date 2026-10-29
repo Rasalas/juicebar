@@ -53,7 +53,7 @@ final class AppStore {
     @ObservationIgnored private var durableSettings = MonitorSettings()
     private struct CredentialBackup { var secret: String? }
     @ObservationIgnored private var credentialRecovery: [String: CredentialBackup] = [:]
-    private let registry = ProviderRegistry()
+    private let registry: ProviderRegistry
     @ObservationIgnored private var refreshPolicy = AccountRefreshPolicy()
     private let scheduler = AccountRefreshScheduler()
     @ObservationIgnored private var timer: Timer?
@@ -61,8 +61,9 @@ final class AppStore {
     @ObservationIgnored private var pendingWarningIDs: Set<String> = []
     @ObservationIgnored private var quotaHistoryCache: [String: [AccountSnapshot]] = [:]
 
-    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil, credentials: any CredentialStore = KeychainCredentialStore()) {
+    init(demo: Bool = false, directory: URL? = nil, resetRedeemer: (any CodexResetRedeeming)? = nil, credentials: any CredentialStore = KeychainCredentialStore(), registry: ProviderRegistry = ProviderRegistry()) {
         self.credentials = credentials
+        self.registry = registry
         isDemo = demo
         if let resetRedeemer { self.resetRedeemer = resetRedeemer }
         else if demo { self.resetRedeemer = DemoCodexResetCredits() }
@@ -177,10 +178,8 @@ final class AppStore {
                     guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
                     let identity = AccountIdentity.reconcile(snapshot, previous: snapshots[account.id], configuration: account)
                     snapshot = QuotaPeriod.normalizing(identity.snapshot, previous: snapshots[account.id])
-                    if identity.switchedLogin {
-                        history[account.id] = []
-                        do { try database.removeAccount(account.id) } catch { storageError = error.localizedDescription }
-                    }
+                    // Each row keeps its login identity. Charts separate their series and
+                    // forecasts filter by identity, so a fallback key need not erase old history.
                     if snapshot.dailyUsage.isEmpty, let previous = snapshots[account.id], previous.identity == snapshot.identity {
                         snapshot.dailyUsage = previous.dailyUsage
                     }
@@ -314,7 +313,7 @@ final class AppStore {
     private func invalidateAccount(_ id: String) {
         scheduler.invalidate(id: id)
         failures[id] = nil
-        resetAccountsAwaitingRefresh.remove(id)
+        // A confirmed reset still needs a fresh observation after editing/restoring credentials.
         refreshPolicy.remove(id: id)
     }
     /// Key presence uses attributes only. Editing an account never loads its saved secret.
@@ -365,8 +364,11 @@ final class AppStore {
         }
     }
 
-    func saveAccount(_ account: AccountConfiguration, secret: String) throws {
+    func saveAccount(_ account: AccountConfiguration, secret: String, removeSavedKey: Bool = false) throws {
         try database.requireWritablePreference("accounts")
+        guard !removeSavedKey || secret.isEmpty else {
+            throw ProviderFailure.invalidData(tr("Bitte den gespeicherten Key entweder ersetzen oder entfernen."))
+        }
         if let schedule = account.workSchedule, schedule.isEnabled, !schedule.isValid {
             throw ProviderFailure.invalidData(tr("Arbeitstage und Arbeitszeit prüfen."))
         }
@@ -377,8 +379,9 @@ final class AppStore {
         var updated = accounts
         if let index = updated.firstIndex(where: { $0.id == account.id }) { updated[index] = account }
         else { updated.append(account) }
-        let clearHistory = old.map { $0.profileDirectory != account.profileDirectory || $0.useLocalCredentials != account.useLocalCredentials || !secret.isEmpty } ?? false
-        try persistAccountChange(account.id, secret: secret.isEmpty ? nil : secret) { beforeCommit in
+        let clearHistory = !removeSavedKey && (old.map { $0.profileDirectory != account.profileDirectory || $0.useLocalCredentials != account.useLocalCredentials || !secret.isEmpty } ?? false)
+        let credentialChange: String? = removeSavedKey ? "" : secret.isEmpty ? nil : secret
+        try persistAccountChange(account.id, secret: credentialChange) { beforeCommit in
             try database.saveAccounts(updated, clearingHistoryFor: clearHistory ? account.id : nil, beforeCommit: beforeCommit)
         }
         invalidateAccount(account.id)
@@ -395,6 +398,7 @@ final class AppStore {
                 try database.deleteAccount(account.id, accounts: updated, manualResets: resets, beforeCommit: beforeCommit)
             }
             invalidateAccount(account.id)
+            resetAccountsAwaitingRefresh.remove(account.id)
             accounts = updated; manualResets = resets
             snapshots[account.id] = nil; history[account.id] = nil
         } catch { storageError = error.localizedDescription }
@@ -402,12 +406,8 @@ final class AppStore {
 
     /// Removes only the Juicebars override. The account and its history remain available.
     func removeSavedKey(for account: AccountConfiguration) throws {
-        guard accounts.contains(where: { $0.id == account.id }) else { return }
-        try persistAccountChange(account.id, secret: "") { beforeCommit in
-            try database.saveAccounts(accounts, beforeCommit: beforeCommit)
-        }
-        invalidateAccount(account.id)
-        refresh(force: true, only: account.id)
+        guard let stored = accounts.first(where: { $0.id == account.id }) else { return }
+        try saveAccount(stored, secret: "", removeSavedKey: true)
     }
 
     func addReset(accountID: String, title: String, scope: String, expiry: Date) {
@@ -552,6 +552,7 @@ final class AppStore {
 extension AppStore {
     func canRedeemReset(_ benefit: ResetBenefit, for account: AccountConfiguration) -> Bool {
         guard account.provider == .codex, account.enabled, accounts.contains(account), !benefit.isManual,
+              credentialRecovery[account.id] == nil,
               !redeemingResetAccounts.contains(account.id), !resetAccountsAwaitingRefresh.contains(account.id), failures[account.id] == nil,
               let snapshot = snapshots[account.id], snapshot.isFresh(at: Date()),
               snapshot.identity != AccountIdentity.fallback(for: account) else { return false }
@@ -581,6 +582,10 @@ extension AppStore {
         resetRedemptionKeys.removeValue(forKey: requestID)
         do { try database.write(resetRedemptionKeys, key: "reset-redemptions") }
         catch { storageError = error.localizedDescription }
+        guard credentialRecovery[account.id] == nil else {
+            resetAccountsAwaitingRefresh.insert(account.id)
+            return result
+        }
         if accounts.contains(account), snapshots[account.id]?.identity == expectedIdentity,
            var fresh = result.snapshot, fresh.configurationID == account.id, fresh.identity == expectedIdentity {
             fresh = QuotaPeriod.normalizing(fresh, previous: snapshots[account.id])

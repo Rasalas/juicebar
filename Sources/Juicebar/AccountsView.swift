@@ -58,6 +58,7 @@ struct AccountEditor: View {
     @State private var budget = ""
     @State private var error: String?
     @State private var hasStoredKey = false
+    @State private var removeKeyOnSave = false
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             Text(store.accounts.contains(where: { $0.id == configuration.id }) ? tr("Konto bearbeiten") : tr("Konto hinzufügen")).font(.title2.bold())
@@ -86,16 +87,15 @@ struct AccountEditor: View {
                         }
                         Text(tr("Ein hier gespeicherter Key hat Vorrang. Ohne eigenen Key liest Juicebars den Eintrag opencode-go auf diesem Mac. Ein Browser-Login allein ändert diesen Key nicht.")).font(.caption).foregroundStyle(.secondary)
                     }
-                    SecureField(tr("API-Key"), text: $secret, prompt: Text(hasStoredKey ? tr("Leer lassen, um gespeicherten Key zu behalten") : tr("Key einfügen")))
+                    SecureField(tr("API-Key"), text: $secret, prompt: Text(hasStoredKey && !removeKeyOnSave ? tr("Leer lassen, um gespeicherten Key zu behalten") : tr("Key einfügen")))
+                        .disabled(removeKeyOnSave)
                     Text(configuration.provider.keyHelp).font(.caption).foregroundStyle(.secondary)
                     if hasStoredKey {
-                        Button(tr("Gespeicherten Key entfernen"), role: .destructive) {
-                            do {
-                                try store.removeSavedKey(for: configuration)
-                                secret = ""; hasStoredKey = false; error = nil
-                            } catch { self.error = error.localizedDescription }
+                        Button(removeKeyOnSave ? tr("Key behalten") : tr("Gespeicherten Key entfernen"), role: removeKeyOnSave ? nil : .destructive) {
+                            removeKeyOnSave.toggle()
+                            if removeKeyOnSave { secret = "" }
                         }
-                        Text(tr("Konto und Verlauf bleiben erhalten. Ohne eigenen Key kann OpenCode Go wieder den lokalen Key verwenden.")).font(.caption).foregroundStyle(.secondary)
+                        Text(removeKeyOnSave ? tr("Der Key wird erst beim Speichern entfernt. Konto und Verlauf bleiben erhalten.") : tr("Konto und Verlauf bleiben erhalten. Ohne eigenen Key kann OpenCode Go wieder den lokalen Key verwenden.")).font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
                     Text(tr("Zen-Aktivität ist über die lokale OpenCode-Datenbank verfügbar. Ein Guthabenabruf wird derzeit nicht angeboten.")).font(.callout).foregroundStyle(.secondary)
@@ -115,7 +115,7 @@ struct AccountEditor: View {
                         guard let amount = Double(budget.replacingOccurrences(of: ",", with: ".")), amount > 0, amount.isFinite else { error = tr("Bitte ein positives Monatsbudget eingeben."); return }
                         configuration.monthlyBudget = amount
                     } else { configuration.monthlyBudget = nil }
-                    do { try store.saveAccount(configuration, secret: secret.trimmingCharacters(in: .whitespacesAndNewlines)); dismiss() }
+                    do { try store.saveAccount(configuration, secret: secret.trimmingCharacters(in: .whitespacesAndNewlines), removeSavedKey: removeKeyOnSave); dismiss() }
                     catch { self.error = error.localizedDescription }
                 }.buttonStyle(JuiceButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
                     .disabled(configuration.workSchedule.map { $0.isEnabled && !$0.isValid } ?? false)

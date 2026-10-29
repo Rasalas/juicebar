@@ -26,20 +26,28 @@ private final class CredentialFake: CredentialStore {
     }
 }
 
+private struct UsageFake: UsageProvider {
+    let snapshot: AccountSnapshot
+    func read(configuration: AccountConfiguration, includeHistory: Bool) async throws -> AccountSnapshot {
+        var value = snapshot; value.observedAt = Date(); return value
+    }
+}
+
 @MainActor
 final class AtomicAccountPersistenceTests: XCTestCase {
-    private func fixture() throws -> (AppStore, HistoryDatabase, AccountConfiguration, URL, CredentialFake) {
+    private func fixture(provider: ProviderKind = .opencodeGo, enabled: Bool = false, paused: Bool = true,
+                         registry: ProviderRegistry = ProviderRegistry(), resetRedeemer: (any CodexResetRedeeming)? = nil) throws -> (AppStore, HistoryDatabase, AccountConfiguration, URL, CredentialFake) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("juicebar-atomic-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let database = try HistoryDatabase(path: directory.appendingPathComponent("usage.sqlite").path)
-        let account = AccountConfiguration(id: "fixture", provider: .opencodeGo, enabled: false)
+        let account = AccountConfiguration(id: "fixture", provider: provider, enabled: enabled)
         try database.write([account], key: "accounts")
         try database.save(AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture"))
         let credentials = CredentialFake()
         credentials.values[account.id] = "fixture-old-key"
-        let store = AppStore(directory: directory, credentials: credentials)
-        store.isPaused = true
+        let store = AppStore(directory: directory, resetRedeemer: resetRedeemer, credentials: credentials, registry: registry)
+        if paused { store.isPaused = true }
         return (store, database, account, directory, credentials)
     }
 
@@ -204,7 +212,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(store.manualResets.map(\.id), resets)
         XCTAssertTrue(edited.useLocalCredentials)
         XCTAssertNil(store.failures[account.id])
-        XCTAssertFalse(store.resetAccountsAwaitingRefresh.contains(account.id))
+        XCTAssertTrue(store.resetAccountsAwaitingRefresh.contains(account.id), "Editing credentials cannot replace a required fresh observation")
     }
 
     func testFailedSavedKeyRemovalPreservesKeyAndRefreshState() throws {
@@ -221,6 +229,75 @@ final class AtomicAccountPersistenceTests: XCTestCase {
         XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
         XCTAssertEqual(store.history[account.id], history)
         XCTAssertEqual(try database.history(account: account.id), history)
+    }
+
+    func testKeyRemovalRefreshPreservesHistoryFromPreviousLoginAcrossRestart() async throws {
+        let next = AccountSnapshot(configurationID: "fixture", identity: "fixture-local-key", source: "fixture")
+        let registry = ProviderRegistry(overrides: [.opencodeGo: UsageFake(snapshot: next)])
+        let (store, database, account, directory, credentials) = try fixture(enabled: true, paused: false, registry: registry)
+        let original = try XCTUnwrap(store.snapshots[account.id])
+        try store.removeSavedKey(for: account)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while store.snapshots[account.id]?.identity != next.identity && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await store.shutDown()
+        XCTAssertEqual(store.snapshots[account.id]?.identity, next.identity)
+        XCTAssertNil(credentials.values[account.id])
+        XCTAssertEqual(store.history[account.id]?.map(\.identity), [original.identity, next.identity])
+        XCTAssertEqual(try database.history(account: account.id).map(\.identity), [original.identity, next.identity])
+        let restarted = AppStore(directory: directory, credentials: credentials, registry: registry)
+        XCTAssertEqual(restarted.quotaHistory(for: account.id).map(\.identity), [original.identity, next.identity])
+        let window = QuotaWindow(id: "weekly", title: "Week", usedPercent: 10, duration: 604800)
+        XCTAssertNotEqual(QuotaPeriod.key(window: window, snapshot: original), QuotaPeriod.key(window: window, snapshot: next),
+                          "The chart must not join measurements from different logins")
+    }
+
+    func testSavingKeyRemovalCommitsOtherEditsTogetherAndKeepsHistory() throws {
+        let (store, database, account, directory, credentials) = try fixture()
+        let history = store.history[account.id]
+        var edited = account; edited.label = "Edited"; edited.useLocalCredentials = false
+        let removeCommitFailure = try failCommit(directory: directory, credentials: credentials)
+        XCTAssertThrowsError(try store.saveAccount(edited, secret: "", removeSavedKey: true))
+        XCTAssertEqual(store.accounts, [account])
+        XCTAssertEqual(credentials.values[account.id], "fixture-old-key")
+        XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [account])
+        removeCommitFailure()
+        try store.saveAccount(edited, secret: "", removeSavedKey: true)
+        XCTAssertEqual(store.accounts, [edited])
+        XCTAssertEqual(try database.read([AccountConfiguration].self, key: "accounts"), [edited])
+        XCTAssertNil(credentials.values[account.id])
+        XCTAssertEqual(store.history[account.id], history)
+        XCTAssertEqual(try database.history(account: account.id), history)
+    }
+
+    func testInFlightResetCannotClearCredentialRecoveryFailure() async throws {
+        let fake = ResetFake(hold: true)
+        let (store, _, account, directory, credentials) = try fixture(provider: .codex, enabled: true, resetRedeemer: fake)
+        let benefit = ResetBenefit(id: "fixture-credit", title: "Fixture", scope: "Codex")
+        let snapshot = AccountSnapshot(configurationID: account.id, identity: "fixture-login", source: "fixture",
+                                       windows: [.init(id: "primary", title: "5h", usedPercent: 90, duration: 18000)], benefits: [benefit])
+        store.snapshots[account.id] = snapshot
+        let pending = Task { try await store.redeemReset(benefit, for: account, expectedIdentity: snapshot.identity) }
+        await fake.waitUntilCalled()
+        let removeCommitFailure = try failCommit(directory: directory, credentials: credentials, failCompensation: true)
+        defer { removeCommitFailure() }
+        XCTAssertThrowsError(try store.saveAccount(account, secret: "fixture-new-key"))
+        let failure = try XCTUnwrap(store.failures[account.id])
+        await fake.finish()
+        _ = try await pending.value
+        XCTAssertEqual(store.failures[account.id], failure)
+        XCTAssertEqual(store.snapshots[account.id], snapshot)
+        // Eligibility must also inspect recovery state if another callback clears display errors.
+        store.failures[account.id] = nil; store.snapshots[account.id] = snapshot
+        store.resetAccountsAwaitingRefresh.remove(account.id)
+        XCTAssertFalse(store.canRedeemReset(benefit, for: account))
+        store.resetAccountsAwaitingRefresh.insert(account.id)
+        removeCommitFailure(); credentials.failSave = false
+        try store.saveAccount(account, secret: "")
+        XCTAssertNil(store.failures[account.id])
+        XCTAssertTrue(store.resetAccountsAwaitingRefresh.contains(account.id))
+        XCTAssertFalse(store.canRedeemReset(benefit, for: account), "Restoring credentials must not reoffer a confirmed credit before refresh")
     }
 
     func testSavedKeyRemovalCommitFailureRestoresKeyAndPreservesHistory() throws {

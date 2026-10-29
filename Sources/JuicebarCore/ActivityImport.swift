@@ -119,7 +119,7 @@ public enum ActivityImport {
                     warnings += previous.notices ?? []
                     warnings.append(tr("{0}: letzter erfolgreicher Stand vom {1} bleibt erhalten. {2}", label, previous.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale)), error.localizedDescription))
                     previous.events.forEach(since: since, through: now) { builder.add($0) }
-                    return nil
+                    return previous.summary
                 }
                 warnings.append("\(label): \(error.localizedDescription)")
                 return nil
