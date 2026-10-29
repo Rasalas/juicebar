@@ -12,6 +12,8 @@ public struct ActivitySourceHealth: Codable, Equatable, Identifiable, Sendable {
     public var issue: String?
     /// Stable coverage limits survive retries and removal; transient transport errors do not.
     public var coverage: [String]?
+    /// SSH limits expire with the affected 90-day history, not with later successful checks.
+    public var coverageObservedAt: [String: Date]?
     public init(id: String, label: String, tools: [ActivitySource]? = nil, phase: Phase, lastSuccess: Date? = nil, issue: String? = nil, coverage: [String]? = nil) {
         self.id = id; self.label = label; self.tools = tools; self.phase = phase; self.lastSuccess = lastSuccess; self.issue = issue; self.coverage = coverage
     }

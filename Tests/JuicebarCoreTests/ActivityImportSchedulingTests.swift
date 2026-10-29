@@ -171,6 +171,52 @@ final class ActivityImportSchedulingTests: XCTestCase {
         _ = try? await first.value
     }
 
+    func testUnchangedSSHDatabaseKeepsCoverageAcrossRestartUntilRetainedUsageExpires() async throws {
+        let root = try directory(), reports = Reports()
+        var request = request(root, hosts: ["a"])
+        let collectors = ActivityImport.Collectors(remote: { [self] host, state, at in
+            var rows: [[String: Any]]
+            if state.databases.isEmpty {
+                rows = [
+                    ["database": "fixture", "fingerprint": "unchanged"],
+                    ["event": ["id": "a", "source": "opencode", "date": now.timeIntervalSince1970, "tokens": 100]],
+                    ["endDatabase": true], ["notice": "Synthetic row limit reached"], ["done": true]
+                ]
+            } else { rows = [["database": "fixture", "unchanged": true], ["done": true]] }
+            if at == now.addingTimeInterval(45 * 86400) {
+                state.carried.append(.init(id: "later", source: .opencode, date: at, model: "fixture", tokens: 40))
+                state.revision += 1
+            }
+            var index = 0
+            try SSHActivity.consume(host: host, state: &state, now: at) {
+                defer { index += 1 }
+                return rows[index]
+            }
+        })
+        try await ActivityImport.readProgressively(request, collectors: collectors) { _, _ in }
+        request.now = now.addingTimeInterval(60)
+        try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        var final = await reports.values.last
+        XCTAssertEqual(final?.days.first?.tokens, 100)
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.coverage, ["a: Synthetic row limit reached"])
+        let cold = try directory().appendingPathComponent("cold")
+        try FileManager.default.copyItem(at: root, to: cold)
+        request.directory = cold; request.now = now.addingTimeInterval(120)
+        try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        final = await reports.values.last
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.coverage, ["a: Synthetic row limit reached"])
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.lastSuccess, request.now)
+        request.now = now.addingTimeInterval(45 * 86400)
+        try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        final = await reports.values.last
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.coverage, ["a: Synthetic row limit reached"])
+        request.now = now.addingTimeInterval(91 * 86400)
+        try await ActivityImport.readProgressively(request, collectors: collectors) { report, _ in await reports.append(report) }
+        final = await reports.values.last
+        XCTAssertEqual(final?.days.reduce(0) { $0 + $1.tokens }, 40, "Newer complete usage must not extend an older coverage limit")
+        XCTAssertEqual(final?.sources?.first { $0.id == "ssh|a" }?.coverage, [])
+    }
+
     func testLocalSummaryAndSourceLastSuccessSurviveUnchangedReadFailureAndRestart() throws {
         let root = try directory(), file = root.appendingPathComponent("opencode.db"), state = root.appendingPathComponent("state")
         var db: OpaquePointer?
@@ -192,6 +238,13 @@ final class ActivityImportSchedulingTests: XCTestCase {
         XCTAssertEqual(failed.0.sources?.first?.lastSuccess, success)
         XCTAssertEqual(failed.0.sources?.first?.phase, .stale)
         XCTAssertEqual(failed.0.days.first?.tokens, 5)
+        let archive = cold.appendingPathComponent("activity-sources/\(stableID("opencode|\(file.path)")).plist")
+        try Data("corrupt synthetic archive".utf8).write(to: archive, options: .atomic)
+        let missing = try read(cold, at: now.addingTimeInterval(180))
+        XCTAssertTrue(missing.0.days.isEmpty)
+        XCTAssertNil(missing.1)
+        XCTAssertEqual(missing.0.sources?.first?.lastSuccess, success)
+        XCTAssertEqual(missing.0.sources?.first?.phase, .unavailable, "A success timestamp cannot substitute for a readable fallback")
     }
 
     func testMissingKiloRootDoesNotAdvanceSuccessfulObservationAndRemovalRetainsHistory() throws {

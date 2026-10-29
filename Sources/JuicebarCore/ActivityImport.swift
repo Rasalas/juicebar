@@ -195,6 +195,13 @@ public enum ActivityImport {
             try control.check()
             let loaded = load()
             var state = loaded.state, health = health
+            let previousCoverage = health.coverage ?? state.notices
+            var coverageTimes = health.coverageObservedAt ?? Dictionary(previousCoverage.map {
+                ($0, health.lastSuccess ?? state.observedAt ?? now)
+            }, uniquingKeysWith: max)
+            coverageTimes = coverageTimes.filter { $0.value >= now.addingTimeInterval(-90 * 86400) }
+            health.coverageObservedAt = coverageTimes
+            health.coverage = coverageTimes.keys.sorted()
             let revision = state.revision
             state.complete = false
             func failedPhase() -> ActivitySourceHealth.Phase {
@@ -216,7 +223,12 @@ public enum ActivityImport {
             do {
                 try collectors.remote(host, &state, now)
                 try control.check()
-                health.phase = .success; health.lastSuccess = state.observedAt; health.issue = nil; health.coverage = state.notices
+                // An unchanged database emits no new notice. Its retained rows still have
+                // the original coverage limit, until that observation leaves the window.
+                for notice in state.notices { coverageTimes[notice] = now }
+                health.coverageObservedAt = coverageTimes
+                health.coverage = coverageTimes.keys.sorted()
+                health.phase = .success; health.lastSuccess = state.observedAt; health.issue = nil
             } catch is CancellationError {
                 health.phase = failedPhase()
                 // Only completed files/checkpoints survive cancellation, never a completed report publication.
@@ -314,7 +326,7 @@ public enum ActivityImport {
                 return summary
             } catch is CancellationError { throw CancellationError() }
             catch {
-                status(lastSuccess != nil || previous != nil ? .stale : .unavailable, at: lastSuccess ?? previous?.observedAt, issue: tr("Quelle konnte nicht vollständig gelesen werden."))
+                status(previous != nil ? .stale : .unavailable, at: lastSuccess ?? previous?.observedAt, issue: tr("Quelle konnte nicht vollständig gelesen werden."))
                 if let previous {
                     health[sourceID]?.coverage = previous.notices
                     warnings += previous.notices ?? []
@@ -400,8 +412,14 @@ public enum ActivityImport {
                 if let saved { kept.observedAt = saved.lastSuccess; kept.complete = kept.archiveValid && (saved.phase == .success || saved.phase == .cached) }
                 let due = SSHActivity.isDue(observedAt: kept.observedAt, complete: kept.complete, now: now, force: request.refreshRemote)
                 job.health.phase = due ? .checking : .cached
+                var hasRetainedUsage = false
+                kept.events.forEach(since: since, through: now) {
+                    hasRetainedUsage = true
+                    builder.add($0, priority: index + 1)
+                }
+                if !hasRetainedUsage { job.health.coverage = []; job.health.coverageObservedAt = [:] }
+                else if job.health.coverage == nil { job.health.coverage = kept.notices }
                 health[job.health.id] = job.health
-                kept.events.forEach(since: since, through: now) { builder.add($0, priority: index + 1) }
                 remoteNotices[index] = kept.notices
                 if due { jobs.append(job) }
             }
