@@ -146,7 +146,29 @@ struct CLISetupHelp: View {
     static func loginCommand(for provider: ProviderKind) -> String? {
         switch provider { case .codex: return "codex login"; case .claude: return "claude auth login"; default: return nil }
     }
-    private var command: String { Self.loginCommand(for: configuration.provider) ?? "" }
+    static func loginCommand(for configuration: AccountConfiguration) -> String? {
+        guard let defaults = loginCommand(for: configuration.provider) else { return nil }
+        let executable = configuration.executablePath.isEmpty
+            ? (configuration.provider == .codex ? "codex" : "claude")
+            : NSString(string: configuration.executablePath).expandingTildeInPath
+        let arguments = configuration.provider == .codex ? " login" : " auth login"
+        let prefix: String
+        if configuration.profileDirectory.isEmpty { prefix = "" }
+        else {
+            let variable = configuration.provider == .codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"
+            prefix = variable + "=" + shellWord(NSString(string: configuration.profileDirectory).expandingTildeInPath) + " "
+        }
+        if configuration.executablePath.isEmpty && prefix.isEmpty { return defaults }
+        return prefix + shellWord(executable) + arguments
+    }
+    /// Quote literal paths, expanding only the same leading tilde as the provider process.
+    /// Shell substitutions, quotes and newlines in a configured path must stay data.
+    private static func shellWord(_ value: String) -> String {
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-")
+        if !value.isEmpty && value.unicodeScalars.allSatisfy({ safe.contains($0) }) { return value }
+        return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+    private var command: String { Self.loginCommand(for: configuration) ?? "" }
     /// A first run only adds the CLIs installed on this Mac, so nobody starts with errors for tools they don't use.
     static func detectedDefaultAccounts(isInstalled: (String) -> Bool = { (try? ProcessClient.executable($0)) != nil }) -> [AccountConfiguration] {
         [(ProviderKind.codex, "codex"), (.claude, "claude")].filter { isInstalled($0.1) }
@@ -170,5 +192,6 @@ struct CLISetupHelp: View {
             Text(tr("Ein gefundenes Programm bestätigt noch keine Anmeldung. Passwörter gehören nur in die Anmeldung des Anbieters."))
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(.vertical, 6)
+            .onChange(of: command) { _, _ in copied = false }
     }
 }
