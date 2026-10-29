@@ -16,15 +16,16 @@ The `macOS / test` job validates pull requests, pushes to main and manual runs. 
 
 ### Performance
 
-Run `bash scripts/check-performance.sh` for the same release-mode profile as CI. It explicitly selects three existing benchmarks with `JUICEBAR_BENCHMARK=1 JUICEBAR_BENCHMARK_PROFILE=ci`:
+Run `bash scripts/check-performance.sh` for the same release-mode profile as CI. It explicitly selects four benchmarks with `JUICEBAR_BENCHMARK=1 JUICEBAR_BENCHMARK_PROFILE=ci`:
 
 | Case | Bounded synthetic fixture | Regression gate |
 | --- | --- | --- |
 | Unchanged import | 64 Claude logs with 50 responses each, 20,000 OpenCode rows; cold and two unchanged imports | Metadata cache identities and hashes stay unchanged; final unchanged CPU is below half the cold CPU plus 20 ms |
 | Append | 6,000 responses in an approximately 24 MiB Claude log; three appends of ten responses | Final append CPU is below half the cold parse CPU plus 20 ms; response counts include each append |
+| Cold SSH archives | Four hosts with 12,000 responses each; cold and two unchanged imports, no host due | No collector runs or archive rewrites; counts remain exact; final unchanged CPU is below half the cold CPU plus 20 ms |
 | Date parsing | 10,000 distinct canonical timestamps | Exact equality with the legacy ISO parser; fast-parser CPU below half the legacy CPU plus 20 ms |
 
-The gates use process user plus system CPU, which excludes time descheduled by runner contention, and compare against a baseline in the same process on the same machine. The 20 ms allowance covers small measurement overhead. Wall time and peak RSS are diagnostic output, without pass/fail thresholds. These checks catch loss of cache/resume/fast-parser behavior; they do not promise latency on a user's hardware. The regular debug suite still skips seven optional benchmarks. The release step runs the three selected cases, without skips. The large archive, peak-memory, repeated-import and aggregation stress workloads remain opt-in with `JUICEBAR_BENCHMARK=1 swift test -c release --filter ActivityPerformanceTests`.
+The gates use process user plus system CPU, which excludes time descheduled by runner contention, and compare against a baseline in the same process on the same machine. The 20 ms allowance covers small measurement overhead. Wall time and peak RSS are diagnostic output, without pass/fail thresholds. These checks catch loss of cache/resume/fast-parser behavior; they do not promise latency on a user's hardware. The regular debug suite skips eight optional benchmarks. The release step runs the four selected cases, without skips. The large archive, peak-memory, repeated-import and aggregation stress workloads remain opt-in with `JUICEBAR_BENCHMARK=1 swift test -c release --filter ActivityPerformanceTests`.
 
 ### Minimum OS
 

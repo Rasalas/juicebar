@@ -343,10 +343,11 @@ public enum ActivityImport {
         }
         func readLocal() throws {
             let roots = request.roots, databasePath = request.databasePath, directory = request.directory
-            warnings += try ActivityLogs.read(roots: roots, cacheDirectory: directory.appendingPathComponent("activity-cache"), now: now, progress: progress, health: { root, success, issues in
+            warnings += try ActivityLogs.read(roots: roots, cacheDirectory: directory.appendingPathComponent("activity-cache"), now: now, progress: progress, health: { observation in
+                let root = observation.root, success = observation.succeeded, issues = observation.issues
                 let id = stableID(root.id)
                 health[id] = ActivitySourceHealth(id: id, label: rootLabel(root), tools: [root.source],
-                    phase: success ? .success : health[id]?.lastSuccess == nil ? .unavailable : .stale,
+                    phase: success ? .success : observation.hasRetainedUsage ? .stale : .unavailable,
                     lastSuccess: success ? now : health[id]?.lastSuccess, issue: success ? nil : issues.first, coverage: success ? issues : health[id]?.coverage)
                 activeHealth.insert(id)
             }, unattributed: { source in
@@ -414,6 +415,7 @@ public enum ActivityImport {
                     let loaded = job.load()
                     var remote = Remote(loaded.state, since: since)
                     remote.archiveValid = loaded.valid
+                    decoded.remember(remote, for: url)
                     return remote
                 }()
                 // Legacy host caches have an observation but no health sidecar.

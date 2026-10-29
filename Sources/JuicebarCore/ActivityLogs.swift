@@ -19,6 +19,7 @@ public enum ActivityLogs {
         var inode: UInt64?
         var resume: Resume?
         var parser: UsageLogParser?
+        var rootID: String?
         var usage: [ActivityEvent] { parser?.events ?? events }
         func matches(size: Int, modified: Date, inode: UInt64?) -> Bool {
             self.size == size && self.modified == modified && (self.inode == nil || self.inode == inode)
@@ -37,15 +38,28 @@ public enum ActivityLogs {
         var inode: UInt64?
         var skipped: Int
         var events: CompactEvents
-        init(key: String, file: CachedFile) {
+        var rootID: String?
+        var retained: RetainedUsage { RetainedUsage(rootID: rootID, events: events) }
+        init(key: String, file: CachedFile, rootID: String? = nil) {
             self.key = key; size = file.size; modified = file.modified; inode = file.inode; skipped = file.skipped
             events = CompactEvents(file.usage)
+            self.rootID = rootID ?? file.rootID
         }
+    }
+    private struct RetainedUsage {
+        var rootID: String?
+        var events: CompactEvents
+    }
+    struct RootObservation {
+        var root: Root
+        var succeeded: Bool
+        var hasRetainedUsage = false
+        var issues: [String]
     }
     /// Parsed results outlive one import, so unchanged logs never touch their cache files again.
     private struct Memory {
         var files: [String: Entry] = [:]
-        var orphans: [String: CompactEvents] = [:]
+        var orphans: [String: RetainedUsage] = [:]
     }
     private final class MemoryStore: @unchecked Sendable {
         private let lock = NSLock()
@@ -101,7 +115,7 @@ public enum ActivityLogs {
     }
     /// Passes each event in the window to `each` instead of collecting them, in the order `read` returns them.
     static func read(roots: [Root], cacheDirectory: URL?, now: Date, progress: @Sendable (String) -> Void,
-                     health: (Root, Bool, [String]) -> Void = { _, _, _ in },
+                     health: (RootObservation) -> Void = { _ in },
                      unattributed: (ActivitySource) -> Void = { _ in },
                      each: (ActivityEvent) -> Void) throws -> [String] {
         let fm = FileManager.default, since = Calendar.current.date(byAdding: .day, value: -90, to: now)!
@@ -124,9 +138,23 @@ public enum ActivityLogs {
         }
         var filesRead = 0, skipped = 0
         var unattributedSources = Set<ActivitySource>()
+        var observations: [RootObservation] = [], retainedRoots = Set<String>()
+        @discardableResult func emit(_ usage: RetainedUsage, orphan: Bool = false) -> Bool {
+            var retained = false
+            usage.events.forEach(since: since, through: now) {
+                retained = true
+                if orphan { unattributedSources.insert($0.source) }
+                each($0)
+            }
+            if retained, let id = usage.rootID { retainedRoots.insert(id) }
+            return retained
+        }
         let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey, .fileIdentifierKey]
         for root in roots where root.source != .kilo {
-            guard fm.fileExists(atPath: root.url.path) else { health(root, false, []); continue }
+            let rootID = stableID(root.id)
+            guard fm.fileExists(atPath: root.url.path) else {
+                observations.append(RootObservation(root: root, succeeded: false, issues: [])); continue
+            }
             var readErrors = 0
             let skippedBefore = skipped
             let enumerator = fm.enumerator(at: root.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles], errorHandler: { _, _ in readErrors += 1; return true })
@@ -149,18 +177,20 @@ public enum ActivityLogs {
                     activeCache.insert(key)
                     let inode = resource.fileIdentifier
                     if let known, known.size == size, known.modified == modified, known.inode == nil || known.inode == inode {
-                        current.files[id] = known
-                        if cacheDirectory == nil { known.events.forEach(since: since, through: now, each) }
+                        var entry = known; entry.rootID = rootID
+                        current.files[id] = entry
+                        if cacheDirectory == nil { emit(entry.retained) }
                         skipped += known.skipped
                     } else {
                         let result: CachedFile = try autoreleasepool {
                             let base = cached(cacheURL)
                             if let base, base.matches(size: size, modified: modified, inode: inode) { return base }
-                            let parsed = try parseFile(file, source: root.source, since: since, size: size, modified: modified, inode: inode, previous: base)
+                            var parsed = try parseFile(file, source: root.source, since: since, size: size, modified: modified, inode: inode, previous: base)
+                            parsed.rootID = rootID
                             if let cacheURL { try encoder.encode(parsed).write(to: cacheURL, options: .atomic) }
                             return parsed
                         }
-                        if cacheDirectory != nil { current.files[id] = Entry(key: key, file: result) }
+                        if cacheDirectory != nil { current.files[id] = Entry(key: key, file: result, rootID: rootID) }
                         if cacheDirectory == nil {
                             for event in result.usage where event.date >= since && event.date <= now { each(event) }
                         }
@@ -174,32 +204,29 @@ public enum ActivityLogs {
                     throw CancellationError()
                 } catch {
                     readErrors += 1
-                    if let last = known ?? cached(cacheURL).map({ Entry(key: key, file: $0) }) {
+                    if var last = known ?? cached(cacheURL).map({ Entry(key: key, file: $0) }) {
+                        last.rootID = rootID
                         activeCache.insert(key)
                         current.files[id] = last
-                        if cacheDirectory == nil { last.events.forEach(since: since, through: now, each) }
+                        if cacheDirectory == nil { emit(last.retained) }
                     }
                 }
             }
             var issues = readErrors > 0 ? [tr("{0}: {1} Dateien konnten nicht gelesen werden.", root.source.name, readErrors)] : []
             notices += issues
             if skipped > skippedBefore { issues.append(tr("{0} Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.", skipped - skippedBefore)) }
-            health(root, readErrors == 0, issues)
+            observations.append(RootObservation(root: root, succeeded: readErrors == 0, issues: issues))
         }
         if skipped > 0 { notices.append(tr("{0} Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.", skipped)) }
         if let cacheDirectory {
             // Vanished logs keep their usage until it leaves the 90-day window.
             var vanished = previous.orphans
-            for entry in previous.files.values { vanished[entry.key] = entry.events }
+            for entry in previous.files.values { vanished[entry.key] = entry.retained }
             for name in ((try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? []).sorted() where name.hasSuffix(".plist") && !activeCache.contains(name) {
                 try Task.checkCancellation()
                 let url = cacheDirectory.appendingPathComponent(name)
-                if let usage = vanished[name] ?? cached(url).map({ CompactEvents($0.usage) }) {
-                    var retained = false
-                    usage.forEach(since: since, through: now) {
-                        retained = true; unattributedSources.insert($0.source); each($0)
-                    }
-                    if retained { current.orphans[name] = usage; continue }
+                if let usage = vanished[name] ?? cached(url).map({ RetainedUsage(rootID: $0.rootID, events: CompactEvents($0.usage)) }) {
+                    if emit(usage, orphan: true) { current.orphans[name] = usage; continue }
                 }
                 try? fm.removeItem(at: url)
             }
@@ -208,14 +235,19 @@ public enum ActivityLogs {
             let files = current.files.keys.sorted()
             for id in files where !liveFiles.contains(id) {
                 try Task.checkCancellation()
-                current.files[id]?.events.forEach(since: since, through: now, each)
+                if let entry = current.files[id] { emit(entry.retained) }
             }
             for id in files where liveFiles.contains(id) {
                 try Task.checkCancellation()
-                current.files[id]?.events.forEach(since: since, through: now, each)
+                if let entry = current.files[id] { emit(entry.retained) }
             }
         }
-        // Cache names are file digests, so an orphan cannot inherit a current root's success.
+        // A previous success alone cannot prove that any fallback is still readable.
+        for var observation in observations {
+            observation.hasRetainedUsage = retainedRoots.contains(stableID(observation.root.id))
+            health(observation)
+        }
+        // Retention does not revalidate vanished files, even when their original root is known.
         for source in unattributedSources { unattributed(source) }
         completed = true
         return notices

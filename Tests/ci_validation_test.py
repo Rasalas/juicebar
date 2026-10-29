@@ -23,7 +23,7 @@ class PerformanceResultsTests(unittest.TestCase):
             else f"Test Case 'Module.Class.{name}' {outcome} (0.1 seconds)." for name in names
         )
 
-    def test_requires_exactly_the_three_passing_cases(self):
+    def test_requires_exactly_the_expected_passing_cases(self):
         performance.check_results(self.report())
         performance.check_results(self.report(objective_c=True))
         for output in [self.report([]), self.report(["testUnchangedImport"]),
