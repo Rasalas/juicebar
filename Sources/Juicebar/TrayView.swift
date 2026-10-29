@@ -148,7 +148,7 @@ private struct TrayWindowRow: Identifiable {
 private struct TrayAccountRow: Identifiable {
     let account: AccountConfiguration
     let snapshot: AccountSnapshot?
-    let failure: String?
+    let failure: AccountFailure?
     let windows: [TrayWindowRow]
     var id: String { account.id }
 }

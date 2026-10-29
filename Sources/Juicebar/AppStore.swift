@@ -16,7 +16,7 @@ final class AppStore {
     var accounts: [AccountConfiguration] = []
     private(set) var settings = MonitorSettings()
     var snapshots: [String: AccountSnapshot] = [:]
-    var failures: [String: String] = [:]
+    var failures: [String: AccountFailure] = [:]
     var refreshingAccountIDs: Set<String> = []
     var isRefreshing: Bool { !refreshingAccountIDs.isEmpty }
     var isPaused = false { didSet { if isPaused { scheduler.cancelAll(); cancelActivityImport() } else { refreshActivityIfNeeded() } } }
@@ -60,7 +60,7 @@ final class AppStore {
     @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private var durableSettings = MonitorSettings()
     @ObservationIgnored private var credentialRecovery: Set<String> = []
-    @ObservationIgnored private var pendingAccountMutations: [String: Int] = [:]
+    private var pendingAccountMutations: [String: Int] = [:]
     private let registry: ProviderRegistry
     @ObservationIgnored private var refreshPolicy = AccountRefreshPolicy()
     private let scheduler = AccountRefreshScheduler()
@@ -221,8 +221,8 @@ final class AppStore {
                 } catch is CancellationError { return }
                 catch {
                     guard scheduler.isCurrent(id: account.id, generation: generation), accounts.contains(where: { $0 == account }) else { return }
-                    failures[account.id] = error.localizedDescription
                     refreshPolicy.failed(id: account.id, error: error, refreshSeconds: settings.refreshSeconds, now: Date())
+                    failures[account.id] = AccountFailure(error)
                 }
                 lastChecked = Date()
             }
@@ -234,6 +234,48 @@ final class AppStore {
                 let snapshot = snapshots[account.id] ?? AccountSnapshot(configurationID: account.id, identity: account.id, observedAt: .distantPast, source: tr("Manuell"))
                 await notify(account: account, snapshot: withManualResets(snapshot), generation: generation)
             }
+        }
+    }
+
+    func failureRecoveryState(for account: AccountConfiguration, at date: Date = Date()) -> AccountFailureRecoveryState {
+        guard !isLoading, !isShuttingDown, !isDemo, accounts.contains(account), failures[account.id] != nil else { return .unavailable }
+        if pendingAccountMutations[account.id, default: 0] > 0 || refreshingAccountIDs.contains(account.id) || redeemingResetAccounts.contains(account.id) { return .running }
+        // Credential compensation must remain available even for paused or disabled accounts.
+        if credentialRecovery.contains(account.id) { return .ready }
+        guard account.enabled, !isPaused else { return .unavailable }
+        if let until = refreshPolicy.retryAllowedAt(id: account.id, now: date) { return .waiting(until: until) }
+        return .ready
+    }
+
+    /// Retry the current failure without overlapping accepted account actions or bypassing cooldowns.
+    /// Restoration uses the persistence worker's retained backup, never asks for a replacement secret.
+    func retryAccountFailure(for account: AccountConfiguration) async {
+        guard failureRecoveryState(for: account).canRetry, let failure = failures[account.id] else { return }
+        guard credentialRecovery.contains(account.id) else {
+            guard failure.actions(for: account).contains(.retry) else { return }
+            refresh(force: true, only: account.id)
+            return
+        }
+        let id = account.id
+        pendingAccountMutations[id, default: 0] += 1
+        scheduler.invalidate(id: id)
+        defer {
+            pendingAccountMutations[id, default: 0] -= 1
+            refresh(force: true, only: id)
+        }
+        do {
+            try await mutate { [self] in
+                guard accounts.contains(account), credentialRecovery.contains(id) else { return }
+                try await persistence.retryCredentialRecovery(id)
+                credentialRecovery.remove(id)
+                // Preserve the session's fresh-reset requirement until an actual provider read succeeds.
+                invalidateAccount(id)
+                if storageError == CredentialRecoveryFailure().localizedDescription { storageError = nil }
+            }
+        } catch {
+            // Compensation failure retains both the backup and the blocking state.
+            if error is CredentialRecoveryFailure { failures[id] = .credentialRecovery }
+            storageError = error.localizedDescription
         }
     }
 
@@ -429,7 +471,7 @@ final class AppStore {
                 }
             } catch {
                 if error is CredentialRecoveryFailure {
-                    credentialRecovery.insert(id); failures[id] = error.localizedDescription; storageError = error.localizedDescription
+                    credentialRecovery.insert(id); failures[id] = .credentialRecovery; storageError = error.localizedDescription
                 }
                 throw error
             }

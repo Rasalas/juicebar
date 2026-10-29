@@ -445,38 +445,72 @@ func lastValueText(_ date: Date, now: Date) -> String {
 struct AccountFailureView: View {
     let store: AppStore
     let account: AccountConfiguration
-    let failure: String
+    let failure: AccountFailure
     @State private var copied = false
+    private var actions: [AccountFailure.Action] { failure.actions(for: account) }
     private var loginCommand: String? {
-        failure == ProviderFailure.authentication.localizedDescription ? CLISetupHelp.loginCommand(for: account) : nil
+        for action in actions { if case .copyLogin(let command) = action { return command } }
+        return nil
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warning).accessibilityHidden(true)
-                Text(failure).fixedSize(horizontal: false, vertical: true)
-            }
-            if let loginCommand {
-                Text(tr("Im Terminal anmelden: {0}", loginCommand)).foregroundStyle(.secondary).textSelection(.enabled)
-            }
-            HStack(spacing: 6) {
-                if let loginCommand {
-                    Button(copied ? tr("Kopiert") : tr("Kopieren")) {
-                        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(loginCommand, forType: .string); copied = true
-                    }.accessibilityLabel(tr("Befehl kopieren"))
-                }
-                Button(tr("Einrichten")) { DashboardWindow.shared.show(store: store, page: .accounts, editing: account.id) }
-                Button(tr("Deaktivieren")) {
-                    var disabled = account; disabled.enabled = false
-                    Task { do { try await store.saveAccount(disabled, secret: "") } catch { store.storageError = error.localizedDescription } }
-                }.help(tr("Verbrauch für dieses Konto nicht mehr abrufen"))
-            }.buttonStyle(JuiceButtonStyle())
+        // A visible cooldown expires without needing to open the panel again or force a request.
+        TimelineView(.explicit(recoveryDates)) { context in
+            content(state: store.failureRecoveryState(for: account, at: context.date))
         }
         .font(.subheadline)
         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.warning.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
         .accessibilityElement(children: .contain)
         .onChange(of: loginCommand) { _, _ in copied = false }
+    }
+    private var recoveryDates: [Date] {
+        let now = Date()
+        if case .waiting(let until) = store.failureRecoveryState(for: account, at: now) { return [now, until] }
+        return [now]
+    }
+    private func content(state: AccountFailureRecoveryState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warning).accessibilityHidden(true)
+                Text(failure.message).fixedSize(horizontal: false, vertical: true)
+            }
+            if let loginCommand {
+                Text(tr("Im Terminal anmelden: {0}", loginCommand)).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if case .waiting(let until) = state {
+                Text(tr("Erneuter Versuch frühestens um {0}.", until.formatted(date: .omitted, time: .standard)))
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { buttons(state: state) }
+                VStack(alignment: .leading, spacing: 6) { buttons(state: state) }
+            }.buttonStyle(JuiceButtonStyle())
+        }
+    }
+    @ViewBuilder private func buttons(state: AccountFailureRecoveryState) -> some View {
+        ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+            switch action {
+            case .retry, .restoreCredentials:
+                Button {
+                    Task { await store.retryAccountFailure(for: account) }
+                } label: {
+                    HStack(spacing: 5) {
+                        if state.isRunning { ProgressView().controlSize(.mini) }
+                        Text(state.isRunning ? tr("Wird ausgeführt …") : action == .restoreCredentials ? tr("Schlüssel wiederherstellen") : tr("Erneut versuchen"))
+                    }
+                }.disabled(!state.canRetry)
+            case .copyLogin(let command):
+                Button(copied ? tr("Kopiert") : tr("Befehl kopieren")) {
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command, forType: .string); copied = true
+                }.disabled(state.isRunning)
+            case .configure:
+                Button(tr("Einrichten")) { DashboardWindow.shared.show(store: store, page: .accounts, editing: account.id) }
+                    .disabled(state.isRunning)
+            case .providerPage:
+                Link(tr("Beim Anbieter öffnen"), destination: account.provider.accountURL)
+            }
+        }
     }
 }
 
