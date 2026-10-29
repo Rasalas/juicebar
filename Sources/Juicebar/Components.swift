@@ -448,7 +448,7 @@ struct AccountFailureView: View {
     let failure: String
     @State private var copied = false
     private var loginCommand: String? {
-        failure == ProviderFailure.authentication.localizedDescription ? CLISetupHelp.loginCommand(for: account.provider) : nil
+        failure == ProviderFailure.authentication.localizedDescription ? CLISetupHelp.loginCommand(for: account) : nil
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -476,6 +476,7 @@ struct AccountFailureView: View {
         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.warning.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
         .accessibilityElement(children: .contain)
+        .onChange(of: loginCommand) { _, _ in copied = false }
     }
 }
 
