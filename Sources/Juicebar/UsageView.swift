@@ -140,11 +140,12 @@ struct UsageView: View {
                                     }
                                     Spacer()
                                     Text(compactNumber(model.tokens)).monospacedDigit()
-                                    Text(model.cost.formatted(.currency(code: "USD").locale(Localization.locale))).monospacedDigit().foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
+                                    Text(model.costLabel).monospacedDigit().foregroundStyle(.secondary).frame(width: 110, alignment: .trailing)
                                 }.font(.callout)
                                 Divider()
                             }
                             Text(tr("Kosten sind OpenCode-Schätzungen, keine Abo-Rechnung. SSH-Nutzung ist in dieser lokalen Modellliste nicht enthalten.")).font(.caption).foregroundStyle(.secondary)
+                            Text(tr("≥ zeigt nur den bepreisten Anteil. Fehlende Kosten sind nicht null.")).font(.caption).foregroundStyle(.secondary)
                         }.padding(.top, 14)
                     }
                 }

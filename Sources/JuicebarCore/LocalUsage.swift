@@ -13,12 +13,28 @@ public struct LocalUsageReport: Codable, Sendable {
         self.days = days; self.models = models; self.messageCount = messageCount; self.notice = notice; self.observedAt = observedAt
     }
 }
-public struct ModelUsage: Codable, Identifiable, Sendable {
+public struct ModelUsage: Codable, Identifiable, Equatable, Sendable {
     public var id: String
     public var provider: String
     public var model: String
     public var tokens: Double
     public var cost: Double
+    /// Tokens belonging to messages with an explicit, valid logged cost, including zero.
+    /// Nil means an older cache did not record coverage; its summed cost cannot prove full coverage.
+    public var pricedTokens: Double? = nil
+    public enum CostCoverage: Equatable, Sendable { case unknown, partial, complete }
+    public var costCoverage: CostCoverage {
+        guard let pricedTokens, pricedTokens > 0 else { return .unknown }
+        return pricedTokens >= tokens ? .complete : .partial
+    }
+    public var costLabel: String {
+        let amount = cost.formatted(.currency(code: "USD").locale(Localization.locale))
+        switch costCoverage {
+        case .unknown: return tr("Unbekannt")
+        case .partial: return "≥ " + amount
+        case .complete: return amount
+        }
+    }
 }
 
 public enum OpenCodeHistory {
@@ -75,7 +91,7 @@ public enum OpenCodeHistory {
         sqlite3_busy_timeout(database, 100)
         let since = now.addingTimeInterval(-Double(lookbackDays) * 86400).timeIntervalSince1970 * 1000
         var rows: [String: (day: Date, date: Date, tokens: Double, cost: Double?, provider: String, model: String, usage: TokenBreakdown?)] = [:]
-        var supported = false, limited = false, missingCosts = false
+        var supported = false, limited = false
         var nextFutureDate: Date?
         // V2 is read after V1 so a migrated record replaces its legacy copy.
         for table in ["message", "session_message"] {
@@ -102,8 +118,7 @@ public enum OpenCodeHistory {
                 let id = message["id"] as? String ?? String(cString: rawID)
                 let provider = message["providerID"] as? String ?? model["providerID"] as? String ?? model["providerId"] as? String ?? tr("Unbekannt")
                 let name = message["modelID"] as? String ?? model["modelID"] as? String ?? model["id"] as? String ?? tr("Unbekannt")
-                let cost = JSONValue.number(message["cost"])
-                if cost == nil { missingCosts = true }
+                let cost = JSONValue.number(message["cost"]).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
                 let time = (message["time"] as? [String: Any]).flatMap { JSONValue.number($0["created"]) } ?? sqlite3_column_double(stmt, 2)
                 let date = Date(timeIntervalSince1970: time / 1000)
                 if date > now {
@@ -121,13 +136,16 @@ public enum OpenCodeHistory {
             var day = days[row.day] ?? UsageDay(day: row.day, tokens: 0, cost: 0)
             day.tokens += row.tokens; day.cost = (day.cost ?? 0) + (row.cost ?? 0); days[row.day] = day
             let id = "\(row.provider)/\(row.model)"
-            var model = models[id] ?? ModelUsage(id: id, provider: row.provider, model: row.model, tokens: 0, cost: 0)
-            model.tokens += row.tokens; model.cost += row.cost ?? 0; models[id] = model
+            var model = models[id] ?? ModelUsage(id: id, provider: row.provider, model: row.model, tokens: 0, cost: 0, pricedTokens: 0)
+            model.tokens += row.tokens; model.cost += row.cost ?? 0
+            if row.cost != nil { model.pricedTokens = (model.pricedTokens ?? 0) + row.tokens }
+            models[id] = model
         }
+        let missingCosts = rows.values.contains { $0.cost == nil }
         let note = tr("Lokale Nachrichten der letzten {0} Tage. Kosten sind OpenCode-Schätzungen, keine Abo-Rechnung. Kopien mit gleicher Nachrichten-ID werden nur einmal gezählt.", lookbackDays)
             + (limited ? tr(" Anzeige auf die neuesten 100.000 Zeilen je Tabelle begrenzt.") : "")
             + (missingCosts ? tr(" Für einige Nachrichten fehlen Kosten.") : "")
-        var report = LocalUsageReport(days: days.values.sorted { $0.day < $1.day }, models: models.values.sorted { $0.tokens > $1.tokens }, messageCount: rows.count, notice: note, observedAt: now)
+        var report = LocalUsageReport(days: days.values.sorted { $0.day < $1.day }, models: models.values.sorted { $0.tokens == $1.tokens ? $0.id < $1.id : $0.tokens > $1.tokens }, messageCount: rows.count, notice: note, observedAt: now)
         report.importWarnings = limited ? [tr("{0}: Import auf die neuesten 100.000 Zeilen je Tabelle begrenzt.", source.name)] : []
         report.events = rows.map { id, row in ActivityEvent(id: stableID(id), source: source, date: row.date, model: row.model, provider: row.provider, tokens: row.tokens, usage: row.usage, reportedCost: source == .kilo ? row.cost : nil) }
         try Task.checkCancellation()

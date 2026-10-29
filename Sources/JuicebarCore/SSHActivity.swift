@@ -106,6 +106,7 @@ public enum SSHActivity {
                     database?.events.append(ActivityEvent(id: id, source: source, date: date, model: event["model"] as? String ?? tr("Unbekannt"), provider: event["provider"] as? String ?? "", tokens: tokens, usage: (event["tokenBreakdown"] as? [String: Any]).flatMap(TokenBreakdown.opencode), reportedCost: source == .kilo ? JSONValue.number(event["reportedCost"]) : nil))
                 } else if row["endDatabase"] as? Bool == true, let current = database {
                     // Rows deleted on the host stay imported, as with the local OpenCode archive.
+                    // Reread observations follow retained ones so equal-total metadata corrections can replace them.
                     var unique = Dictionary((state.databases[current.key]?.events ?? []).map { ("\($0.source.rawValue)|\($0.id)", $0) }, uniquingKeysWith: ActivityEvent.preferred)
                     for event in current.events {
                         let key = "\(event.source.rawValue)|\(event.id)"

@@ -1,7 +1,7 @@
 import Foundation
 
 extension ActivityReport {
-    /// Folds events into a report while they are read. Keeps one 80-byte record per (source, ID) instead of the events,
+    /// Folds events into a report while they are read. Keeps one compact record per (source, ID) instead of the events,
     /// so an import never holds its whole event list. Adding events in the order of a list gives that list's report.
     struct Builder {
         private typealias Digest = (UInt64, UInt64, UInt64, UInt64)
@@ -17,13 +17,14 @@ extension ActivityReport {
             var label: UInt32
             var source: ActivitySource
             var flags: UInt8
-            var preference: (tokens: Double, hasUsage: Bool, session: Date?) {
-                (tokens, flags & Builder.hasUsage != 0, flags & Builder.hasSession != 0 ? Date(timeIntervalSinceReferenceDate: session) : nil)
+            var completeness: UInt8
+            var preference: ActivityEvent.Preference {
+                .init(tokens: tokens, completeness: completeness, session: flags & Builder.hasSession != 0 ? Date(timeIntervalSinceReferenceDate: session) : nil)
             }
         }
         private struct ModelKey: Hashable { var model: String; var provider: String }
         private struct Model { var key: ModelKey; var rate: CatalogDocument.Rate?; var alias: String? }
-        private static let hasUsage: UInt8 = 1, priced: UInt8 = 2, hasSession: UInt8 = 4, textID: UInt8 = 8
+        private static let priced: UInt8 = 2, hasSession: UInt8 = 4, textID: UInt8 = 8
         private static let chunkSize = 16384
         private let now: Date, calendar: Calendar, catalog = ModelCatalog.shared.snapshot
         // Fixed-size chunks and a slot table of record numbers: growing never copies the records,
@@ -44,7 +45,7 @@ extension ActivityReport {
             // Streaming blocks may repeat a message with an updated output count.
             if let existing {
                 let record = chunks[existing / Self.chunkSize][existing % Self.chunkSize]
-                guard !ActivityEvent.keepsFirst(source: event.source, record.preference, (event.tokens, event.usage != nil, event.sessionStartedAt)) else { return }
+                guard !ActivityEvent.keepsFirst(source: event.source, record.preference, event.preference) else { return }
                 chunks[existing / Self.chunkSize][existing % Self.chunkSize] = self.record(event, digest: digest)
                 return
             }
@@ -87,7 +88,7 @@ extension ActivityReport {
                 models.append(Model(key: key, rate: APICost.rate(model: event.model, provider: event.provider, catalog: catalog),
                                     alias: alias.map { "\(event.model) → \($0.displayName)" }))
             }
-            var flags: UInt8 = (event.usage == nil ? 0 : Self.hasUsage) | (digest == nil ? Self.textID : 0), cost = 0.0
+            var flags: UInt8 = digest == nil ? Self.textID : 0, cost = 0.0
             if let reported = event.reportedCost, reported.isFinite, reported >= 0 {
                 cost = reported; flags |= Self.priced
             } else if let usage = event.usage, abs(usage.total - event.tokens) < 0.5, let rate = models[Int(label)].rate,
@@ -97,7 +98,7 @@ extension ActivityReport {
             if event.sessionStartedAt != nil { flags |= Self.hasSession }
             return Record(digest: digest ?? (0, 0, 0, 0), date: event.date.timeIntervalSinceReferenceDate, tokens: event.tokens, cost: cost,
                           session: event.sessionStartedAt?.timeIntervalSinceReferenceDate ?? 0, responses: event.responseCount ?? 1,
-                          label: label, source: event.source, flags: flags)
+                          label: label, source: event.source, flags: flags, completeness: event.preference.completeness)
         }
 
         func report(notices: [String] = [], warnings: [String] = []) -> ActivityReport {

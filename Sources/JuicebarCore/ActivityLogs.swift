@@ -86,6 +86,7 @@ public enum ActivityLogs {
         for account in accounts where !account.profileDirectory.isEmpty && (account.provider == .codex || account.provider == .claude) {
             let root = URL(fileURLWithPath: (account.profileDirectory as NSString).expandingTildeInPath)
             roots.append(Root(source: account.provider == .codex ? .codex : .claude, url: root.appendingPathComponent(account.provider == .codex ? "sessions" : "projects")))
+            if account.provider == .codex { roots.append(Root(source: .codex, url: root.appendingPathComponent("archived_sessions"))) }
         }
         roots += additional.filter { ActivitySource.logFormats.contains($0.source) }
         var seen = Set<String>()
