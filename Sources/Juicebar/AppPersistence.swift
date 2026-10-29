@@ -111,6 +111,7 @@ final class AppPersistence: @unchecked Sendable {
             configuration.activityRoots = load([ActivityLogs.Root].self, "activity-roots", missing: [], unreadable: [])
             var result = PersistenceBootstrap(configuration: configuration)
             result.activity = try? db.readCache(ActivityReport.self, key: "activity-report-v2")
+            result.activity?.markCached()
             result.localUsage = try? db.readCache(LocalUsageReport.self, key: "local-usage-v2")
             do { result.warnings = try db.warnings() } catch { errors.append(error.localizedDescription) }
             let now = Date(), since = Date().addingTimeInterval(-HistoryRetention.loadedSpan)
@@ -228,10 +229,12 @@ final class AppPersistence: @unchecked Sendable {
         }
     }
 
-    func cacheImport(_ activity: ActivityReport, localUsage: LocalUsageReport?) async {
+    func cacheImport(_ activity: ActivityReport, localUsage: LocalUsageReport?, control: ActivityImport.Control = .init()) async {
         _ = try? await perform { [self] in
-            try? database!.write(activity, key: "activity-report-v2")
-            if let localUsage { try? database!.write(localUsage, key: "local-usage-v2") }
+            try control.commit {
+                try? database!.write(activity, key: "activity-report-v2")
+                if let localUsage { try? database!.write(localUsage, key: "local-usage-v2") }
+            }
         }
     }
 

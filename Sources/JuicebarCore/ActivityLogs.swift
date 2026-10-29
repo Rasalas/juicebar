@@ -101,6 +101,8 @@ public enum ActivityLogs {
     }
     /// Passes each event in the window to `each` instead of collecting them, in the order `read` returns them.
     static func read(roots: [Root], cacheDirectory: URL?, now: Date, progress: @Sendable (String) -> Void,
+                     health: (Root, Bool, [String]) -> Void = { _, _, _ in },
+                     unattributed: (ActivitySource) -> Void = { _ in },
                      each: (ActivityEvent) -> Void) throws -> [String] {
         let fm = FileManager.default, since = Calendar.current.date(byAdding: .day, value: -90, to: now)!
         if let cacheDirectory { try fm.createDirectory(at: cacheDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
@@ -121,11 +123,14 @@ public enum ActivityLogs {
             }
         }
         var filesRead = 0, skipped = 0
+        var unattributedSources = Set<ActivitySource>()
         let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey, .fileIdentifierKey]
         for root in roots where root.source != .kilo {
-            guard fm.fileExists(atPath: root.url.path) else { continue }
+            guard fm.fileExists(atPath: root.url.path) else { health(root, false, []); continue }
             var readErrors = 0
+            let skippedBefore = skipped
             let enumerator = fm.enumerator(at: root.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles], errorHandler: { _, _ in readErrors += 1; return true })
+            if enumerator == nil { readErrors += 1 }
             while let file = enumerator?.nextObject() as? URL {
                 try Task.checkCancellation()
                 guard root.source.acceptsLog(file), seen.insert(file.standardizedFileURL.path).inserted else { continue }
@@ -176,7 +181,10 @@ public enum ActivityLogs {
                     }
                 }
             }
-            if readErrors > 0 { notices.append(tr("{0}: {1} Dateien konnten nicht gelesen werden.", root.source.name, readErrors)) }
+            var issues = readErrors > 0 ? [tr("{0}: {1} Dateien konnten nicht gelesen werden.", root.source.name, readErrors)] : []
+            notices += issues
+            if skipped > skippedBefore { issues.append(tr("{0} Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.", skipped - skippedBefore)) }
+            health(root, readErrors == 0, issues)
         }
         if skipped > 0 { notices.append(tr("{0} Nutzungszeilen konnten nicht gelesen werden. Sie werden bei Änderungen erneut geprüft.", skipped)) }
         if let cacheDirectory {
@@ -188,7 +196,9 @@ public enum ActivityLogs {
                 let url = cacheDirectory.appendingPathComponent(name)
                 if let usage = vanished[name] ?? cached(url).map({ CompactEvents($0.usage) }) {
                     var retained = false
-                    usage.forEach(since: since, through: now) { retained = true; each($0) }
+                    usage.forEach(since: since, through: now) {
+                        retained = true; unattributedSources.insert($0.source); each($0)
+                    }
                     if retained { current.orphans[name] = usage; continue }
                 }
                 try? fm.removeItem(at: url)
@@ -205,6 +215,8 @@ public enum ActivityLogs {
                 current.files[id]?.events.forEach(since: since, through: now, each)
             }
         }
+        // Cache names are file digests, so an orphan cannot inherit a current root's success.
+        for source in unattributedSources { unattributed(source) }
         completed = true
         return notices
     }

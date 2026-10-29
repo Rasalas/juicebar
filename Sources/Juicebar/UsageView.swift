@@ -34,11 +34,12 @@ struct UsageView: View {
             if let error = store.localUsageError { Text(error).font(.callout).foregroundStyle(Palette.warning) }
             if let report = store.activity {
                 HStack {
-                    Text(store.isPaused ? tr("Automatische Aktualisierung pausiert") : tr("Automatisch alle 5 Minuten · {0}", updatedText(report.observedAt, now: store.now)))
+                    Text(store.isPaused ? tr("Automatische Aktualisierung pausiert") : tr("Automatisch alle 5 Minuten · Zusammenstellung: {0}", report.observedAt.formatted(.dateTime.hour().minute().locale(Localization.locale))))
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     JuiceSegments(title: tr("Zeitraum"), selection: $days, options: [(tr("30 Tage"), 30), (tr("90 Tage"), 90)]).frame(width: 175)
                 }
+                UsageFreshnessView(report: report, source: source)
                 summary(filtered)
                 Panel {
                     VStack(alignment: .leading, spacing: 20) {
@@ -86,8 +87,8 @@ struct UsageView: View {
                     DisclosureGroup(report.warnings.isEmpty ? tr("Datenquellen & Preisberechnung") : tr("Datenquellen & Preisberechnung · {0} Hinweise", report.warnings.count)) {
                         VStack(alignment: .leading, spacing: 10) {
                             Text(tr("Logs dieses Macs und der eingerichteten SSH-Rechner, einschließlich Unteragenten. Keine verlässliche Zuordnung zu einzelnen Abos. Vor dem ersten Import gelöschte Logs und nicht verbundene Geräte können fehlen. Anbieter-Tageswerte werden nicht zusätzlich addiert."))
-                            Text(tr("Stand: {0}. Automatischer Import beim Start und alle fünf Minuten. Unveränderte Dateien werden aus dem Cache gelesen. Bereits erfasste Nutzungsdaten bleiben 90 Tage erhalten, auch wenn ein Chat gelöscht wird.", report.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale))))
-                            Text(tr("API-Gegenwert: aktuelle Standardpreise in USD, Stand {0}. Input, Output und Cache werden getrennt berechnet; lange Kontexte berücksichtigen modellabhängige Aufpreise. Ohne Steuern, Toolgebühren, Fast-Modus oder Batch-Rabatte. Keine Abo-Rechnung. Fehlt die Cache-Dauer, wird die kurze Dauer angenommen.", APICost.priceDate))
+                            Text(tr("Zusammenstellung: {0}. Quellen können ältere Werte enthalten. Automatischer Import beim Start und alle fünf Minuten. Unveränderte Dateien werden aus dem Cache gelesen. Bereits erfasste Nutzungsdaten bleiben 90 Tage erhalten, auch wenn ein Chat gelöscht wird.", report.observedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localization.locale))))
+                            Text(tr("API-Gegenwert: aktuelle Standardpreise in USD, Stand {0}. Input, Output und Cache werden getrennt berechnet; lange Kontexte berücksichtigen modellabhängige Aufpreise. Ohne Steuern, Toolgebühren, Fast-Modus oder Batch-Rabatte. Keine Abo-Rechnung. Fehlt die Cache-Dauer, wird die kurze Dauer angenommen.", report.pricingVerifiedOn ?? tr("Unbekannt")))
                             Text(tr("Pi, Cline, Roo Code und Kilo: Kosten aus dem Log haben Vorrang. Fehlen sie, verwenden wir den Preiskatalog. Roo protokolliert dabei keinen Modellnamen. Auch bei Abo-Anbietern ist dies ein API-Gegenwert, keine Rechnung. Pi-Tool-Verbrauch und Cache-Warming erhöhen die Tokenzahl, nicht die Anzahl der Antworten."))
                             HStack {
                                 Link(tr("OpenAI-Preise"), destination: URL(string: "https://developers.openai.com/api/docs/pricing")!)
@@ -101,6 +102,9 @@ struct UsageView: View {
                             let missing = Set(filtered.flatMap { $0.unpricedModels }).sorted()
                             if !missing.isEmpty { Text(tr("Noch ohne Kostenbewertung: ") + missing.joined(separator: ", ")) }
                             ForEach(report.warnings, id: \.self) { Text($0).foregroundStyle(Palette.warning) }
+                            ForEach(report.sources?.filter { $0.issue != nil } ?? []) { item in
+                                Text("\(item.label): \(item.issue ?? "")").foregroundStyle(Palette.warning)
+                            }
                             ForEach(report.notices, id: \.self) { Text($0) }
                             Button(tr("Andere OpenCode-Datenbank …")) { store.selectLocalDatabase() }.disabled(store.isDemo || store.localUsageLoading)
                         }.font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
