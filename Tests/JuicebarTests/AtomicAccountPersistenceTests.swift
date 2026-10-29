@@ -138,7 +138,7 @@ final class AtomicAccountPersistenceTests: XCTestCase {
     private func failCommit(directory: URL, credentials: CredentialFake, failCompensation: Bool = false) throws -> () -> Void {
         try execute("CREATE TABLE fixture_parent(id INTEGER PRIMARY KEY); CREATE TABLE fixture_child(parent INTEGER REFERENCES fixture_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER fail_commit AFTER INSERT ON preferences WHEN NEW.id='accounts' BEGIN INSERT INTO fixture_child VALUES(1); END", directory: directory)
         if failCompensation { credentials.onMutation = { credentials.failSave = true } }
-        return { try? self.execute("DROP TRIGGER fail_commit; DROP TABLE fixture_child; DROP TABLE fixture_parent", directory: directory) }
+        return { try? self.execute("DROP TRIGGER IF EXISTS fail_commit; DROP TABLE IF EXISTS fixture_child; DROP TABLE IF EXISTS fixture_parent", directory: directory) }
     }
 
     func testFailedCommitRestoresReplacedAndNewCredentials() throws {
