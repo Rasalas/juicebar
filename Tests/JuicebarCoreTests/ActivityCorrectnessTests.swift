@@ -140,6 +140,53 @@ final class ActivityCorrectnessTests: XCTestCase {
         XCTAssertTrue(customOnly.contains { $0.url == profile.appendingPathComponent("archived_sessions") })
     }
 
+    func testMovedLogCorrectionOverridesRetainedCacheAfterRestart() throws {
+        let root = try directory(), logs = root.appendingPathComponent("sessions"), cache = root.appendingPathComponent("cache")
+        let archives = root.appendingPathComponent("archived_sessions")
+        for folder in [logs, archives] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        let roots = [ActivityLogs.Root(source: .codex, url: logs), .init(source: .codex, url: archives)]
+        func write(_ file: URL, input: Int) throws {
+            let context: [String: Any] = ["type": "turn_context", "payload": ["model": "gpt-6-astra"]]
+            let record: [String: Any] = ["type": "token_usage_record", "timestamp": now.timeIntervalSince1970,
+                                         "payload": ["response_id": "same",
+                                                     "usage": ["input_tokens": input, "output_tokens": 100 - input]]]
+            var line = try JSONSerialization.data(withJSONObject: context); line.append(10)
+            line.append(try JSONSerialization.data(withJSONObject: record)); line.append(10)
+            try line.write(to: file)
+        }
+        func report(_ cache: URL) throws -> ActivityDay {
+            let result = try ActivityLogs.read(roots: roots, cacheDirectory: cache, now: now)
+            return try XCTUnwrap(ActivityReport(events: result.events, now: now).days.first)
+        }
+        let original = logs.appendingPathComponent("a.jsonl")
+        try write(original, input: 90)
+        let oldCost = try report(cache).apiCost
+        XCTAssertEqual(oldCost, try XCTUnwrap(APICost.estimate(model: "gpt-6-astra", usage: TokenBreakdown(input: 90, output: 10))))
+        try FileManager.default.removeItem(at: original)
+        try write(archives.appendingPathComponent("b.jsonl"), input: 10)
+        let expected = try XCTUnwrap(APICost.estimate(model: "gpt-6-astra", usage: TokenBreakdown(input: 10, output: 90)))
+        XCTAssertNotEqual(oldCost, expected)
+        XCTAssertEqual(try report(cache).apiCost, expected)
+        XCTAssertEqual(try report(cache).responses, 1)
+        let cold = root.appendingPathComponent("cold-cache")
+        try FileManager.default.copyItem(at: cache, to: cold)
+        XCTAssertEqual(try report(cold).apiCost, expected)
+    }
+
+    func testRemotePeerConflictOrderSurvivesStateRoundTrips() throws {
+        let event = ActivityEvent(id: "same", source: .kilo, date: now, model: "custom", tokens: 100, reportedCost: 0.8)
+        var corrected = event; corrected.reportedCost = 0.2
+        var state = SSHActivity.State()
+        state.databases["a"] = .init(fingerprint: "a", events: [event])
+        state.databases["b"] = .init(fingerprint: "b", events: [corrected])
+        let encoded = try PropertyListEncoder().encode(state)
+        for _ in 0..<40 {
+            let restored = try PropertyListDecoder().decode(SSHActivity.State.self, from: encoded)
+            let events = restored.events(since: now.addingTimeInterval(-1), now: now)
+            XCTAssertEqual(ActivityReport(events: events, now: now).days.first?.apiCost, 0.2)
+        }
+    }
+
     func testKiloCostAndSplitCorrectionsSurviveColdArchiveRead() throws {
         let root = try directory(), file = root.appendingPathComponent("kilo.db"), state = root.appendingPathComponent("state")
         var db: OpaquePointer?

@@ -157,12 +157,15 @@ public struct ActivityEvent: Codable, Sendable, Identifiable {
         var completeness: UInt8
         var session: Date?
     }
-    var preference: Preference {
+    static func labelCompleteness(model: String, provider: String) -> UInt8 {
         func known(_ text: String) -> Bool { !["", "unknown", "unbekannt"].contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+        return (known(model) ? 4 : 0) | (known(provider) ? 2 : 0)
+    }
+    var preference: Preference { preference(labelCompleteness: Self.labelCompleteness(model: model, provider: provider)) }
+    func preference(labelCompleteness: UInt8) -> Preference {
         let validUsage = usage.map { $0.isValid && abs($0.total - tokens) < 0.5 } ?? false
         let validCost = reportedCost.map { $0.isFinite && $0 >= 0 } ?? false
-        let completeness: UInt8 = (validUsage ? 16 : 0) | (validCost ? 8 : 0) | (known(model) ? 4 : 0)
-            | (known(provider) ? 2 : 0) | (responseCount != nil ? 1 : 0)
+        let completeness: UInt8 = (validUsage ? 16 : 0) | (validCost ? 8 : 0) | labelCompleteness | (responseCount != nil ? 1 : 0)
         return Preference(tokens: tokens, completeness: completeness, session: sessionStartedAt)
     }
     static func keepsFirst(source: ActivitySource, _ first: Preference, _ second: Preference) -> Bool {

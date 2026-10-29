@@ -27,8 +27,9 @@ public enum SSHActivity {
         func isDue(now: Date, force: Bool) -> Bool { SSHActivity.isDue(observedAt: observedAt, complete: complete, now: now, force: force) }
         func events(since: Date, now: Date) -> [ActivityEvent] {
             var result = carried.filter { $0.date >= since && $0.date <= now }
-            for file in files.values { result += file.parser.events.lazy.filter { $0.date >= since && $0.date <= now } }
-            for database in databases.values { result += database.events.lazy.filter { $0.date >= since && $0.date <= now } }
+            // Peer conflicts use input order, which must survive dictionary decoding.
+            for key in files.keys.sorted() { result += files[key]!.parser.events.lazy.filter { $0.date >= since && $0.date <= now } }
+            for key in databases.keys.sorted() { result += databases[key]!.events.lazy.filter { $0.date >= since && $0.date <= now } }
             return result
         }
         /// Vanished remote logs keep their usage until it leaves the import window, like local logs.
