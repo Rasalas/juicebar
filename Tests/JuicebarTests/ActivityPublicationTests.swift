@@ -18,6 +18,13 @@ final class ActivityPublicationTests: XCTestCase {
         }
         func release() { open = true; waiters.forEach { $0.resume() }; waiters = [] }
     }
+    private actor Imports {
+        var controls: [ActivityImport.Control] = []
+        func begin(_ control: ActivityImport.Control) -> Int { controls.append(control); return controls.count }
+        func firstCancelled() -> Bool {
+            do { try controls.first?.check(); return false } catch { return true }
+        }
+    }
     private func fixture() throws -> (URL, HistoryDatabase) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("activity-publication-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -96,5 +103,58 @@ final class ActivityPublicationTests: XCTestCase {
         await store.shutDown()
         XCTAssertEqual(store.activity?.days.first?.tokens, 20)
         XCTAssertEqual(try database.readCache(ActivityReport.self, key: "activity-report-v2")?.days.first?.tokens, 20)
+    }
+
+    func testAccountProfileChangeInvalidatesImportButLabelEditDoesNot() async throws {
+        let (root, database) = try fixture(), old = Gate(), imports = Imports()
+        let newPublished = expectation(description: "new profile generation")
+        var account = AccountConfiguration(id: "profile", provider: .codex, enabled: false,
+                                           executablePath: "/fixture/never-run", profileDirectory: root.appendingPathComponent("old-profile").path)
+        try database.write([account], key: "accounts")
+        let store = AppStore(directory: root, credentials: Credentials(), notifications: NotificationFixture(), activityReader: { request, control, publish in
+            if await imports.begin(control) == 1 {
+                await publish(Self.report(10), nil)
+                await old.wait()
+                await publish(Self.report(999), nil)
+            } else {
+                XCTAssertTrue(request.roots.contains { $0.url.path.hasSuffix("new-profile/sessions") })
+                await publish(Self.report(20), nil)
+                newPublished.fulfill()
+            }
+        }, activityCatalogRefresh: {})
+        await store.waitUntilReady(); store.loadLocalUsage()
+        try await eventually { store.activity?.days.first?.tokens == 10 }
+        account.label = "Renamed"
+        try await store.saveAccount(account, secret: "")
+        let labelCancelled = await imports.firstCancelled()
+        XCTAssertFalse(labelCancelled, "Presentation-only edits keep the active import")
+        account.profileDirectory = root.appendingPathComponent("new-profile").path
+        try await store.saveAccount(account, secret: "")
+        let profileCancelled = await imports.firstCancelled()
+        XCTAssertTrue(profileCancelled, "Changed effective roots invalidate the old import before returning")
+        await old.release()
+        await fulfillment(of: [newPublished], timeout: 3)
+        await store.shutDown()
+        XCTAssertEqual(store.activity?.days.first?.tokens, 20)
+        XCTAssertEqual(try database.readCache(ActivityReport.self, key: "activity-report-v2")?.days.first?.tokens, 20)
+    }
+
+    func testLocalRootRemovalIsReservedBeforeImmediateShutdown() async throws {
+        for waitForBootstrap in [false, true] {
+            let (directory, database) = try fixture()
+            let root = ActivityLogs.Root(source: .pi, url: directory.appendingPathComponent("removed"))
+            try database.write([root], key: "activity-roots")
+            let store = AppStore(directory: directory, credentials: Credentials(), notifications: NotificationFixture(),
+                                 activityReader: { _, _, _ in XCTFail("Shutdown must not restart an import") }, activityCatalogRefresh: {})
+            if waitForBootstrap { await store.waitUntilReady() }
+            store.removeActivityRoot(root)
+            let path = directory.appendingPathComponent("selected.db").path
+            store.setLocalDatabasePath(path)
+            await store.shutDown()
+            XCTAssertEqual(store.activityRoots, [])
+            XCTAssertEqual(try database.read([ActivityLogs.Root].self, key: "activity-roots"), [])
+            XCTAssertEqual(store.localDatabasePath, path)
+            XCTAssertEqual(try database.read(String.self, key: "opencode-path"), path)
+        }
     }
 }
