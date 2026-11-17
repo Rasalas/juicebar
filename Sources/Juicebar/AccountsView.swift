@@ -83,7 +83,10 @@ struct AccountEditor: View {
                     DisclosureGroup(tr("Erweiterte Einrichtung")) {
                         TextField(tr("CLI-Pfad"), text: $configuration.executablePath, prompt: Text(tr("Automatisch erkennen")))
                         TextField(tr("Profilordner"), text: $configuration.profileDirectory, prompt: Text(tr("Standardprofil")))
-                        Text(tr("Optional: absoluter Pfad zum Programm und zu CODEX_HOME bzw. CLAUDE_CONFIG_DIR. Anmeldung über codex login bzw. claude auth login.")).font(.caption).foregroundStyle(.secondary)
+                        Text(configuration.provider == .codex
+                             ? tr("Optional: Pfad zur Codex-CLI und Profilordner für CODEX_HOME. Der Anmeldebefehl oben verwendet diesen Profilordner.")
+                             : tr("Optional: Pfad zu Claude Code und Profilordner für CLAUDE_CONFIG_DIR. Der Anmeldebefehl oben verwendet diesen Profilordner."))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 } else if configuration.provider != .opencodeZen {
                     if configuration.provider == .opencodeGo {
@@ -203,13 +206,14 @@ struct CLISetupHelp: View {
                 .font(.subheadline.weight(.medium))
             Text(tr("1. CLI installieren, falls sie noch fehlt. 2. Im Terminal anmelden. 3. Hier speichern. Juicebars prüft die Verbindung automatisch."))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(command).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Text(command).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                Spacer()
                 Button(copied ? tr("Kopiert") : tr("Befehl kopieren")) {
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command, forType: .string); copied = true
                 }
-                Link(tr("CLI installieren"), destination: configuration.provider == .codex ? URL(string: "https://developers.openai.com/codex/cli/")! : URL(string: "https://code.claude.com/docs/en/setup")!)
+                Link(configuration.provider == .codex ? tr("Codex CLI installieren") : tr("Claude Code installieren"),
+                     destination: configuration.provider == .codex ? URL(string: "https://developers.openai.com/codex/cli/")! : URL(string: "https://code.claude.com/docs/en/setup")!)
             }
             Text(tr("Ein gefundenes Programm bestätigt noch keine Anmeldung. Passwörter gehören nur in die Anmeldung des Anbieters."))
                 .font(.caption).foregroundStyle(.secondary)

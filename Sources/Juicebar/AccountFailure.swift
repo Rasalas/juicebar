@@ -35,7 +35,12 @@ enum AccountFailure: Equatable {
             }
             return [.configure, .providerPage]
         case .provider(.missingExecutable), .provider(.needsSetup): return [.configure]
-        case .provider(.unsupported), .provider(.invalidData): return [.configure, .providerPage]
+        case .provider(.unsupported):
+            if account.provider == .claude, let command = CLISetupHelp.loginCommand(for: account) {
+                return [.copyLogin(command), .configure, .providerPage]
+            }
+            return [.configure, .providerPage]
+        case .provider(.invalidData): return [.configure, .providerPage]
         case .provider(.rateLimited): return [.retry]
         case .provider(.network), .provider(.timedOut), .provider(.unavailable), .unknown:
             return [.retry, .configure]
