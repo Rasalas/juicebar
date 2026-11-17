@@ -132,10 +132,25 @@ private final class FailureURLProtocol: URLProtocol {
                 XCTAssertEqual(AccountFailure(error).actions(for: account), [.configure])
             }
             for error in [ProviderFailure.invalidData("fixture"), .unsupported("fixture")] {
-                XCTAssertEqual(AccountFailure(error).actions(for: account), [.configure, .providerPage])
+                let failure = AccountFailure(error)
+                if provider == .claude, case .unsupported = error {
+                    XCTAssertEqual(failure.actions(for: account), [.copyLogin(try XCTUnwrap(CLISetupHelp.loginCommand(for: account))), .configure, .providerPage])
+                } else {
+                    XCTAssertEqual(failure.actions(for: account), [.configure, .providerPage])
+                }
             }
             XCTAssertEqual(AccountFailure.provider(.rateLimited(120)).actions(for: account), [.retry])
             XCTAssertEqual(AccountFailure.credentialRecovery.actions(for: account), [.restoreCredentials])
+        }
+    }
+
+    func testUnavailableClaudeLimitsOfferLoginForTheSameProfile() throws {
+        let account = AccountConfiguration(provider: .claude, label: "Claude THK", profileDirectory: "~/.claude_thk")
+        XCTAssertThrowsError(try ProviderParsing.claude(["rate_limits_available": false], configuration: account)) { error in
+            let failure = AccountFailure(error)
+            guard case .provider(.unsupported) = failure else { return XCTFail("Missing limits do not prove an expired login") }
+            let profile = NSString(string: account.profileDirectory).expandingTildeInPath
+            XCTAssertEqual(failure.actions(for: account), [.copyLogin("CLAUDE_CONFIG_DIR=\(profile) claude auth login"), .configure, .providerPage])
         }
     }
 

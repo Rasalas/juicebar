@@ -475,7 +475,14 @@ struct AccountFailureView: View {
                 Text(failure.message).fixedSize(horizontal: false, vertical: true)
             }
             if let loginCommand {
-                Text(tr("Im Terminal anmelden: {0}", loginCommand)).foregroundStyle(.secondary).textSelection(.enabled)
+                if case .provider(.authentication) = failure {
+                    Text(tr("Im Terminal erneut anmelden. Danach erneut versuchen.")).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(tr("Falls du dich erneut anmelden musst, nutze diesen Befehl im Terminal.")).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(loginCommand).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if case .waiting(let until) = state {

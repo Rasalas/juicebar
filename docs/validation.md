@@ -1,5 +1,13 @@
 # Validation status · 25 September 2026
 
+## Profile-specific Claude sign-in recovery, 17 November 2026
+
+Claude's missing-limit response offered configuration and the provider page but omitted the profile-specific sign-in command. The regression first failed with those two actions instead of the expected Copy command action, then passed after adding the command as optional recovery. The error remains an unsupported-source failure; missing limits do not prove an expired login. The editor now shows only the selected provider's setup instructions and installation link, with the full command on its own line.
+
+Local validation passed 335 Swift tests with nine optional skips, 13 collector tests, nine validation-script tests and all four bounded release benchmarks without skips. Source packaging, deep strict signature verification, the macOS 14 deployment-target check, four English/German tray layout variants and isolated restart persistence passed. The offscreen quota AX tree remained unavailable; live accessibility, VoiceOver and macOS 14 runtime execution were not validated.
+
+The native Claude editor was rendered with a synthetic second-account configuration and its advanced profile settings expanded. English/German website and store screenshots were refreshed. Playwright checks at 1280 and 390 CSS pixels found no horizontal overflow, and all images decoded successfully. These checks did not change installed accounts or history. Release preparation uses version 0.1.18, build 22.
+
 ## Typed account recovery, 29 October 2026
 
 The baseline refresh regression failed because a synthetic network error became a `String`. It now retains `ProviderFailure.network` and offers Retry without inspecting localized text. Tests cover real synthetic HTTP, parser and executable errors, misleading messages in both languages, configured CLI login commands, every provider context, retry success, busy/pending/pause guards, Retry-After expiry, and errors arriving after account edits/removal. Credential tests force a deferred SQLite commit failure followed by failed compensation, then verify failed/successful restoration from the retained backup, observable busy state, duplicate suppression, preserved account/history and fresh-reset guards, stale provider responses, and ordering with removal/shutdown.
