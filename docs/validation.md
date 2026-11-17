@@ -8,6 +8,14 @@ Local validation passed 335 Swift tests with nine optional skips, 13 collector t
 
 The native Claude editor was rendered with a synthetic second-account configuration and its advanced profile settings expanded. English/German website and store screenshots were refreshed. Playwright checks at 1280 and 390 CSS pixels found no horizontal overflow, and all images decoded successfully. These checks did not change installed accounts or history. Release preparation uses version 0.1.18, build 22.
 
+## Juicebars 0.1.18 release, 17 November 2026
+
+PR #36 passed macOS CI at tagged source `41c261a` and merged as `9273ded`; the release tag and merge have identical trees. App and DMG passed Developer ID signing, Apple notarization, stapling, Gatekeeper and installer-copy verification. The four draft assets and their public prerelease downloads matched the local originals byte for byte. Both checksums and the updater archive's Ed25519 signature passed. Two archive-signing calls completed unattended in 0.13 and 0.08 seconds. The signed bundle also passed deployment-target, tray-layout and isolated restart-persistence checks.
+
+The installed 0.1.17 used the valid candidate feed and completed Sparkle's download, install and relaunch as 0.1.18, build 22. All five saved configuration groups stayed byte-identical; both usage caches retained their 225 and 22 day entries, and all four accounts returned fresh quotas. Of the 5,571 backed-up observations, normal retention removed 39 older than 30 days and 118 redundant unchanged polls. Every other prior observation survived; eight new observations were present at the immediate post-update check. The original update and language preferences remained unchanged. The installed second-account editor displayed the profile-specific command and Claude installation link without changing the account.
+
+The temporary feed override was removed and the app restarted with its normal stable feed. No update-failure scenario was triggered in the installed app. The same tested assets were promoted to stable; the latest feed serves build 22. Website downloads now target the public 0.1.18 DMG.
+
 ## Typed account recovery, 29 October 2026
 
 The baseline refresh regression failed because a synthetic network error became a `String`. It now retains `ProviderFailure.network` and offers Retry without inspecting localized text. Tests cover real synthetic HTTP, parser and executable errors, misleading messages in both languages, configured CLI login commands, every provider context, retry success, busy/pending/pause guards, Retry-After expiry, and errors arriving after account edits/removal. Credential tests force a deferred SQLite commit failure followed by failed compensation, then verify failed/successful restoration from the retained backup, observable busy state, duplicate suppression, preserved account/history and fresh-reset guards, stale provider responses, and ordering with removal/shutdown.
